@@ -1,0 +1,13 @@
+[package]
+name = "mainline"
+version = "0.1.0"
+authors = ["nuh.dev"]
+edition = "2018"
+description = "Simple, robust, BitTorrent's Mainline DHT implementation"
+homepage = "https://github.com/nuhvi/mainline"
+license = "MIT"
+keywords = ["bittorrent", "torrent", "dht", "kademlia", "mainline"]
+categories = ["network-programming"]
+repository = "https://github.com/nuhvi/mainline"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
