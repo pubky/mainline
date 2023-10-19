@@ -1,6 +1,8 @@
 //! Kademlia routing table based on the simplifications described [here](https://web.archive.org/web/20191122230423/https://github.com/ethereum/wiki/wiki/Kademlia-Peer-Selection)
 
 use rand::Rng;
+use std::collections::BTreeMap;
+use std::fmt::{self, Debug, Formatter};
 use std::net::IpAddr;
 
 use crate::Result;
@@ -10,7 +12,9 @@ const ID_LENGTH: usize = 20;
 /// The capacity of each row in the routing table.
 const K: usize = 20;
 
-#[derive(Debug, Clone, Copy)]
+const MAX_DISTANCE: u8 = ID_LENGTH as u8 * 8;
+
+#[derive(Clone, Copy, PartialEq)]
 struct Id([u8; 20]);
 
 impl Id {
@@ -21,32 +25,70 @@ impl Id {
         Id(random_bytes)
     }
 
-    fn distance(&self, other: &Id) -> i32 {
+    /// Simplified XOR distance between this Id and a target Id.
+    ///
+    /// The distance is the number of trailing non zero bits in the XOR result.
+    ///
+    /// Distance to self is 0
+    /// Distance to the furthest Id is 160
+    /// Distance to an Id with 5 leading matching bits is 155
+    fn distance(&self, other: &Id) -> u8 {
         for i in 0..ID_LENGTH {
             let a = self.0[i];
             let b = other.0[i];
 
-            if a == b {
-                return (i as i32) * 8 + (a ^ b).leading_zeros() as i32;
+            if a != b {
+                // leading zeros so far + laedinge zeros of this byte
+                let leading_zeros = (i as u32 * 8 + (a ^ b).leading_zeros()) as u8;
+
+                return MAX_DISTANCE - leading_zeros;
             }
         }
 
-        (ID_LENGTH * 8) as i32 - 1
+        0
+    }
+}
+
+impl Debug for Id {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Id({:x?})", &self.0)
     }
 }
 
 #[derive(Debug)]
 struct RoutingTable {
-    rows: Vec<Row>,
+    rows: BTreeMap<u8, Row>,
     id: Id,
 }
 
-#[derive(Debug)]
 struct Row {
     nodes: Vec<Node>,
 }
 
-#[derive(Debug)]
+impl Row {
+    fn new() -> Self {
+        Row {
+            nodes: Vec::with_capacity(K),
+        }
+    }
+
+    fn add(&mut self, node: Node) -> bool {
+        if self.nodes.len() < K {
+            self.nodes.push(node);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Debug for Row {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Row{{ nodes: {} }}", &self.nodes.len())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Node {
     id: Id,
     ip: IpAddr,
@@ -55,8 +97,7 @@ struct Node {
 
 impl RoutingTable {
     pub fn new() -> Self {
-        let mut rows = Vec::with_capacity(ID_LENGTH * 8);
-        rows.push(Row::new());
+        let mut rows = BTreeMap::new();
 
         RoutingTable {
             rows,
@@ -69,95 +110,98 @@ impl RoutingTable {
         self
     }
 
-    pub fn add(&self, node: Node) -> Result<()> {
-        //
-        // let row = this.rows[i]
-        //
-        // if (!row) {
-        //   row = this.rows[i] = new Row(this, i)
-        //   this.emit('row', row)
-        // }
-        //
-        // return row.add(node, this.k)
+    pub fn add(&mut self, node: Node) -> bool {
+        let distance = self.id.distance(&node.id);
 
-        Ok(())
-    }
-}
+        let row = self.rows.get_mut(&distance);
 
-impl Row {
-    fn new() -> Self {
-        Row {
-            nodes: Vec::with_capacity(K),
+        if row.is_none() {
+            let mut row = Row::new();
+            self.rows.insert(distance, row);
         }
+
+        let row = self.rows.get_mut(&distance).unwrap();
+
+        row.add(node)
+    }
+
+    pub fn closest(&self, target: &Id) -> Vec<&Node> {
+        let mut result = Vec::with_capacity(K);
+        let distance = self.id.distance(target);
+
+        // push close nodes
+        for i in distance..MAX_DISTANCE {
+            match self.rows.get(&distance) {
+                Some(row) => {
+                    for node in row.nodes.iter() {
+                        if result.len() < K {
+                            result.push(node)
+                        }
+                    }
+                }
+                None => continue,
+            }
+        }
+
+        // // if we don't have enough close nodes, populate from other rows, re the paper
+        // for (let i = d + 1; i < this.rows.length && result.length < k; i++) this._pushNodes(i, k, result)
+        //
+        return result;
     }
 }
 
 mod test {
     use std::mem;
 
-    use crate::routing_table::{Id, ID_LENGTH};
+    use crate::routing_table::{Id, MAX_DISTANCE};
 
     use super::{Node, RoutingTable};
-
-    #[test]
-    fn add_contact_to_root() {
-        let table = RoutingTable::new();
-
-        println!("{:?}", table);
-    }
 
     #[test]
     fn distance_to_self() {
         let id = Id::random();
         let distance = id.distance(&id);
-
-        dbg!(&distance);
         assert_eq!(distance, 0)
     }
 
     #[test]
-    fn distance_to_other() {
+    fn distance_to_id() {
         let id = Id([
             6, 57, 161, 226, 79, 187, 138, 178, 119, 223, 3, 52, 118, 171, 13, 225, 15, 171, 59,
             220,
         ]);
-        let other = Id([
+        let target = Id([
             3, 91, 26, 235, 151, 55, 173, 225, 168, 9, 51, 89, 79, 64, 93, 63, 119, 42, 160, 142,
         ]);
 
-        let distance = id.distance(&other);
+        let distance = id.distance(&target);
 
-        assert_eq!(distance, 5)
+        assert_eq!(distance, 155)
     }
 
     #[test]
-    fn distance_to_random_other() {
+    fn distance_to_random_id() {
         let id = Id::random();
-        let other = Id::random();
+        let target = Id::random();
 
-        dbg!(id, other);
-        let distance = id.distance(&other);
+        let distance = id.distance(&target);
 
-        dbg!("other", &distance);
         assert_ne!(distance, 0)
     }
 
     #[test]
     fn distance_to_furthest() {
         let id = Id::random();
-        let mut opposite = [0_u8; 20];
 
+        let mut opposite = [0_u8; 20];
         for (i, &value) in id.0.iter().enumerate() {
             opposite[i] = value ^ 0xff;
         }
+        let target = Id(opposite);
 
-        let other = Id(opposite);
+        let distance = id.distance(&target);
 
-        dbg!(id, other);
-        let distance = id.distance(&other);
-
-        dbg!("distance", &distance);
-        assert_eq!(distance, ID_LENGTH as i32 * 8 - 1)
+        assert_eq!(distance, MAX_DISTANCE)
     }
 
     #[test]
@@ -573,7 +617,7 @@ mod test {
             })
             .collect();
 
-        let closest_ids = [
+        let expected_closest_ids = [
             [
                 6, 52, 88, 177, 145, 74, 225, 100, 136, 252, 249, 26, 112, 53, 16, 45, 211, 147,
                 248, 174,
@@ -654,17 +698,32 @@ mod test {
                 63, 245, 167, 126, 45, 97, 10, 134, 157, 225, 103, 150, 51, 182, 70, 203, 155, 58,
                 88, 61,
             ],
-        ];
+        ]
+        .iter()
+        .map(|u| Id(*u))
+        .collect::<Vec<Id>>();
 
-        let closest_nodes: Vec<Node> = ids
-            .iter()
-            .map(|id| Node {
-                id: Id(id.to_owned()),
-                ip: "0.0.0.0".parse().unwrap(),
-                port: 0,
-            })
-            .collect();
+        let local_id = Id([
+            89, 129, 213, 226, 44, 203, 42, 87, 83, 245, 17, 156, 85, 186, 60, 64, 191, 52, 56, 230,
+        ]);
 
-        dbg!(closest_nodes);
+        let target = Id([
+            21, 193, 111, 78, 197, 160, 205, 47, 159, 128, 190, 65, 3, 203, 226, 52, 62, 43, 115,
+            156,
+        ]);
+
+        let mut table = RoutingTable::new().with_id(local_id);
+
+        for node in nodes {
+            table.add(node);
+        }
+
+        let closest = table.closest(&target);
+
+        let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
+
+        closest_ids.sort_by(|a, b| a.0.cmp(&b.0));
+
+        assert_eq!(closest_ids, expected_closest_ids)
     }
 }
