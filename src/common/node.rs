@@ -1,7 +1,7 @@
 //! Struct and implementation of the Node entry in the Kademlia routing table
 use std::net::IpAddr;
 
-use super::id::Id;
+use crate::common::Id;
 
 #[derive(Debug, Clone, PartialEq)]
 /// Node entry in Kademlia routing table

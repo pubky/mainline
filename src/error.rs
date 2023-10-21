@@ -13,4 +13,16 @@ pub enum Error {
     #[error(transparent)]
     /// Transparent [std::io::Error]
     IO(#[from] std::io::Error),
+
+    #[error("Failed to parse packet bytes: {0}")]
+    BencodeError(#[from] serde_bencode::Error),
+
+    /// Indicates that the Message type you're trying to build requires more information.
+    #[error("{0} is required")]
+    BuilderMissingFieldError(&'static str),
+
+    /// Indicates that the builder is in an invalid/ambiguous state to build the desired
+    /// Message type.
+    #[error("Builder state invalid: {0}")]
+    BuilderInvalidComboError(&'static str),
 }

@@ -4,10 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 use std::net::IpAddr;
 
-use super::{
-    id::{Id, ID_LENGTH, MAX_DISTANCE},
-    node::Node,
-};
+use crate::common::{Id, Node, ID_SIZE, MAX_DISTANCE};
 use crate::Result;
 
 /// The capacity of each row in the routing table.
@@ -112,15 +109,15 @@ impl RoutingTable {
     }
 }
 
+#[cfg(test)]
 mod test {
     use std::mem;
 
-    use crate::kademlia::{
-        id::Id,
+    use crate::{
+        common::{Id, Node},
+        routing_table::RoutingTable,
         routing_table::{K, MAX_DISTANCE},
     };
-
-    use super::{Node, RoutingTable};
 
     #[test]
     fn distance_to_self() {

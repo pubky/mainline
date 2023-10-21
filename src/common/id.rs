@@ -5,13 +5,15 @@ use std::{
     fmt::{self, Debug, Formatter},
 };
 
+use crate::{Error, Result};
+
 /// The size of node IDs in bits.
-pub const ID_LENGTH: usize = 20;
-pub const MAX_DISTANCE: u8 = ID_LENGTH as u8 * 8;
+pub const ID_SIZE: usize = 20;
+pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
 
 #[derive(Clone, Copy, PartialEq)]
 /// Kademlia node Id or a lookup target
-pub struct Id(pub [u8; 20]);
+pub struct Id(pub [u8; ID_SIZE]);
 
 impl Id {
     pub fn random() -> Id {
@@ -19,6 +21,19 @@ impl Id {
         let random_bytes: [u8; 20] = rng.gen();
 
         Id(random_bytes)
+    }
+    /// Create a new Id from some bytes. Returns Err if `bytes` is not of length
+    /// [ID_SIZE](crate::common::ID_SIZE).
+    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
+        let bytes = bytes.as_ref();
+        if bytes.len() != ID_SIZE {
+            return Err(Error::Generic("Wrong number of bytes".to_string()));
+        }
+
+        let mut tmp: [u8; ID_SIZE] = [0; ID_SIZE];
+        tmp[..ID_SIZE].clone_from_slice(&bytes[..ID_SIZE]);
+
+        Ok(Id(tmp))
     }
 
     /// Simplified XOR distance between this Id and a target Id.
@@ -29,7 +44,7 @@ impl Id {
     /// Distance to the furthest Id is 160
     /// Distance to an Id with 5 leading matching bits is 155
     pub fn distance(&self, other: &Id) -> u8 {
-        for i in 0..ID_LENGTH {
+        for i in 0..ID_SIZE {
             let a = self.0[i];
             let b = other.0[i];
 
@@ -46,6 +61,10 @@ impl Id {
 
     pub fn cmp(&self, id: &Id) -> Ordering {
         self.0.cmp(&id.0)
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
     }
 }
 
