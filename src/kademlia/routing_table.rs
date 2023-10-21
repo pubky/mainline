@@ -1,62 +1,20 @@
 //! Kademlia routing table based on the simplifications described [here](https://web.archive.org/web/20191122230423/https://github.com/ethereum/wiki/wiki/Kademlia-Peer-Selection)
 
-use rand::Rng;
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
 use std::net::IpAddr;
 
+use super::{
+    id::{Id, ID_LENGTH, MAX_DISTANCE},
+    node::Node,
+};
 use crate::Result;
 
-/// The size of node IDs in bits.
-const ID_LENGTH: usize = 20;
 /// The capacity of each row in the routing table.
 const K: usize = 20;
 
-const MAX_DISTANCE: u8 = ID_LENGTH as u8 * 8;
-
-#[derive(Clone, Copy, PartialEq)]
-struct Id([u8; 20]);
-
-impl Id {
-    fn random() -> Id {
-        let mut rng = rand::thread_rng();
-        let random_bytes: [u8; 20] = rng.gen();
-
-        Id(random_bytes)
-    }
-
-    /// Simplified XOR distance between this Id and a target Id.
-    ///
-    /// The distance is the number of trailing non zero bits in the XOR result.
-    ///
-    /// Distance to self is 0
-    /// Distance to the furthest Id is 160
-    /// Distance to an Id with 5 leading matching bits is 155
-    fn distance(&self, other: &Id) -> u8 {
-        for i in 0..ID_LENGTH {
-            let a = self.0[i];
-            let b = other.0[i];
-
-            if a != b {
-                // leading zeros so far + laedinge zeros of this byte
-                let leading_zeros = (i as u32 * 8 + (a ^ b).leading_zeros()) as u8;
-
-                return MAX_DISTANCE - leading_zeros;
-            }
-        }
-
-        0
-    }
-}
-
-impl Debug for Id {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Id({:x?})", &self.0)
-    }
-}
-
 #[derive(Debug)]
-struct RoutingTable {
+pub struct RoutingTable {
     rows: BTreeMap<u8, Row>,
     id: Id,
 }
@@ -74,7 +32,8 @@ impl Row {
 
     fn add(&mut self, node: Node) -> bool {
         if self.nodes.len() < K {
-            let index = match self.nodes.binary_search_by(|a| a.id.0.cmp(&node.id.0)) {
+            // TODO: revisit the ordering of this row!
+            let index = match self.nodes.binary_search_by(|a| a.id.cmp(&node.id)) {
                 Ok(existing_index) => existing_index,
                 Err(insertion_index) => insertion_index,
             };
@@ -93,13 +52,6 @@ impl Debug for Row {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct Node {
-    id: Id,
-    ip: IpAddr,
-    port: u16,
-}
-
 impl RoutingTable {
     pub fn new() -> Self {
         let mut rows = BTreeMap::new();
@@ -116,6 +68,8 @@ impl RoutingTable {
     }
 
     pub fn add(&mut self, node: Node) -> bool {
+        // TODO: Verify the type of ip v4 or v6?
+
         let distance = self.id.distance(&node.id);
 
         let row = self.rows.get_mut(&distance);
@@ -161,7 +115,10 @@ impl RoutingTable {
 mod test {
     use std::mem;
 
-    use crate::routing_table::{Id, K, MAX_DISTANCE};
+    use crate::kademlia::{
+        id::Id,
+        routing_table::{K, MAX_DISTANCE},
+    };
 
     use super::{Node, RoutingTable};
 

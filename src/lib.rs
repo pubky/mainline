@@ -1,7 +1,7 @@
 #![allow(unused)]
 // Modules
 mod error;
-mod routing_table;
+mod kademlia;
 
 // Exports
 pub use crate::error::Error;
