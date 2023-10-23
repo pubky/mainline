@@ -27,7 +27,7 @@ impl Id {
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
         let bytes = bytes.as_ref();
         if bytes.len() != ID_SIZE {
-            return Err(Error::Generic("Wrong number of bytes".to_string()));
+            return Err(Error::Static("Wrong number of bytes"));
         }
 
         let mut tmp: [u8; ID_SIZE] = [0; ID_SIZE];

@@ -1,43 +1,71 @@
+use std::io;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use crate::{Error, Result};
 
-// Define a UDP server struct
 struct RPC {
     socket: UdpSocket,
+    next_tid: u16,
 }
 
 impl RPC {
-    // Create a new UDP server bound to the specified address and port
-    fn new(bind_address: &str, port: u16) -> Result<Self> {
-        let bind_str = format!("{}:{}", bind_address, port);
-        let bind_addr: SocketAddr = bind_str.parse().unwrap();
-        let socket = UdpSocket::bind(bind_addr)?;
-        Ok(RPC { socket })
+    fn new(port: u16) -> Result<RPC> {
+        let address = SocketAddr::from(([0, 0, 0, 0], port));
+        let socket = UdpSocket::bind(address)?;
+
+        Ok(RPC {
+            socket,
+            next_tid: 0,
+        })
     }
 
-    // Receive data from a client
-    fn receive(&self) -> Result<(Vec<u8>, SocketAddr), std::io::Error> {
-        let mut buf = vec![0; 1024];
-        let (size, client_addr) = self.socket.recv_from(&mut buf)?;
-        buf.resize(size, 0);
-        Ok((buf, client_addr))
+    fn listen(&self) -> JoinHandle<Result<()>> {
+        let socket = self.socket.try_clone().expect("Failed to clone socket"); // Clone the socket to move into the thread.
+
+        thread::spawn(move || -> Result<()> {
+            loop {
+                // // Buffer to hold incoming data.
+                // let mut buf = [0u8; 1024];
+                //
+                // // Wait for a client to send data.
+                // let (amt, src) = socket.recv_from(&mut buf)?;
+                //
+                // println!("Received in server: {:?}", &buf[0..amt]);
+                //
+                // // Echo the data back to the client.
+                // socket.send_to(&buf[0..amt], &src)?;
+
+                dbg!("inside loop");
+                thread::sleep(Duration::from_secs(1));
+            }
+
+            Ok(())
+        })
     }
 
-    // Send data to a specific client
-    fn ping(&self, data: &[u8], target: SocketAddr) -> Result<usize, std::io::Error> {
-        self.socket.send_to(data, target)
+    fn tid(&mut self) -> u16 {
+        let tid = self.next_tid;
+        self.next_tid = self.next_tid.wrapping_add(1);
+        tid
     }
 
-    fn handle(&self, data: &[u8], client_addr: SocketAddr) -> Result<Vec<u8>> {
-        dbg!("GOT REQUEST HEREEEE");
+    fn ping(&mut self, address: SocketAddr) -> Result<()> {
+        let tid = self.tid();
+        dbg!(&tid);
 
-        self.socket.send_to(b"Hello back!", client_addr)?;
+        let msg = b"Hello, UDP Echo Server!";
 
-        Ok(data.to_vec())
+        // Send a message to the server.
+        self.socket.send_to(msg, address)?;
+
+        // Wait for the server to echo the message back.
+        let mut buf = [0u8; 1024];
+        let (amt, _) = self.socket.recv_from(&mut buf)?;
+        println!("Received in client: {:?}", &buf[0..amt]);
+
+        Ok(())
     }
 }
 
@@ -46,28 +74,29 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_ping() {
-        // Create a UDP server and bind it to a specific address and port
-        let server = RPC::new("127.0.0.1", 12345).unwrap();
+    fn test_tid() {
+        let mut rpc = RPC::new(12345).unwrap();
 
-        // Create a UDP client
-        let client = RPC::new("127.0.0.1", 12346).unwrap();
+        assert_eq!(rpc.tid(), 0);
+        assert_eq!(rpc.tid(), 1);
+        assert_eq!(rpc.tid(), 2);
 
-        // Example: Sending data from client to server
-        let message = b"Hello, UDP Server!";
-        let server_addr = "127.0.0.1:12345".parse().unwrap();
-        client.ping(message, server_addr).unwrap();
+        rpc.next_tid = u16::max_value();
 
-        // Example: Receiving data on the server and handling the method
-        let (data, client_addr) = server.receive().unwrap();
-        let response = server.handle(&data, client_addr).unwrap();
-
-        println!(
-            "Received data from client at {}: {:?}",
-            client_addr, response
-        );
-
-        let (resres) = client.receive().unwrap();
-        dbg!(resres);
+        assert_eq!(rpc.tid(), 65535);
+        assert_eq!(rpc.tid(), 0);
     }
+
+    // #[test]
+    // fn test_rpc_echo() {
+    //     let server = RPC::new(12345).unwrap();
+    //     let listening = server.listen();
+    //
+    //     // Start the client.
+    //     let client = RPC::new(12347).unwrap();
+    //     client.ping(server.socket.local_addr().unwrap()).unwrap();
+    //     client.ping(server.socket.local_addr().unwrap()).unwrap();
+    //
+    //     // listening.join().unwrap();
+    // }
 }

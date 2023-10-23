@@ -135,41 +135,31 @@ impl Message {
 
                 internal::DHTMessageVariant::DHTError(err) => {
                     if err.error_info.len() < 2 {
-                        return Err(Error::Generic(
-                            "Error packet should have at least 2 elements".to_string(),
+                        return Err(Error::Static(
+                            "Error packet should have at least 2 elements",
                         ));
                     }
                     MessageType::Error(ErrorSpecific {
                         code: match err.error_info[0] {
                             serde_bencode::value::Value::Int(code) => match code.try_into() {
                                 Ok(code) => code,
-                                Err(e) => {
-                                    return Err(Error::Generic(
-                                        "error parsing error code".to_string(),
-                                    ))
-                                }
+                                Err(e) => return Err(Error::Static("error parsing error code")),
                             },
-                            _ => {
-                                return Err(Error::Generic(
-                                    "Expected error code as first element".to_string(),
-                                ))
-                            }
+                            _ => return Err(Error::Static("Expected error code as first element")),
                         },
                         description: match &err.error_info[1] {
                             serde_bencode::value::Value::Bytes(desc) => {
                                 match std::str::from_utf8(desc) {
                                     Ok(desc) => desc.to_string(),
                                     Err(e) => {
-                                        return Err(Error::Generic(
-                                            "error parsing error description".to_string(),
+                                        return Err(Error::Static(
+                                            "error parsing error description",
                                         ))
                                     }
                                 }
                             }
                             _ => {
-                                return Err(Error::Generic(
-                                    "Expected description as second element".to_string(),
-                                ))
+                                return Err(Error::Static("Expected description as second element"))
                             }
                         },
                     })
@@ -218,18 +208,16 @@ fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr> {
 
             let port_bytes_as_array: [u8; 2] = bytes[4..6]
                 .try_into()
-                .map_err(|_| Error::Generic("wrong number of bytes for port".to_string()))?;
+                .map_err(|_| Error::Static("wrong number of bytes for port"))?;
 
             let port: u16 = u16::from_be_bytes(port_bytes_as_array);
 
             Ok(SocketAddr::new(IpAddr::V4(ip), port))
         }
 
-        18 => Err(Error::Generic("IPv6 is not yet implemented".to_string())),
+        18 => Err(Error::Static("IPv6 is not yet implemented")),
 
-        _ => Err(Error::Generic(
-            "Wrong number of bytes for sockaddr".to_string(),
-        )),
+        _ => Err(Error::Static("Wrong number of bytes for sockaddr")),
     }
 }
 
