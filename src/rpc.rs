@@ -103,10 +103,9 @@ impl RPC {
         self.socket.send_to(&message, address)?;
 
         // TODO: Add timeout here!
-        let response = response_rx.recv().map_err(|e| {
-            dbg!(e);
-            Error::Static("Failed to receive response>")
-        })?;
+        let response = response_rx
+            .recv()
+            .map_err(|e| Error::Static("Failed to receive response>"))?;
 
         Ok(response)
     }
@@ -132,7 +131,7 @@ fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) -> () {
     let mut responses = BTreeMap::<u16, Message>::new();
 
     loop {
-        match rx.recv_timeout(Duration::from_micros(1)) {
+        match rx.try_recv() {
             Ok(ListenerMessage::Shutdown) => {
                 break;
             }
@@ -146,12 +145,10 @@ fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) -> () {
 
         // Match request/response.
         for (tid, response) in responses.iter() {
-            dbg!((&requests, &responses));
             match &requests.remove(&tid) {
                 Some(request) => {
                     responses_to_remove.push(*tid);
                     request.send(response.clone()).unwrap();
-                    dbg!((requests.len(), responses.len()));
                 }
                 None => {}
             }
@@ -258,6 +255,7 @@ mod test {
         let c = client.ping(server_addr).unwrap();
 
         dbg!((a, b, c));
+        // TODO: prove that we gced everything
     }
 
     // Live interoperability tests, should be removed before CI.
