@@ -176,6 +176,17 @@ impl Message {
         Message::from_serde_message(internal::DHTMessage::from_bytes(bytes)?)
     }
 
+    // Return the transaction Id as a u16
+    pub fn transaction_id(&self) -> Result<u16> {
+        let bytes = &self.transaction_id;
+
+        if bytes.len() != 2 {
+            return Err(Error::Static("Transaction Id should be 2 bytes"));
+        }
+
+        Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16))
+    }
+
     /// Return the Id of the sender of the Message
     ///
     /// This is less straightforward than it seems because not *all* messages are sent
@@ -253,9 +264,46 @@ mod tests {
     use rand::prelude::*;
 
     #[test]
+    fn test_transaction_id() {
+        assert_eq!(
+            Message {
+                transaction_id: (0x1 as u16).to_be_bytes().to_vec(),
+                version: None,
+                requester_ip: None,
+                read_only: None,
+                message_type: MessageType::Request(RequestSpecific::PingRequest(
+                    PingRequestArguments {
+                        requester_id: Id::random(),
+                    },
+                )),
+            }
+            .transaction_id()
+            .unwrap(),
+            0x1,
+        );
+
+        assert_eq!(
+            Message {
+                transaction_id: (0x1234 as u16).to_be_bytes().to_vec(),
+                version: None,
+                requester_ip: None,
+                read_only: None,
+                message_type: MessageType::Request(RequestSpecific::PingRequest(
+                    PingRequestArguments {
+                        requester_id: Id::random(),
+                    },
+                )),
+            }
+            .transaction_id()
+            .unwrap(),
+            0x1234
+        );
+    }
+
+    #[test]
     fn test_ping_request() {
         let original_msg = Message {
-            transaction_id: vec![0, 1, 2],
+            transaction_id: vec![0, 1],
             version: None,
             requester_ip: None,
             read_only: None,
@@ -276,7 +324,7 @@ mod tests {
     #[test]
     fn test_ping_response() {
         let original_msg = Message {
-            transaction_id: vec![1, 2, 3],
+            transaction_id: vec![1, 2],
             version: Some(vec![0xde, 0xad]),
             requester_ip: Some("99.100.101.102:1030".parse().unwrap()),
             read_only: None,
