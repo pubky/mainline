@@ -72,7 +72,7 @@ impl Message {
                 .read_only
                 .map(|read_only| if read_only { 1 } else { 0 }),
             variant: match self.message_type {
-                MessageType::Request(req) => internal::DHTMessageVariant::DHTRequest(match req {
+                MessageType::Request(req) => internal::DHTMessageVariant::Request(match req {
                     RequestSpecific::PingRequest(ping_args) => internal::DHTRequestSpecific::Ping {
                         arguments: internal::DHTPingArguments {
                             id: ping_args.requester_id.to_vec(),
@@ -80,7 +80,7 @@ impl Message {
                     },
                 }),
 
-                MessageType::Response(res) => internal::DHTMessageVariant::DHTResponse(match res {
+                MessageType::Response(res) => internal::DHTMessageVariant::Response(match res {
                     ResponseSpecific::PingResponse(ping_args) => {
                         internal::DHTResponseSpecific::Ping {
                             arguments: internal::DHTPingResponseArguments {
@@ -91,7 +91,7 @@ impl Message {
                 }),
 
                 MessageType::Error(err) => {
-                    internal::DHTMessageVariant::DHTError(internal::DHTErrorSpecific {
+                    internal::DHTMessageVariant::Error(internal::DHTErrorSpecific {
                         error_info: vec![
                             serde_bencode::value::Value::Int(err.code.into()),
                             serde_bencode::value::Value::Bytes(err.description.into()),
@@ -113,27 +113,27 @@ impl Message {
             read_only: msg.read_only.map(|read_only| read_only >= 1),
 
             message_type: match msg.variant {
-                internal::DHTMessageVariant::DHTRequest(req_variant) => {
+                internal::DHTMessageVariant::Request(req_variant) => {
                     MessageType::Request(match req_variant {
                         internal::DHTRequestSpecific::Ping { arguments } => {
                             RequestSpecific::PingRequest(PingRequestArguments {
-                                requester_id: Id::from_bytes(&arguments.id)?,
+                                requester_id: Id::from_bytes(arguments.id)?,
                             })
                         }
                     })
                 }
 
-                internal::DHTMessageVariant::DHTResponse(res_variant) => {
+                internal::DHTMessageVariant::Response(res_variant) => {
                     MessageType::Response(match res_variant {
                         internal::DHTResponseSpecific::Ping { arguments } => {
                             ResponseSpecific::PingResponse(PingResponseArguments {
-                                responder_id: Id::from_bytes(&arguments.id)?,
+                                responder_id: Id::from_bytes(arguments.id)?,
                             })
                         }
                     })
                 }
 
-                internal::DHTMessageVariant::DHTError(err) => {
+                internal::DHTMessageVariant::Error(err) => {
                     if err.error_info.len() < 2 {
                         return Err(Error::Static(
                             "Error packet should have at least 2 elements",

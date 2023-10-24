@@ -11,7 +11,7 @@ use crate::{Error, Result};
 pub const ID_SIZE: usize = 20;
 pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq)]
 /// Kademlia node Id or a lookup target
 pub struct Id(pub [u8; ID_SIZE]);
 
@@ -57,10 +57,6 @@ impl Id {
         }
 
         0
-    }
-
-    pub fn cmp(&self, id: &Id) -> Ordering {
-        self.0.cmp(&id.0)
     }
 
     pub fn to_vec(&self) -> Vec<u8> {

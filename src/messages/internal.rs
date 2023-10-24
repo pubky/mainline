@@ -31,7 +31,7 @@ impl DHTMessage {
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_bencode::to_bytes(self).map_err(|e| Error::BencodeError(e))
+        serde_bencode::to_bytes(self).map_err(Error::BencodeError)
     }
 }
 
@@ -39,13 +39,13 @@ impl DHTMessage {
 #[serde(tag = "y")]
 pub enum DHTMessageVariant {
     #[serde(rename = "q")]
-    DHTRequest(DHTRequestSpecific),
+    Request(DHTRequestSpecific),
 
     #[serde(rename = "r")]
-    DHTResponse(DHTResponseSpecific),
+    Response(DHTResponseSpecific),
 
     #[serde(rename = "e")]
-    DHTError(DHTErrorSpecific),
+    Error(DHTErrorSpecific),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

@@ -15,7 +15,7 @@ use crate::{Error, Result};
 
 const DEFAULT_PORT: u16 = 6881;
 
-struct RPC {
+struct Rpc {
     id: Id,
     socket: UdpSocket,
     next_tid: u16,
@@ -33,8 +33,8 @@ enum ListenerMessage {
     RegisterRequest((u16, Sender<Message>)),
 }
 
-impl RPC {
-    fn new() -> Result<RPC> {
+impl Rpc {
+    fn new() -> Result<Rpc> {
         // TODO: One day I might implement BEP42.
         let id = Id::random();
 
@@ -49,11 +49,10 @@ impl RPC {
         let (tx, rx) = mpsc::channel::<ListenerMessage>();
 
         let cloned_socket = socket.try_clone()?;
-        let cloned_id = id.clone();
 
-        let server_handle = thread::spawn(move || listen(cloned_id, cloned_socket, rx));
+        let server_handle = thread::spawn(move || listen(id, cloned_socket, rx));
 
-        Ok(RPC {
+        Ok(Rpc {
             id,
             socket,
             next_tid: 0,
@@ -123,7 +122,7 @@ impl RPC {
     }
 }
 
-fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) -> () {
+fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) {
     // // Buffer to hold incoming data.
     let mut buf = [0u8; 1024];
     // TODO: timeout clean requests probably with ListenerMessage::Timeout(tid);
@@ -136,7 +135,7 @@ fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) -> () {
                 break;
             }
             Ok(ListenerMessage::RegisterRequest((tid, sender))) => {
-                &requests.insert(tid, sender);
+                requests.insert(tid, sender);
             }
             _ => {}
         };
@@ -145,7 +144,7 @@ fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) -> () {
 
         // Match request/response.
         for (tid, response) in responses.iter() {
-            match &requests.remove(&tid) {
+            match &requests.remove(tid) {
                 Some(request) => {
                     responses_to_remove.push(*tid);
                     request.send(response.clone()).unwrap();
@@ -159,70 +158,65 @@ fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) -> () {
             responses.remove(tid);
         });
 
-        match socket.recv_from(&mut buf) {
-            Ok((amt, requester)) => {
-                let mut msg = match Message::from_bytes(&buf[..amt]) {
-                    Ok(msg) => msg,
-                    Err(_) => {
-                        // TODO: tracing
-                        println!("Failed to parse message from {:?}", requester);
-                        continue;
-                    }
-                };
+        if let Ok((amt, requester)) = socket.recv_from(&mut buf) {
+            let mut msg = match Message::from_bytes(&buf[..amt]) {
+                Ok(msg) => msg,
+                Err(_) => {
+                    // TODO: tracing
+                    println!("Failed to parse message from {:?}", requester);
+                    continue;
+                }
+            };
 
-                match &msg.message_type {
-                    MessageType::Request(request_type) => {
-                        // TODO: check if it is IPV4 or IPV6
-                        // TODO: support IPV6
-                        msg.requester_ip = Some(requester);
+            match &msg.message_type {
+                MessageType::Request(request_type) => {
+                    // TODO: check if it is IPV4 or IPV6
+                    // TODO: support IPV6
+                    msg.requester_ip = Some(requester);
 
-                        println!("Received a request: {:?}", &msg);
+                    println!("Received a request: {:?}", &msg);
 
-                        let response = match request_type {
-                            RequestSpecific::PingRequest(ping_request_arguments) => {
-                                Message {
-                                    transaction_id: msg.transaction_id.clone(),
-                                    requester_ip: Some(requester),
-                                    message_type: MessageType::Response(
-                                        ResponseSpecific::PingResponse(PingResponseArguments {
-                                            responder_id: id,
-                                        }),
-                                    ),
-                                    // TODO: define these variables
-                                    version: None,
-                                    read_only: None,
-                                }
+                    let response = match request_type {
+                        RequestSpecific::PingRequest(ping_request_arguments) => {
+                            Message {
+                                transaction_id: msg.transaction_id.clone(),
+                                requester_ip: Some(requester),
+                                message_type: MessageType::Response(
+                                    ResponseSpecific::PingResponse(PingResponseArguments {
+                                        responder_id: id,
+                                    }),
+                                ),
+                                // TODO: define these variables
+                                version: None,
+                                read_only: None,
                             }
-                        };
+                        }
+                    };
 
-                        socket
-                            .send_to(&response.to_bytes().unwrap(), requester)
-                            .unwrap();
-                    }
-                    MessageType::Response(_) => {
-                        let tid = match msg.transaction_id() {
-                            Ok(tid) => tid,
-                            Err(_) => {
-                                // TODO: tracing
-                                println!("Failed to parse response message transaction_id, expected 2 bytes {:?}", msg);
-                                continue;
-                            }
-                        };
+                    socket
+                        .send_to(&response.to_bytes().unwrap(), requester)
+                        .unwrap();
+                }
+                MessageType::Response(_) => {
+                    let tid = match msg.transaction_id() {
+                        Ok(tid) => tid,
+                        Err(_) => {
+                            // TODO: tracing
+                            println!("Failed to parse response message transaction_id, expected 2 bytes {:?}", msg);
+                            continue;
+                        }
+                    };
 
-                        println!("Received a response: {:?}", &msg);
+                    println!("Received a response: {:?}", &msg);
 
-                        &responses.insert(tid, msg.clone());
-                    }
-                    MessageType::Error(_) => {
-                        println!("Received an error: {:?}", &msg);
-                    }
+                    responses.insert(tid, msg.clone());
+                }
+                MessageType::Error(_) => {
+                    println!("Received an error: {:?}", &msg);
                 }
             }
-            Err(_) => {}
         }
     }
-
-    ()
 }
 
 #[cfg(test)]
@@ -231,7 +225,7 @@ mod test {
 
     #[test]
     fn test_tid() {
-        let mut rpc = RPC::new().unwrap();
+        let mut rpc = Rpc::new().unwrap();
 
         assert_eq!(rpc.tid(), 0);
         assert_eq!(rpc.tid(), 1);
@@ -245,11 +239,11 @@ mod test {
 
     #[test]
     fn test_ping() {
-        let server = RPC::new().unwrap();
+        let server = Rpc::new().unwrap();
 
         let server_addr = server.socket.local_addr().unwrap();
         // Start the client.
-        let mut client = RPC::new().unwrap();
+        let mut client = Rpc::new().unwrap();
         let a = client.ping(server_addr).unwrap();
         let b = client.ping(server_addr).unwrap();
         let c = client.ping(server_addr).unwrap();
@@ -261,7 +255,7 @@ mod test {
     // Live interoperability tests, should be removed before CI.
     #[test]
     fn test_live_ping() {
-        let mut client = RPC::new().unwrap();
+        let mut client = Rpc::new().unwrap();
 
         // TODO: resolve the address from DNS.
         let address: SocketAddr = "167.86.102.121:6881".parse().unwrap();

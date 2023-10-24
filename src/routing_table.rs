@@ -105,7 +105,13 @@ impl RoutingTable {
             }
         }
 
-        return result;
+        result
+    }
+}
+
+impl Default for RoutingTable {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
