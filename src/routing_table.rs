@@ -117,7 +117,7 @@ impl Default for RoutingTable {
 
 #[cfg(test)]
 mod test {
-    use std::mem;
+    use std::{mem, net::SocketAddr};
 
     use crate::{
         common::{Id, Node},
@@ -280,8 +280,7 @@ mod test {
             .iter()
             .map(|id| Node {
                 id: Id(id.to_owned()),
-                ip: "0.0.0.0".parse().unwrap(),
-                port: 0,
+                address: SocketAddr::from(([0, 0, 0, 0], 0)),
             })
             .collect();
 

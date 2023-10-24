@@ -42,11 +42,14 @@ pub struct ErrorSpecific {
 #[derive(Debug, PartialEq, Clone)]
 pub enum RequestSpecific {
     PingRequest(PingRequestArguments),
+    FindNodeRequest(FindNodeRequestArguments),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ResponseSpecific {
     PingResponse(PingResponseArguments),
+
+    FindNodeResponse(FindNodeResponseArguments),
 }
 
 // === PING ===
@@ -58,6 +61,19 @@ pub struct PingRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct PingResponseArguments {
     pub responder_id: Id,
+}
+
+// === FIND_NODE ===
+#[derive(Debug, PartialEq, Clone)]
+pub struct FindNodeRequestArguments {
+    pub target: Id,
+    pub requester_id: Id,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct FindNodeResponseArguments {
+    pub responder_id: Id,
+    pub nodes: Vec<Node>,
 }
 
 impl Message {
@@ -78,6 +94,14 @@ impl Message {
                             id: ping_args.requester_id.to_vec(),
                         },
                     },
+                    RequestSpecific::FindNodeRequest(find_node_args) => {
+                        internal::DHTRequestSpecific::FindNode {
+                            arguments: internal::DHTFindNodeArguments {
+                                id: find_node_args.requester_id.to_vec(),
+                                target: find_node_args.target.to_vec(),
+                            },
+                        }
+                    }
                 }),
 
                 MessageType::Response(res) => internal::DHTMessageVariant::Response(match res {
@@ -85,6 +109,14 @@ impl Message {
                         internal::DHTResponseSpecific::Ping {
                             arguments: internal::DHTPingResponseArguments {
                                 id: ping_args.responder_id.to_vec(),
+                            },
+                        }
+                    }
+                    ResponseSpecific::FindNodeResponse(find_node_args) => {
+                        internal::DHTResponseSpecific::FindNode {
+                            arguments: internal::DHTFindNodeResponseArguments {
+                                id: find_node_args.responder_id.to_vec(),
+                                nodes: nodes4_to_bytes(&find_node_args.nodes),
                             },
                         }
                     }
@@ -120,6 +152,12 @@ impl Message {
                                 requester_id: Id::from_bytes(arguments.id)?,
                             })
                         }
+                        internal::DHTRequestSpecific::FindNode { arguments } => {
+                            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+                                requester_id: Id::from_bytes(arguments.id)?,
+                                target: Id::from_bytes(&arguments.target)?,
+                            })
+                        }
                     })
                 }
 
@@ -128,6 +166,12 @@ impl Message {
                         internal::DHTResponseSpecific::Ping { arguments } => {
                             ResponseSpecific::PingResponse(PingResponseArguments {
                                 responder_id: Id::from_bytes(arguments.id)?,
+                            })
+                        }
+                        internal::DHTResponseSpecific::FindNode { arguments } => {
+                            ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
+                                responder_id: Id::from_bytes(&arguments.id)?,
+                                nodes: bytes_to_nodes4(&arguments.nodes)?,
                             })
                         }
                     })
@@ -198,9 +242,11 @@ impl Message {
         let id = match &self.message_type {
             MessageType::Request(request_variant) => match request_variant {
                 RequestSpecific::PingRequest(arguments) => arguments.requester_id,
+                RequestSpecific::FindNodeRequest(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::PingResponse(arguments) => arguments.responder_id,
+                ResponseSpecific::FindNodeResponse(arguments) => arguments.responder_id,
             },
             MessageType::Error(_) => {
                 return None;
@@ -256,6 +302,39 @@ pub fn sockaddr_to_bytes(sockaddr: &SocketAddr) -> Vec<u8> {
     bytes.push(port_bytes[1]);
 
     bytes
+}
+
+fn nodes4_to_bytes(nodes: &[Node]) -> Vec<u8> {
+    let node4_byte_size: usize = ID_SIZE + 6;
+    let mut vec = Vec::with_capacity(node4_byte_size * nodes.len());
+    for node in nodes {
+        vec.append(&mut node.id.to_vec());
+        vec.append(&mut sockaddr_to_bytes(&node.address));
+    }
+    vec
+}
+
+fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>> {
+    let bytes = bytes.as_ref();
+    let node4_byte_size: usize = ID_SIZE + 6;
+    if bytes.len() % node4_byte_size != 0 {
+        return Err(Error::Generic(format!(
+            "Wrong number of bytes for nodes message ({})",
+            bytes.len()
+        )));
+    }
+
+    let expected_num = bytes.len() / node4_byte_size;
+    let mut to_ret = Vec::with_capacity(expected_num);
+    for i in 0..bytes.len() / node4_byte_size {
+        let i = i * node4_byte_size;
+        let id = Id::from_bytes(&bytes[i..i + ID_SIZE])?;
+        let sockaddr = bytes_to_sockaddr(&bytes[i + ID_SIZE..i + node4_byte_size])?;
+        let node = Node::new(id, sockaddr);
+        to_ret.push(node);
+    }
+
+    Ok(to_ret)
 }
 
 #[cfg(test)]

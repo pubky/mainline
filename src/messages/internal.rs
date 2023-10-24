@@ -56,11 +56,22 @@ pub enum DHTRequestSpecific {
         #[serde(rename = "a")]
         arguments: DHTPingArguments,
     },
+
+    #[serde(rename = "find_node")]
+    FindNode {
+        #[serde(rename = "a")]
+        arguments: DHTFindNodeArguments,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)] // This means order matters! Order these from most to least detailed
 pub enum DHTResponseSpecific {
+    FindNode {
+        #[serde(rename = "r")]
+        arguments: DHTFindNodeResponseArguments,
+    },
+
     Ping {
         #[serde(rename = "r")]
         arguments: DHTPingResponseArguments,
@@ -92,4 +103,24 @@ pub struct DHTPingArguments {
 pub struct DHTPingResponseArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
+}
+
+// === FIND NODE ===
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTFindNodeArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub target: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTFindNodeResponseArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub nodes: Vec<u8>,
 }

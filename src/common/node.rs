@@ -1,5 +1,5 @@
 //! Struct and implementation of the Node entry in the Kademlia routing table
-use std::net::IpAddr;
+use std::net::SocketAddr;
 
 use crate::common::Id;
 
@@ -7,6 +7,12 @@ use crate::common::Id;
 /// Node entry in Kademlia routing table
 pub struct Node {
     pub id: Id,
-    pub ip: IpAddr,
-    pub port: u16,
+    pub address: SocketAddr,
+}
+
+impl Node {
+    /// Creates a new Node from an id and socket address.
+    pub fn new(id: Id, address: SocketAddr) -> Node {
+        Node { id, address }
+    }
 }

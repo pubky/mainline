@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use crate::common::Id;
 use crate::messages::{
-    Message, MessageType, PingRequestArguments, PingResponseArguments, RequestSpecific,
-    ResponseSpecific,
+    FindNodeRequestArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
+    RequestSpecific, ResponseSpecific,
 };
 use crate::{Error, Result};
 
@@ -84,14 +84,14 @@ impl Rpc {
 
     fn ping(&mut self, address: SocketAddr) -> Result<Message> {
         let tid = self.tid();
-        let message = self
-            .request_message(
-                tid,
-                RequestSpecific::PingRequest(PingRequestArguments {
-                    requester_id: self.id,
-                }),
-            )
-            .to_bytes()?;
+        let message = self.request_message(
+            tid,
+            RequestSpecific::PingRequest(PingRequestArguments {
+                requester_id: self.id,
+            }),
+        );
+
+        println!("Sending a request: {:?}", &message);
 
         let (response_tx, response_rx) = mpsc::channel();
 
@@ -99,7 +99,35 @@ impl Rpc {
             .send(ListenerMessage::RegisterRequest((tid, response_tx)));
 
         // Send a message to the server.
-        self.socket.send_to(&message, address)?;
+        self.socket.send_to(&message.to_bytes()?, address)?;
+
+        // TODO: Add timeout here!
+        let response = response_rx
+            .recv()
+            .map_err(|e| Error::Static("Failed to receive response>"))?;
+
+        Ok(response)
+    }
+
+    fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Message> {
+        let tid = self.tid();
+        let message = self.request_message(
+            tid,
+            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+                target,
+                requester_id: self.id,
+            }),
+        );
+
+        println!("Sending a request: {:?}", &message);
+
+        let (response_tx, response_rx) = mpsc::channel();
+
+        self.sender
+            .send(ListenerMessage::RegisterRequest((tid, response_tx)));
+
+        // Send a message to the server.
+        self.socket.send_to(&message.to_bytes()?, address)?;
 
         // TODO: Add timeout here!
         let response = response_rx
@@ -191,13 +219,28 @@ fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) {
                                 read_only: None,
                             }
                         }
+                        _ => {
+                            // TODO: solve find_node response!
+                            Message {
+                                transaction_id: msg.transaction_id.clone(),
+                                requester_ip: Some(requester),
+                                message_type: MessageType::Response(
+                                    ResponseSpecific::PingResponse(PingResponseArguments {
+                                        responder_id: id,
+                                    }),
+                                ),
+                                // TODO: define these variables
+                                version: None,
+                                read_only: None,
+                            }
+                        }
                     };
 
                     socket
                         .send_to(&response.to_bytes().unwrap(), requester)
                         .unwrap();
                 }
-                MessageType::Response(_) => {
+                MessageType::Response(message_type) => {
                     let tid = match msg.transaction_id() {
                         Ok(tid) => tid,
                         Err(_) => {
@@ -258,8 +301,19 @@ mod test {
         let mut client = Rpc::new().unwrap();
 
         // TODO: resolve the address from DNS.
-        let address: SocketAddr = "167.86.102.121:6881".parse().unwrap();
+        let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
 
         client.ping(address);
+    }
+
+    // Live interoperability tests, should be removed before CI.
+    #[test]
+    fn test_live_find_node() {
+        let mut client = Rpc::new().unwrap();
+
+        // TODO: resolve the address from DNS.
+        let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
+
+        client.find_node(address, client.id);
     }
 }
