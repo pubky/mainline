@@ -420,4 +420,70 @@ mod tests {
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
+
+    #[test]
+    fn test_find_node_request() {
+        let original_msg = Message {
+            transaction_id: vec![1, 2, 3],
+            version: Some(vec![0x62, 0x61, 0x72, 0x66]),
+            requester_ip: None,
+            read_only: None,
+            message_type: MessageType::Request(RequestSpecific::FindNodeRequest(
+                FindNodeRequestArguments {
+                    target: Id::random(),
+                    requester_id: Id::random(),
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_find_node_request_read_only() {
+        let original_msg = Message {
+            transaction_id: vec![1, 2, 3],
+            version: Some(vec![0x62, 0x61, 0x72, 0x66]),
+            requester_ip: None,
+            read_only: Some(true),
+            message_type: MessageType::Request(RequestSpecific::FindNodeRequest(
+                FindNodeRequestArguments {
+                    target: Id::random(),
+                    requester_id: Id::random(),
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_find_node_response() {
+        let original_msg = Message {
+            transaction_id: vec![1, 2, 3],
+            version: Some(vec![1]),
+            requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
+            read_only: None,
+            message_type: MessageType::Response(ResponseSpecific::FindNodeResponse(
+                FindNodeResponseArguments {
+                    responder_id: Id::random(),
+                    nodes: vec![Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap())],
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
 }
