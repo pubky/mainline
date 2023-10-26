@@ -8,7 +8,7 @@ use crate::{Error, Result};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Message {
-    pub transaction_id: Vec<u8>,
+    pub transaction_id: u16,
 
     /// The version of the requester or responder.
     pub version: Option<Vec<u8>>,
@@ -79,7 +79,7 @@ pub struct FindNodeResponseArguments {
 impl Message {
     fn into_serde_message(self) -> internal::DHTMessage {
         internal::DHTMessage {
-            transaction_id: self.transaction_id,
+            transaction_id: self.transaction_id.to_be_bytes().to_vec(),
             version: self.version,
             ip: self
                 .requester_ip
@@ -136,7 +136,7 @@ impl Message {
 
     fn from_serde_message(msg: internal::DHTMessage) -> Result<Message> {
         Ok(Message {
-            transaction_id: msg.transaction_id,
+            transaction_id: transaction_id(msg.transaction_id)?,
             version: msg.version,
             requester_ip: match msg.ip {
                 Some(ip) => Some(bytes_to_sockaddr(ip)?),
@@ -220,17 +220,6 @@ impl Message {
         Message::from_serde_message(internal::DHTMessage::from_bytes(bytes)?)
     }
 
-    // Return the transaction Id as a u16
-    pub fn transaction_id(&self) -> Result<u16> {
-        let bytes = &self.transaction_id;
-
-        if bytes.len() != 2 {
-            return Err(Error::Static("Transaction Id should be 2 bytes"));
-        }
-
-        Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16))
-    }
-
     /// Return the Id of the sender of the Message
     ///
     /// This is less straightforward than it seems because not *all* messages are sent
@@ -255,6 +244,17 @@ impl Message {
 
         Some(id)
     }
+}
+
+// Return the transaction Id as a u16
+pub fn transaction_id(bytes: Vec<u8>) -> Result<u16> {
+    if bytes.len() > 2 {
+        return Err(Error::InvalidTransactionId(bytes));
+    } else if bytes.len() == 1 {
+        return Ok(bytes[0] as u16);
+    }
+
+    Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16))
 }
 
 fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr> {
@@ -344,45 +344,14 @@ mod tests {
 
     #[test]
     fn test_transaction_id() {
-        assert_eq!(
-            Message {
-                transaction_id: (0x1 as u16).to_be_bytes().to_vec(),
-                version: None,
-                requester_ip: None,
-                read_only: None,
-                message_type: MessageType::Request(RequestSpecific::PingRequest(
-                    PingRequestArguments {
-                        requester_id: Id::random(),
-                    },
-                )),
-            }
-            .transaction_id()
-            .unwrap(),
-            0x1,
-        );
-
-        assert_eq!(
-            Message {
-                transaction_id: (0x1234 as u16).to_be_bytes().to_vec(),
-                version: None,
-                requester_ip: None,
-                read_only: None,
-                message_type: MessageType::Request(RequestSpecific::PingRequest(
-                    PingRequestArguments {
-                        requester_id: Id::random(),
-                    },
-                )),
-            }
-            .transaction_id()
-            .unwrap(),
-            0x1234
-        );
+        assert_eq!(transaction_id(vec![255]).unwrap(), 255);
+        assert_eq!(transaction_id(vec![1, 2]).unwrap(), 258);
     }
 
     #[test]
     fn test_ping_request() {
         let original_msg = Message {
-            transaction_id: vec![0, 1],
+            transaction_id: 258,
             version: None,
             requester_ip: None,
             read_only: None,
@@ -403,7 +372,7 @@ mod tests {
     #[test]
     fn test_ping_response() {
         let original_msg = Message {
-            transaction_id: vec![1, 2],
+            transaction_id: 258,
             version: Some(vec![0xde, 0xad]),
             requester_ip: Some("99.100.101.102:1030".parse().unwrap()),
             read_only: None,
@@ -424,7 +393,7 @@ mod tests {
     #[test]
     fn test_find_node_request() {
         let original_msg = Message {
-            transaction_id: vec![1, 2, 3],
+            transaction_id: 258,
             version: Some(vec![0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: None,
@@ -446,7 +415,7 @@ mod tests {
     #[test]
     fn test_find_node_request_read_only() {
         let original_msg = Message {
-            transaction_id: vec![1, 2, 3],
+            transaction_id: 258,
             version: Some(vec![0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: Some(true),
@@ -468,7 +437,7 @@ mod tests {
     #[test]
     fn test_find_node_response() {
         let original_msg = Message {
-            transaction_id: vec![1, 2, 3],
+            transaction_id: 258,
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: None,

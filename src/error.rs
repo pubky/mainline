@@ -25,4 +25,8 @@ pub enum Error {
     /// Message type.
     #[error("Builder state invalid: {0}")]
     BuilderInvalidComboError(&'static str),
+
+    /// Indicates that the message transaction_id is not two bytes.
+    #[error("Invalid transaction_id: {0:?}")]
+    InvalidTransactionId(Vec<u8>),
 }
