@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::common::Id;
@@ -16,10 +17,10 @@ const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_TIMEOUT_MILLIS: u64 = 2000;
 const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Rpc {
     id: Id,
-    socket: Arc<UdpSocket>,
+    socket: UdpSocket,
     next_tid: u16,
     request_timeout: Duration,
     read_only: bool,
@@ -31,6 +32,19 @@ pub struct Rpc {
 struct OutstandingRequest {
     sent_at: Instant,
     sender: Sender<Message>,
+}
+
+impl Clone for Rpc {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            socket: self.socket.try_clone().unwrap(),
+            next_tid: self.next_tid,
+            request_timeout: self.request_timeout,
+            read_only: self.read_only,
+            outstanding_requests: self.outstanding_requests.clone(),
+        }
+    }
 }
 
 impl Rpc {
@@ -52,8 +66,13 @@ impl Rpc {
             next_tid: 0,
             request_timeout: Duration::from_millis(DEFAULT_TIMEOUT_MILLIS),
             read_only: false,
-            outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
+            outstanding_requests: Mutex::new(HashMap::new()).into(),
         })
+    }
+
+    pub fn with_id(mut self, id: Id) -> Self {
+        self.id = id;
+        self
     }
 
     pub fn with_read_only(mut self, read_only: bool) -> Self {
@@ -142,7 +161,7 @@ impl Rpc {
                 // Requests
                 MessageType::Request(_) => {
                     // Return requests to be handled by the caller, if the RPC is not read_only.
-                    if (self.read_only) {
+                    if self.read_only {
                         return Ok(None);
                     };
                     return Ok(Some((message, from)));
@@ -230,6 +249,13 @@ impl Rpc {
         self.socket.send_to(&message.to_bytes()?, address)?;
         Ok(self.response(transaction_id))
     }
+
+    /// Helper function to spawn a background thread
+    fn run(mut self) -> thread::JoinHandle<()> {
+        thread::spawn(move || loop {
+            self.tick();
+        })
+    }
 }
 
 #[cfg(test)]
@@ -239,6 +265,7 @@ mod test {
     use crate::messages::{FindNodeResponseArguments, PingResponseArguments};
 
     use super::*;
+    use std::net::{SocketAddr, ToSocketAddrs};
 
     #[test]
     fn test_tid() {
@@ -311,10 +338,7 @@ mod test {
         // Start the client.
         let mut client = Rpc::new().unwrap().with_request_timout(100).unwrap();
 
-        let mut client_clone = client.clone();
-        thread::spawn(move || loop {
-            let _ = client_clone.tick();
-        });
+        client.clone().run();
 
         // Test that tick does not return responses;
         client.respond(
@@ -364,10 +388,7 @@ mod test {
         // Start the client.
         let mut client = Rpc::new().unwrap();
 
-        let mut client_clone = client.clone();
-        thread::spawn(move || loop {
-            let _ = client_clone.tick();
-        });
+        client.clone().run();
 
         let pong = client.ping(server_addr).unwrap().recv().unwrap();
         let pong2 = client.ping(server_addr).unwrap().recv().unwrap();
@@ -425,10 +446,7 @@ mod test {
         // Start the client.
         let mut client = Rpc::new().unwrap();
 
-        let mut client_clone = client.clone();
-        thread::spawn(move || loop {
-            let _ = client_clone.tick();
-        });
+        client.clone().run();
 
         let find_node_response = client
             .find_node(server_addr, client.id)
@@ -457,13 +475,14 @@ mod test {
     #[test]
     fn test_live_ping() {
         let mut client = Rpc::new().unwrap();
-        let mut client_clone = client.clone();
-        thread::spawn(move || loop {
-            let _ = client_clone.tick();
-        });
+        client.clone().run();
 
         // TODO: resolve the address from DNS.
-        let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
+        let address: SocketAddr = "router.pkarr.org:6881"
+            .to_socket_addrs()
+            .unwrap()
+            .next()
+            .unwrap();
 
         let _ = client.ping(address);
     }
@@ -472,13 +491,14 @@ mod test {
     #[test]
     fn test_live_find_node() {
         let mut client = Rpc::new().unwrap();
-        let mut client_clone = client.clone();
-        thread::spawn(move || loop {
-            let _ = client_clone.tick();
-        });
+        client.clone().run();
 
         // TODO: resolve the address from DNS.
-        let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
+        let address: SocketAddr = "router.bittorrent.com:6881"
+            .to_socket_addrs()
+            .unwrap()
+            .next()
+            .unwrap();
 
         let _ = client.find_node(address, client.id);
     }
