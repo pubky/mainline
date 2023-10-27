@@ -1,9 +1,6 @@
 //! Kademlia node Id or a lookup target
 use rand::Rng;
-use std::{
-    cmp::Ordering,
-    fmt::{self, Debug, Formatter},
-};
+use std::fmt::{self, Debug, Formatter};
 
 use crate::{Error, Result};
 
@@ -27,7 +24,7 @@ impl Id {
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
         let bytes = bytes.as_ref();
         if bytes.len() != ID_SIZE {
-            return Err(Error::Static("Wrong number of bytes"));
+            return Err(Error::InvalidIdSize(bytes.len()));
         }
 
         let mut tmp: [u8; ID_SIZE] = [0; ID_SIZE];

@@ -1,23 +1,22 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io;
+use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::thread::{self, JoinHandle};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::common::Id;
 use crate::messages::{
-    FindNodeRequestArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
-    RequestSpecific, ResponseSpecific,
+    FindNodeRequestArguments, Message, MessageType, PingRequestArguments, RequestSpecific,
+    ResponseSpecific,
 };
-use crate::{Error, Result};
+
+use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_TIMEOUT_MILLIS: u64 = 2000;
 
 #[derive(Debug, Clone)]
-struct Rpc {
+pub struct Rpc {
     id: Id,
     socket: Arc<UdpSocket>,
     next_tid: u16,
@@ -100,7 +99,7 @@ impl Rpc {
         let mut buf = [0u8; 1024];
         match self.socket.recv_from(&mut buf) {
             Ok((amt, from)) => {
-                let mut message = Message::from_bytes(&buf[..amt])?;
+                let message = Message::from_bytes(&buf[..amt])?;
                 Ok(Some((message, from)))
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -119,7 +118,7 @@ impl Rpc {
     ///
     /// Because it awaits a message from the udp socket for 1/4 of the request timeout, calling
     /// this in a loop will behave as a tick function with that interval.
-    fn tick(&mut self) -> Result<Option<(Message, SocketAddr)>> {
+    pub fn tick(&mut self) -> Result<Option<(Message, SocketAddr)>> {
         let request = self.try_recv_from()?;
 
         let mut lock = self.outstanding_requests.lock().unwrap();
@@ -130,7 +129,7 @@ impl Rpc {
                 MessageType::Request(_) => {}
                 _ => {
                     if let Some(outstanding_request) = lock.remove(&message.transaction_id) {
-                        outstanding_request.sender.send(message.clone());
+                        let _ = outstanding_request.sender.send(message.clone());
                     }
                 }
             }
@@ -184,7 +183,7 @@ impl Rpc {
         response_rx
     }
 
-    fn ping(&mut self, address: SocketAddr) -> Result<Receiver<Message>> {
+    pub fn ping(&mut self, address: SocketAddr) -> Result<Receiver<Message>> {
         let transaction_id = self.tid();
         let message = self.request_message(
             transaction_id,
@@ -198,7 +197,7 @@ impl Rpc {
         Ok(self.response(transaction_id))
     }
 
-    fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Receiver<Message>> {
+    pub fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Receiver<Message>> {
         let transaction_id = self.tid();
         let message = self.request_message(
             transaction_id,
@@ -216,6 +215,10 @@ impl Rpc {
 
 #[cfg(test)]
 mod test {
+    use std::thread;
+
+    use crate::messages::PingResponseArguments;
+
     use super::*;
 
     #[test]
@@ -241,7 +244,7 @@ mod test {
             if let Ok(Some((message, from))) = server_clone.tick() {
                 match message.message_type {
                     MessageType::Request(request_specific) => match request_specific {
-                        RequestSpecific::PingRequest(args) => {
+                        RequestSpecific::PingRequest(_) => {
                             server_clone
                                 .respond(
                                     message.transaction_id,
@@ -266,7 +269,7 @@ mod test {
 
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.tick();
+            let _ = client_clone.tick();
             // Do nothing ... responses will be sent to the outstanding_requests senders.
         });
 
@@ -302,7 +305,7 @@ mod test {
 
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.tick();
+            let _ = client_clone.tick();
         });
 
         client.ping(server_addr).unwrap();
@@ -318,13 +321,13 @@ mod test {
         let mut client = Rpc::new().unwrap();
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.tick();
+            let _ = client_clone.tick();
         });
 
         // TODO: resolve the address from DNS.
         let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
 
-        client.ping(address);
+        let _ = client.ping(address);
     }
 
     // Live interoperability tests, should be removed before CI.
@@ -333,12 +336,12 @@ mod test {
         let mut client = Rpc::new().unwrap();
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.tick();
+            let _ = client_clone.tick();
         });
 
         // TODO: resolve the address from DNS.
         let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
 
-        client.find_node(address, client.id);
+        let _ = client.find_node(address, client.id);
     }
 }

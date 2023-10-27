@@ -1,7 +1,7 @@
 //! Main Crate Error
 
 #[derive(thiserror::Error, Debug)]
-/// Pkarr crate error enum.
+/// Mainline crate error enum.
 pub enum Error {
     /// For starter, to remove as code matures.
     #[error("Generic error: {0}")]
@@ -14,17 +14,15 @@ pub enum Error {
     /// Transparent [std::io::Error]
     IO(#[from] std::io::Error),
 
+    // Id
+    /// Id is expected to by 20 bytes.
+    #[error("Invalid Id size, expected 20, got {0}")]
+    InvalidIdSize(usize),
+
+    // DHT messages
+    /// Errors related to parsing DHT messages.
     #[error("Failed to parse packet bytes: {0}")]
     BencodeError(#[from] serde_bencode::Error),
-
-    /// Indicates that the Message type you're trying to build requires more information.
-    #[error("{0} is required")]
-    BuilderMissingFieldError(&'static str),
-
-    /// Indicates that the builder is in an invalid/ambiguous state to build the desired
-    /// Message type.
-    #[error("Builder state invalid: {0}")]
-    BuilderInvalidComboError(&'static str),
 
     /// Indicates that the message transaction_id is not two bytes.
     #[error("Invalid transaction_id: {0:?}")]

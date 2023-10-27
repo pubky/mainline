@@ -1,7 +1,6 @@
 use super::internal;
 use std::convert::TryInto;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
 
 use crate::common::{Id, Node, ID_SIZE};
 use crate::{Error, Result};
@@ -187,7 +186,7 @@ impl Message {
                         code: match err.error_info[0] {
                             serde_bencode::value::Value::Int(code) => match code.try_into() {
                                 Ok(code) => code,
-                                Err(e) => return Err(Error::Static("error parsing error code")),
+                                Err(_) => return Err(Error::Static("error parsing error code")),
                             },
                             _ => return Err(Error::Static("Expected error code as first element")),
                         },
@@ -195,7 +194,7 @@ impl Message {
                             serde_bencode::value::Value::Bytes(desc) => {
                                 match std::str::from_utf8(desc) {
                                     Ok(desc) => desc.to_string(),
-                                    Err(e) => {
+                                    Err(_) => {
                                         return Err(Error::Static(
                                             "error parsing error description",
                                         ))
@@ -340,7 +339,6 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::prelude::*;
 
     #[test]
     fn test_transaction_id() {

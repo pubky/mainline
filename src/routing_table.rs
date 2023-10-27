@@ -2,10 +2,8 @@
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
-use std::net::IpAddr;
 
-use crate::common::{Id, Node, ID_SIZE, MAX_DISTANCE};
-use crate::Result;
+use crate::common::{Id, Node, MAX_DISTANCE};
 
 /// The capacity of each row in the routing table.
 const K: usize = 20;
@@ -51,7 +49,7 @@ impl Debug for Row {
 
 impl RoutingTable {
     pub fn new() -> Self {
-        let mut rows = BTreeMap::new();
+        let rows = BTreeMap::new();
 
         RoutingTable {
             rows,
@@ -72,7 +70,7 @@ impl RoutingTable {
         let row = self.rows.get_mut(&distance);
 
         if row.is_none() {
-            let mut row = Row::new();
+            let row = Row::new();
             self.rows.insert(distance, row);
         }
 
@@ -117,12 +115,12 @@ impl Default for RoutingTable {
 
 #[cfg(test)]
 mod test {
-    use std::{mem, net::SocketAddr};
+    use std::net::SocketAddr;
 
     use crate::{
         common::{Id, Node},
         routing_table::RoutingTable,
-        routing_table::{K, MAX_DISTANCE},
+        routing_table::MAX_DISTANCE,
     };
 
     #[test]
@@ -284,7 +282,7 @@ mod test {
             })
             .collect();
 
-        let mut expected_closest_ids = [
+        let expected_closest_ids = [
             [
                 201, 70, 67, 200, 246, 70, 16, 38, 0, 236, 216, 87, 116, 239, 39, 11, 106, 128,
                 101, 90,
@@ -387,7 +385,7 @@ mod test {
 
         let closest = table.closest(&target);
 
-        let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
+        let closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
 
         assert_eq!(closest_ids, expected_closest_ids)
     }
