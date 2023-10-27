@@ -211,8 +211,8 @@ impl Message {
         })
     }
 
-    pub fn to_bytes(self) -> Result<Vec<u8>> {
-        self.into_serde_message().to_bytes()
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        self.clone().into_serde_message().to_bytes()
     }
 
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Message> {

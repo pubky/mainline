@@ -56,13 +56,17 @@ impl Id {
         0
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
+    pub fn to_vec(self) -> Vec<u8> {
         self.0.to_vec()
     }
 }
 
 impl Debug for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Id({:x?})", &self.0)
+        // Create a hexadecimal string from the bytes
+        let hex_string: String = self.0.iter().map(|byte| format!("{:02x}", byte)).collect();
+
+        // Write the formatted string to the formatter
+        write!(f, "Id({})", hex_string)
     }
 }

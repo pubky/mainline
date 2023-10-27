@@ -3,13 +3,14 @@
 //! Rust implementation of read-only BitTorrent Mainline DHT client.
 
 /// Miscellaneous common structs used throughout the library.
-pub mod common;
+mod common;
+pub mod dht;
 /// Errors
-pub mod error;
-pub mod messages;
+mod error;
+mod messages;
 /// Kademlia routing table to keep track of local view of the Mainline network.
-pub mod routing_table;
-pub mod rpc;
+mod routing_table;
+mod rpc;
 
 // Re-exports
 pub use crate::error::Error;

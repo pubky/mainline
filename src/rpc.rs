@@ -62,7 +62,7 @@ impl Rpc {
 
         Ok(Rpc {
             id,
-            socket: socket.into(),
+            socket,
             next_tid: 0,
             request_timeout: Duration::from_millis(DEFAULT_TIMEOUT_MILLIS),
             read_only: false,
@@ -168,6 +168,8 @@ impl Rpc {
                 }
                 // Responses and errors
                 _ => {
+                    // TODO: emit responses and errors to the caller ... sorry.
+                    println!("Received response or error: from({}) {:?}\n", from, message);
                     // Send responses or errors to outstanding_requests.
                     if let Some(outstanding_request) = lock.remove(&message.transaction_id) {
                         let _ = outstanding_request.sender.send(message.clone());

@@ -2,15 +2,16 @@
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
+use std::sync::{Arc, Mutex};
 
 use crate::common::{Id, Node, MAX_DISTANCE};
 
 /// The capacity of each row in the routing table.
 const K: usize = 20;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RoutingTable {
-    rows: BTreeMap<u8, Row>,
+    rows: Arc<Mutex<BTreeMap<u8, Row>>>,
     id: Id,
 }
 
@@ -52,7 +53,7 @@ impl RoutingTable {
         let rows = BTreeMap::new();
 
         RoutingTable {
-            rows,
+            rows: Mutex::new(rows).into(),
             id: Id::random(),
         }
     }
@@ -67,21 +68,24 @@ impl RoutingTable {
 
         let distance = self.id.distance(&node.id);
 
-        let row = self.rows.get_mut(&distance);
+        let mut lock = self.rows.lock().unwrap();
+        let row = lock.get_mut(&distance);
 
         if row.is_none() {
             let row = Row::new();
-            self.rows.insert(distance, row);
+            lock.insert(distance, row);
         }
 
-        let row = self.rows.get_mut(&distance).unwrap();
+        let row = lock.get_mut(&distance).unwrap();
 
         row.add(node)
     }
 
-    pub fn closest(&self, target: &Id) -> Vec<&Node> {
+    pub fn closest(&self, target: &Id) -> Vec<Node> {
         let mut result = Vec::with_capacity(K);
         let distance = self.id.distance(target);
+
+        let lock = self.rows.lock().unwrap();
 
         for i in
             // First search in closest nodes
@@ -89,11 +93,13 @@ impl RoutingTable {
                 // if we don't have enough close nodes, populate from other rows
                 .chain((0..distance).rev())
         {
-            match self.rows.get(&i) {
+            match &lock.get(&i) {
                 Some(row) => {
                     for node in row.nodes.iter() {
                         if result.len() < K {
-                            result.push(node)
+                            // TODO: Do we need to keep full nodes in the table? can't we just keep track of the ids and keep
+                            // nodes somewhere else that doesn't cross threads, or at least keep this pure?
+                            result.push(node.clone());
                         } else {
                             return result;
                         }
