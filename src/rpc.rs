@@ -14,6 +14,7 @@ use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_TIMEOUT_MILLIS: u64 = 2000;
+const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
 
 #[derive(Debug, Clone)]
 pub struct Rpc {
@@ -21,6 +22,7 @@ pub struct Rpc {
     socket: Arc<UdpSocket>,
     next_tid: u16,
     request_timeout: Duration,
+    read_only: bool,
     // TODO: Use oneshot instead of mpsc sender?
     outstanding_requests: Arc<Mutex<HashMap<u16, OutstandingRequest>>>,
 }
@@ -32,7 +34,7 @@ struct OutstandingRequest {
 }
 
 impl Rpc {
-    pub fn new() -> Result<Rpc> {
+    pub fn new() -> Result<Self> {
         // TODO: One day I might implement BEP42.
         let id = Id::random();
 
@@ -49,8 +51,14 @@ impl Rpc {
             socket: socket.into(),
             next_tid: 0,
             request_timeout: Duration::from_millis(DEFAULT_TIMEOUT_MILLIS),
+            read_only: false,
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
     }
 
     /// Sets requests timeout in milliseconds
@@ -70,6 +78,21 @@ impl Rpc {
 
     /// === Responses methods ===
 
+    pub fn response_message(
+        &self,
+        transaction_id: u16,
+        to: SocketAddr,
+        response: ResponseSpecific,
+    ) -> Message {
+        Message {
+            transaction_id,
+            message_type: MessageType::Response(response),
+            version: Some(VERSION.into()),
+            read_only: Some(self.read_only),
+            requester_ip: Some(to),
+        }
+    }
+
     pub fn respond(
         &self,
         transaction_id: u16,
@@ -78,16 +101,7 @@ impl Rpc {
     ) -> Result<()> {
         let socket = self.socket.try_clone()?;
 
-        let response = Message {
-            transaction_id,
-            message_type: MessageType::Response(response),
-            // TODO: define our version.
-            version: None,
-            // TODO: configure. if false, we should disable respond or make it noop.
-            read_only: Some(false),
-            // Only relevant in responses.
-            requester_ip: Some(to),
-        };
+        let response = self.response_message(transaction_id, to, response);
 
         let bytes = &response.clone().to_bytes()?;
         socket.send_to(bytes, to)?;
@@ -158,10 +172,8 @@ impl Rpc {
         Message {
             transaction_id,
             message_type: MessageType::Request(request),
-            // TODO: define our version.
-            version: None,
-            // TODO: configure
-            read_only: Some(true),
+            version: Some(VERSION.into()),
+            read_only: Some(self.read_only),
             // Only relevant in responses.
             requester_ip: None,
         }
@@ -170,7 +182,6 @@ impl Rpc {
     /// Blocks until a response is received for a given transaction_id.
     /// Times out after the configured self.timeout.
     fn response(&mut self, transaction_id: u16) -> Receiver<Message> {
-        // // TODO: Add timeout here!
         let (response_tx, response_rx) = mpsc::channel();
         self.outstanding_requests.lock().unwrap().insert(
             transaction_id,
@@ -217,7 +228,7 @@ impl Rpc {
 mod test {
     use std::thread;
 
-    use crate::messages::PingResponseArguments;
+    use crate::messages::{FindNodeResponseArguments, PingResponseArguments};
 
     use super::*;
 
@@ -236,7 +247,69 @@ mod test {
     }
 
     #[test]
-    fn test_tick() {
+    fn test_with_readonly() {
+        let mut rpc = Rpc::new().unwrap();
+        assert_eq!(rpc.read_only, false);
+        let request = rpc.request_message(
+            0,
+            RequestSpecific::PingRequest(PingRequestArguments {
+                requester_id: Id::random(),
+            }),
+        );
+        assert_eq!(request.read_only, Some(false));
+
+        let response = rpc.response_message(
+            0,
+            SocketAddr::from(([0, 0, 0, 0], 0)),
+            ResponseSpecific::PingResponse(PingResponseArguments {
+                responder_id: Id::random(),
+            }),
+        );
+        assert_eq!(response.read_only, Some(false));
+
+        let mut rpc = rpc.with_read_only(true);
+        assert_eq!(rpc.read_only, true);
+
+        let request = rpc.request_message(
+            0,
+            RequestSpecific::PingRequest(PingRequestArguments {
+                requester_id: Id::random(),
+            }),
+        );
+        assert_eq!(request.read_only, Some(true));
+
+        let response = rpc.response_message(
+            0,
+            SocketAddr::from(([0, 0, 0, 0], 0)),
+            ResponseSpecific::PingResponse(PingResponseArguments {
+                responder_id: Id::random(),
+            }),
+        );
+        assert_eq!(response.read_only, Some(true));
+    }
+
+    #[test]
+    fn test_request_timeout() {
+        let server = Rpc::new().unwrap();
+        let server_addr = server.server_addr();
+
+        // Start the client.
+        let mut client = Rpc::new().unwrap().with_request_timout(100).unwrap();
+
+        let mut client_clone = client.clone();
+        thread::spawn(move || loop {
+            let _ = client_clone.tick();
+        });
+
+        client.ping(server_addr).unwrap();
+        assert_eq!(client.outstanding_requests.lock().unwrap().len(), 1);
+
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(client.outstanding_requests.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_ping() {
         let server = Rpc::new().unwrap();
 
         let mut server_clone = server.clone();
@@ -277,6 +350,7 @@ mod test {
         let pong2 = client.ping(server_addr).unwrap().recv().unwrap();
 
         assert_eq!(pong.transaction_id, 0);
+        assert_eq!(pong.version, Some(VERSION.into()), "local version 'rs'");
         assert_eq!(
             pong.message_type,
             MessageType::Response(ResponseSpecific::PingResponse(PingResponseArguments {
@@ -296,23 +370,65 @@ mod test {
     }
 
     #[test]
-    fn test_request_timeout() {
+    fn test_find_node() {
         let server = Rpc::new().unwrap();
+
+        let mut server_clone = server.clone();
+        thread::spawn(move || loop {
+            if let Ok(Some((message, from))) = server_clone.tick() {
+                match message.message_type {
+                    MessageType::Request(request_specific) => match request_specific {
+                        RequestSpecific::FindNodeRequest(_) => {
+                            server_clone
+                                .respond(
+                                    message.transaction_id,
+                                    from,
+                                    ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
+                                        responder_id: server_clone.id,
+                                        nodes: vec![],
+                                    }),
+                                )
+                                .unwrap();
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        });
+
         let server_addr = server.server_addr();
 
         // Start the client.
-        let mut client = Rpc::new().unwrap().with_request_timout(100).unwrap();
+        let mut client = Rpc::new().unwrap();
 
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
             let _ = client_clone.tick();
+            // Do nothing ... responses will be sent to the outstanding_requests senders.
         });
 
-        client.ping(server_addr).unwrap();
-        assert_eq!(client.outstanding_requests.lock().unwrap().len(), 1);
+        let find_node_response = client
+            .find_node(server_addr, client.id)
+            .unwrap()
+            .recv()
+            .unwrap();
 
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(client.outstanding_requests.lock().unwrap().len(), 0);
+        assert_eq!(find_node_response.transaction_id, 0);
+        assert_eq!(
+            find_node_response.message_type,
+            MessageType::Response(ResponseSpecific::FindNodeResponse(
+                FindNodeResponseArguments {
+                    responder_id: server.id,
+                    nodes: vec![]
+                }
+            ))
+        );
+        assert_eq!(
+            client.outstanding_requests.lock().unwrap().len(),
+            0,
+            "Outstandng requests should be empty after receiving a response"
+        );
     }
 
     // Live interoperability tests, should be removed before CI.
