@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -14,23 +14,14 @@ use crate::messages::{
 use crate::{Error, Result};
 
 const DEFAULT_PORT: u16 = 6881;
+const DEFAULT_TIMEOUT: u16 = 6881;
 
+#[derive(Debug, Clone)]
 struct Rpc {
     id: Id,
-    socket: UdpSocket,
+    socket: Arc<UdpSocket>,
     next_tid: u16,
-    sender: Sender<ListenerMessage>,
-    /// Hande to the server thread.
-    server_handle: JoinHandle<()>,
-    // Request tid => response message.
-    outstanding_requests: Arc<RwLock<BTreeSet<u16>>>,
-    responses: Arc<RwLock<BTreeMap<u16, Option<Message>>>>,
-}
-
-#[derive(Debug)]
-enum ListenerMessage {
-    Shutdown,
-    RegisterRequest((u16, Sender<Message>)),
+    outstanding_requests: Arc<Mutex<HashMap<u16, Sender<Message>>>>,
 }
 
 impl Rpc {
@@ -45,63 +36,104 @@ impl Rpc {
 
         socket.set_read_timeout(Some(Duration::from_millis(100)))?;
 
-        // Create a channel to wait for the response.
-        let (tx, rx) = mpsc::channel::<ListenerMessage>();
-
-        let cloned_socket = socket.try_clone()?;
-
-        let server_handle = thread::spawn(move || listen(id, cloned_socket, rx));
-
         Ok(Rpc {
             id,
-            socket,
+            socket: socket.into(),
             next_tid: 0,
-            sender: tx,
-            server_handle,
-            outstanding_requests: Arc::new(RwLock::new(BTreeSet::new())),
-            responses: Arc::new(RwLock::new(BTreeMap::new())),
+            outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
+    /// Returns the address the server is listening to.
+    #[inline]
+    pub fn server_addr(&self) -> SocketAddr {
+        self.socket.local_addr().unwrap()
+    }
+
+    /// Increments self.next_tid and returns the previous value.
+    /// Wraps around at u16::max_value();
     fn tid(&mut self) -> u16 {
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
     }
 
+    /// === Responses methods ===
+
+    fn respond(
+        &self,
+        transaction_id: u16,
+        to: SocketAddr,
+        response: ResponseSpecific,
+    ) -> Result<()> {
+        let socket = self.socket.try_clone()?;
+
+        let response = Message {
+            transaction_id,
+            message_type: MessageType::Response(response),
+            // TODO: define our version.
+            version: None,
+            // TODO: configure. if false, we should disable respond or make it noop.
+            read_only: Some(false),
+            // Only relevant in responses.
+            requester_ip: Some(to),
+        };
+
+        let bytes = &response.clone().to_bytes()?;
+        socket.send_to(bytes, to)?;
+
+        Ok(())
+    }
+
+    fn recv_from(&self) -> Result<(Message, SocketAddr)> {
+        let mut buf = [0u8; 1024];
+        let (amt, from) = self.socket.recv_from(&mut buf)?;
+        let mut message = Message::from_bytes(&buf[..amt])?;
+
+        match message.message_type {
+            MessageType::Request(_) => {}
+            // Response or error, send it to the outstanding_request
+            _ => {
+                if let Some(response_tx) = self
+                    .outstanding_requests
+                    .clone()
+                    .lock()
+                    .unwrap()
+                    .remove(&message.transaction_id)
+                {
+                    response_tx.send(message.clone());
+                }
+            }
+        };
+
+        return Ok((message, from));
+    }
+
+    /// === Requests methods ===
+
     /// Create a new request message with the given request specific arguments.
-    fn request_message(&mut self, tid: u16, request: RequestSpecific) -> Message {
+    fn request_message(&mut self, transaction_id: u16, request: RequestSpecific) -> Message {
         Message {
-            transaction_id: tid.to_be_bytes().into(),
+            transaction_id,
             message_type: MessageType::Request(request),
             // TODO: define our version.
             version: None,
-            read_only: None,
+            // TODO: configure
+            read_only: Some(true),
             // Only relevant in responses.
             requester_ip: None,
         }
     }
 
-    fn ping(&mut self, address: SocketAddr) -> Result<Message> {
-        let tid = self.tid();
-        let message = self.request_message(
-            tid,
-            RequestSpecific::PingRequest(PingRequestArguments {
-                requester_id: self.id,
-            }),
-        );
-
-        println!("Sending a request: {:?}", &message);
-
+    /// Blocks until a response is received for a given transaction_id.
+    /// Times out after the configured self.timeout.
+    fn response(&mut self, transaction_id: u16) -> Result<Message> {
+        // // TODO: Add timeout here!
         let (response_tx, response_rx) = mpsc::channel();
-
-        self.sender
-            .send(ListenerMessage::RegisterRequest((tid, response_tx)));
-
-        // Send a message to the server.
-        self.socket.send_to(&message.to_bytes()?, address)?;
-
-        // TODO: Add timeout here!
+        self.outstanding_requests
+            .lock()
+            .unwrap()
+            .insert(transaction_id, response_tx);
         let response = response_rx
             .recv()
             .map_err(|e| Error::Static("Failed to receive response>"))?;
@@ -109,156 +141,33 @@ impl Rpc {
         Ok(response)
     }
 
-    fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Message> {
-        let tid = self.tid();
+    fn ping(&mut self, address: SocketAddr) -> Result<Message> {
+        let transaction_id = self.tid();
         let message = self.request_message(
-            tid,
+            transaction_id,
+            RequestSpecific::PingRequest(PingRequestArguments {
+                requester_id: self.id,
+            }),
+        );
+
+        // Send a message to the server.
+        self.socket.send_to(&message.to_bytes()?, address)?;
+        self.response(transaction_id)
+    }
+
+    fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Message> {
+        let transaction_id = self.tid();
+        let message = self.request_message(
+            transaction_id,
             RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
                 target,
                 requester_id: self.id,
             }),
         );
 
-        println!("Sending a request: {:?}", &message);
-
-        let (response_tx, response_rx) = mpsc::channel();
-
-        self.sender
-            .send(ListenerMessage::RegisterRequest((tid, response_tx)));
-
         // Send a message to the server.
         self.socket.send_to(&message.to_bytes()?, address)?;
-
-        // TODO: Add timeout here!
-        let response = response_rx
-            .recv()
-            .map_err(|e| Error::Static("Failed to receive response>"))?;
-
-        Ok(response)
-    }
-
-    fn shutdown(&self) -> Result<()> {
-        self.sender
-            .send(ListenerMessage::Shutdown)
-            .map_err(|_| Error::Static("Failed to send shutdown message to server thread."))?;
-
-        Ok(())
-    }
-
-    fn block_until_shutdown(self) {
-        self.server_handle.join().unwrap();
-    }
-}
-
-fn listen(id: Id, socket: UdpSocket, rx: Receiver<ListenerMessage>) {
-    // // Buffer to hold incoming data.
-    let mut buf = [0u8; 1024];
-    // TODO: timeout clean requests probably with ListenerMessage::Timeout(tid);
-    let mut requests = BTreeMap::<u16, Sender<Message>>::new();
-    let mut responses = BTreeMap::<u16, Message>::new();
-
-    loop {
-        match rx.try_recv() {
-            Ok(ListenerMessage::Shutdown) => {
-                break;
-            }
-            Ok(ListenerMessage::RegisterRequest((tid, sender))) => {
-                requests.insert(tid, sender);
-            }
-            _ => {}
-        };
-
-        let mut responses_to_remove: Vec<u16> = vec![];
-
-        // Match request/response.
-        for (tid, response) in responses.iter() {
-            match &requests.remove(tid) {
-                Some(request) => {
-                    responses_to_remove.push(*tid);
-                    request.send(response.clone()).unwrap();
-                }
-                None => {}
-            }
-        }
-
-        // Clean responses.
-        responses_to_remove.iter().for_each(|tid| {
-            responses.remove(tid);
-        });
-
-        if let Ok((amt, requester)) = socket.recv_from(&mut buf) {
-            let mut msg = match Message::from_bytes(&buf[..amt]) {
-                Ok(msg) => msg,
-                Err(_) => {
-                    // TODO: tracing
-                    println!("Failed to parse message from {:?}", requester);
-                    continue;
-                }
-            };
-
-            match &msg.message_type {
-                MessageType::Request(request_type) => {
-                    // TODO: check if it is IPV4 or IPV6
-                    // TODO: support IPV6
-                    msg.requester_ip = Some(requester);
-
-                    println!("Received a request: {:?}", &msg);
-
-                    let response = match request_type {
-                        RequestSpecific::PingRequest(ping_request_arguments) => {
-                            Message {
-                                transaction_id: msg.transaction_id.clone(),
-                                requester_ip: Some(requester),
-                                message_type: MessageType::Response(
-                                    ResponseSpecific::PingResponse(PingResponseArguments {
-                                        responder_id: id,
-                                    }),
-                                ),
-                                // TODO: define these variables
-                                version: None,
-                                read_only: None,
-                            }
-                        }
-                        _ => {
-                            // TODO: solve find_node response!
-                            Message {
-                                transaction_id: msg.transaction_id.clone(),
-                                requester_ip: Some(requester),
-                                message_type: MessageType::Response(
-                                    ResponseSpecific::PingResponse(PingResponseArguments {
-                                        responder_id: id,
-                                    }),
-                                ),
-                                // TODO: define these variables
-                                version: None,
-                                read_only: None,
-                            }
-                        }
-                    };
-
-                    socket
-                        .send_to(&response.to_bytes().unwrap(), requester)
-                        .unwrap();
-                }
-                MessageType::Response(message_type) => {
-                    let tid = match msg.transaction_id() {
-                        Ok(tid) => tid,
-                        Err(_) => {
-                            // TODO: tracing
-                            println!("Failed to parse response message transaction_id, expected 2 bytes {:?}", msg);
-                            continue;
-                        }
-                    };
-
-                    println!("Received a response: {:?}", &msg);
-
-                    responses.insert(tid, msg.clone());
-                }
-                MessageType::Error(_) => {
-                    println!("Received an error: {:?}", &msg);
-                }
-            }
-        }
+        self.response(transaction_id)
     }
 }
 
@@ -281,24 +190,68 @@ mod test {
     }
 
     #[test]
-    fn test_ping() {
+    fn test_recv_from() {
         let server = Rpc::new().unwrap();
 
-        let server_addr = server.socket.local_addr().unwrap();
+        let server_clone = server.clone();
+        thread::spawn(move || loop {
+            if let Ok((message, from)) = server_clone.recv_from() {
+                match message.message_type {
+                    MessageType::Request(request_specific) => match request_specific {
+                        RequestSpecific::PingRequest(args) => {
+                            server_clone
+                                .respond(
+                                    message.transaction_id,
+                                    from,
+                                    ResponseSpecific::PingResponse(PingResponseArguments {
+                                        responder_id: server_clone.id,
+                                    }),
+                                )
+                                .unwrap();
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        });
+
+        let server_addr = server.server_addr();
+
         // Start the client.
         let mut client = Rpc::new().unwrap();
-        let a = client.ping(server_addr).unwrap();
-        let b = client.ping(server_addr).unwrap();
-        let c = client.ping(server_addr).unwrap();
 
-        dbg!((a, b, c));
-        // TODO: prove that we gced everything
+        let client_clone = client.clone();
+        thread::spawn(move || loop {
+            client_clone.recv_from();
+            // Do nothing ... responses will be sent to the outstanding_requests senders.
+        });
+
+        let pong = client.ping(server_addr).unwrap();
+        let pong2 = client.ping(server_addr).unwrap();
+
+        assert_eq!(pong.transaction_id, 0);
+        assert_eq!(
+            pong.message_type,
+            MessageType::Response(ResponseSpecific::PingResponse(PingResponseArguments {
+                responder_id: server.id
+            }))
+        );
+        assert_eq!(
+            pong.requester_ip.unwrap().port(),
+            client.server_addr().port()
+        );
+        assert_eq!(pong2.transaction_id, 1);
     }
 
     // Live interoperability tests, should be removed before CI.
     #[test]
     fn test_live_ping() {
         let mut client = Rpc::new().unwrap();
+        let client_clone = client.clone();
+        thread::spawn(move || loop {
+            client_clone.recv_from();
+        });
 
         // TODO: resolve the address from DNS.
         let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
@@ -310,6 +263,10 @@ mod test {
     #[test]
     fn test_live_find_node() {
         let mut client = Rpc::new().unwrap();
+        let client_clone = client.clone();
+        thread::spawn(move || loop {
+            client_clone.recv_from();
+        });
 
         // TODO: resolve the address from DNS.
         let address: SocketAddr = "67.215.246.10:6881".parse().unwrap();
