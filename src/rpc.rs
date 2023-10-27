@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::common::Id;
 use crate::messages::{
@@ -14,18 +14,26 @@ use crate::messages::{
 use crate::{Error, Result};
 
 const DEFAULT_PORT: u16 = 6881;
-const DEFAULT_TIMEOUT: u16 = 6881;
+const DEFAULT_TIMEOUT_MILLIS: u64 = 2000;
 
 #[derive(Debug, Clone)]
 struct Rpc {
     id: Id,
     socket: Arc<UdpSocket>,
     next_tid: u16,
-    outstanding_requests: Arc<Mutex<HashMap<u16, Sender<Message>>>>,
+    request_timeout: Duration,
+    // TODO: Use oneshot instead of mpsc sender?
+    outstanding_requests: Arc<Mutex<HashMap<u16, OutstandingRequest>>>,
+}
+
+#[derive(Debug)]
+struct OutstandingRequest {
+    sent_at: Instant,
+    sender: Sender<Message>,
 }
 
 impl Rpc {
-    fn new() -> Result<Rpc> {
+    pub fn new() -> Result<Rpc> {
         // TODO: One day I might implement BEP42.
         let id = Id::random();
 
@@ -34,14 +42,25 @@ impl Rpc {
             Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
         }?;
 
-        socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+        // TICK interval
+        socket.set_read_timeout(Some(Duration::from_millis(DEFAULT_TIMEOUT_MILLIS / 4)))?;
 
         Ok(Rpc {
             id,
             socket: socket.into(),
             next_tid: 0,
+            request_timeout: Duration::from_millis(DEFAULT_TIMEOUT_MILLIS),
             outstanding_requests: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Sets requests timeout in milliseconds
+    pub fn with_request_timout(mut self, timeout: u64) -> Result<Self> {
+        self.request_timeout = Duration::from_millis(timeout);
+        // TICK interval
+        self.socket
+            .set_read_timeout(Some(Duration::from_millis(timeout / 4)))?;
+        Ok(self)
     }
 
     /// Returns the address the server is listening to.
@@ -50,17 +69,9 @@ impl Rpc {
         self.socket.local_addr().unwrap()
     }
 
-    /// Increments self.next_tid and returns the previous value.
-    /// Wraps around at u16::max_value();
-    fn tid(&mut self) -> u16 {
-        let tid = self.next_tid;
-        self.next_tid = self.next_tid.wrapping_add(1);
-        tid
-    }
-
     /// === Responses methods ===
 
-    fn respond(
+    pub fn respond(
         &self,
         transaction_id: u16,
         to: SocketAddr,
@@ -85,31 +96,63 @@ impl Rpc {
         Ok(())
     }
 
-    fn recv_from(&self) -> Result<(Message, SocketAddr)> {
+    fn try_recv_from(&self) -> Result<Option<(Message, SocketAddr)>> {
         let mut buf = [0u8; 1024];
-        let (amt, from) = self.socket.recv_from(&mut buf)?;
-        let mut message = Message::from_bytes(&buf[..amt])?;
+        match self.socket.recv_from(&mut buf) {
+            Ok((amt, from)) => {
+                let mut message = Message::from_bytes(&buf[..amt])?;
+                Ok(Some((message, from)))
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // No data received within the timeout
+                // println!("No data received");
+                Ok(None)
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
 
-        match message.message_type {
-            MessageType::Request(_) => {}
-            // Response or error, send it to the outstanding_request
-            _ => {
-                if let Some(response_tx) = self
-                    .outstanding_requests
-                    .clone()
-                    .lock()
-                    .unwrap()
-                    .remove(&message.transaction_id)
-                {
-                    response_tx.send(message.clone());
+    /// Performs multiple tasks:
+    /// - Receives a message from the udp socket.
+    /// - Sends responses or errors to outstanding_requests.
+    /// - Cleans up timeout outstanding_requests.
+    ///
+    /// Because it awaits a message from the udp socket for 1/4 of the request timeout, calling
+    /// this in a loop will behave as a tick function with that interval.
+    fn tick(&mut self) -> Result<Option<(Message, SocketAddr)>> {
+        let request = self.try_recv_from()?;
+
+        let mut lock = self.outstanding_requests.lock().unwrap();
+
+        // Send responses or errors to outstanding_requests.
+        if let Some((message, _)) = &request {
+            match message.message_type {
+                MessageType::Request(_) => {}
+                _ => {
+                    if let Some(outstanding_request) = lock.remove(&message.transaction_id) {
+                        outstanding_request.sender.send(message.clone());
+                    }
                 }
             }
-        };
+        }
 
-        return Ok((message, from));
+        // Use the locked reference to iterate and remove timed-out requests
+        lock.retain(|_, outstanding_request| {
+            outstanding_request.sent_at.elapsed() <= self.request_timeout
+        });
+
+        Ok(request)
     }
 
     /// === Requests methods ===
+
+    /// Increments self.next_tid and returns the previous value.
+    /// Wraps around at u16::max_value();
+    fn tid(&mut self) -> u16 {
+        let tid = self.next_tid;
+        self.next_tid = self.next_tid.wrapping_add(1);
+        tid
+    }
 
     /// Create a new request message with the given request specific arguments.
     fn request_message(&mut self, transaction_id: u16, request: RequestSpecific) -> Message {
@@ -127,21 +170,21 @@ impl Rpc {
 
     /// Blocks until a response is received for a given transaction_id.
     /// Times out after the configured self.timeout.
-    fn response(&mut self, transaction_id: u16) -> Result<Message> {
+    fn response(&mut self, transaction_id: u16) -> Receiver<Message> {
         // // TODO: Add timeout here!
         let (response_tx, response_rx) = mpsc::channel();
-        self.outstanding_requests
-            .lock()
-            .unwrap()
-            .insert(transaction_id, response_tx);
-        let response = response_rx
-            .recv()
-            .map_err(|e| Error::Static("Failed to receive response>"))?;
+        self.outstanding_requests.lock().unwrap().insert(
+            transaction_id,
+            OutstandingRequest {
+                sent_at: Instant::now(),
+                sender: response_tx,
+            },
+        );
 
-        Ok(response)
+        response_rx
     }
 
-    fn ping(&mut self, address: SocketAddr) -> Result<Message> {
+    fn ping(&mut self, address: SocketAddr) -> Result<Receiver<Message>> {
         let transaction_id = self.tid();
         let message = self.request_message(
             transaction_id,
@@ -152,10 +195,10 @@ impl Rpc {
 
         // Send a message to the server.
         self.socket.send_to(&message.to_bytes()?, address)?;
-        self.response(transaction_id)
+        Ok(self.response(transaction_id))
     }
 
-    fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Message> {
+    fn find_node(&mut self, address: SocketAddr, target: Id) -> Result<Receiver<Message>> {
         let transaction_id = self.tid();
         let message = self.request_message(
             transaction_id,
@@ -167,7 +210,7 @@ impl Rpc {
 
         // Send a message to the server.
         self.socket.send_to(&message.to_bytes()?, address)?;
-        self.response(transaction_id)
+        Ok(self.response(transaction_id))
     }
 }
 
@@ -190,12 +233,12 @@ mod test {
     }
 
     #[test]
-    fn test_recv_from() {
+    fn test_tick() {
         let server = Rpc::new().unwrap();
 
-        let server_clone = server.clone();
+        let mut server_clone = server.clone();
         thread::spawn(move || loop {
-            if let Ok((message, from)) = server_clone.recv_from() {
+            if let Ok(Some((message, from))) = server_clone.tick() {
                 match message.message_type {
                     MessageType::Request(request_specific) => match request_specific {
                         RequestSpecific::PingRequest(args) => {
@@ -221,14 +264,14 @@ mod test {
         // Start the client.
         let mut client = Rpc::new().unwrap();
 
-        let client_clone = client.clone();
+        let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.recv_from();
+            client_clone.tick();
             // Do nothing ... responses will be sent to the outstanding_requests senders.
         });
 
-        let pong = client.ping(server_addr).unwrap();
-        let pong2 = client.ping(server_addr).unwrap();
+        let pong = client.ping(server_addr).unwrap().recv().unwrap();
+        let pong2 = client.ping(server_addr).unwrap().recv().unwrap();
 
         assert_eq!(pong.transaction_id, 0);
         assert_eq!(
@@ -242,15 +285,40 @@ mod test {
             client.server_addr().port()
         );
         assert_eq!(pong2.transaction_id, 1);
+        assert_eq!(
+            client.outstanding_requests.lock().unwrap().len(),
+            0,
+            "Outstandng requests should be empty after receiving a response"
+        );
+    }
+
+    #[test]
+    fn test_request_timeout() {
+        let server = Rpc::new().unwrap();
+        let server_addr = server.server_addr();
+
+        // Start the client.
+        let mut client = Rpc::new().unwrap().with_request_timout(100).unwrap();
+
+        let mut client_clone = client.clone();
+        thread::spawn(move || loop {
+            client_clone.tick();
+        });
+
+        client.ping(server_addr).unwrap();
+        assert_eq!(client.outstanding_requests.lock().unwrap().len(), 1);
+
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(client.outstanding_requests.lock().unwrap().len(), 0);
     }
 
     // Live interoperability tests, should be removed before CI.
     #[test]
     fn test_live_ping() {
         let mut client = Rpc::new().unwrap();
-        let client_clone = client.clone();
+        let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.recv_from();
+            client_clone.tick();
         });
 
         // TODO: resolve the address from DNS.
@@ -263,9 +331,9 @@ mod test {
     #[test]
     fn test_live_find_node() {
         let mut client = Rpc::new().unwrap();
-        let client_clone = client.clone();
+        let mut client_clone = client.clone();
         thread::spawn(move || loop {
-            client_clone.recv_from();
+            client_clone.tick();
         });
 
         // TODO: resolve the address from DNS.
