@@ -137,24 +137,32 @@ impl Rpc {
 
         let mut lock = self.outstanding_requests.lock().unwrap();
 
-        // Send responses or errors to outstanding_requests.
-        if let Some((message, _)) = &request {
+        if let Some((message, from)) = request {
             match message.message_type {
-                MessageType::Request(_) => {}
+                // Requests
+                MessageType::Request(_) => {
+                    // Return requests to be handled by the caller, if the RPC is not read_only.
+                    if (self.read_only) {
+                        return Ok(None);
+                    };
+                    return Ok(Some((message, from)));
+                }
+                // Responses and errors
                 _ => {
+                    // Send responses or errors to outstanding_requests.
                     if let Some(outstanding_request) = lock.remove(&message.transaction_id) {
                         let _ = outstanding_request.sender.send(message.clone());
-                    }
+                    };
                 }
             }
-        }
+        };
 
         // Use the locked reference to iterate and remove timed-out requests
         lock.retain(|_, outstanding_request| {
             outstanding_request.sent_at.elapsed() <= self.request_timeout
         });
 
-        Ok(request)
+        Ok(None)
     }
 
     /// === Requests methods ===
@@ -289,9 +297,16 @@ mod test {
     }
 
     #[test]
-    fn test_request_timeout() {
-        let server = Rpc::new().unwrap();
+    fn test_tick() {
+        let server = Rpc::new().unwrap().with_read_only(true);
+
         let server_addr = server.server_addr();
+
+        let mut server_clone = server.clone();
+        thread::spawn(move || loop {
+            let incoming = server_clone.tick().unwrap();
+            assert_eq!(incoming, None, "read_only server does not receive requests")
+        });
 
         // Start the client.
         let mut client = Rpc::new().unwrap().with_request_timout(100).unwrap();
@@ -300,6 +315,15 @@ mod test {
         thread::spawn(move || loop {
             let _ = client_clone.tick();
         });
+
+        // Test that tick does not return responses;
+        client.respond(
+            0,
+            server_addr,
+            ResponseSpecific::PingResponse(PingResponseArguments {
+                responder_id: client.id,
+            }),
+        );
 
         client.ping(server_addr).unwrap();
         assert_eq!(client.outstanding_requests.lock().unwrap().len(), 1);
@@ -343,7 +367,6 @@ mod test {
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
             let _ = client_clone.tick();
-            // Do nothing ... responses will be sent to the outstanding_requests senders.
         });
 
         let pong = client.ping(server_addr).unwrap().recv().unwrap();
@@ -405,7 +428,6 @@ mod test {
         let mut client_clone = client.clone();
         thread::spawn(move || loop {
             let _ = client_clone.tick();
-            // Do nothing ... responses will be sent to the outstanding_requests senders.
         });
 
         let find_node_response = client
