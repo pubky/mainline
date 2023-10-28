@@ -247,13 +247,13 @@ impl Message {
 
 // Return the transaction Id as a u16
 pub fn transaction_id(bytes: Vec<u8>) -> Result<u16> {
-    if bytes.len() > 2 {
-        return Err(Error::InvalidTransactionId(bytes));
+    if bytes.len() == 2 {
+        return Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16));
     } else if bytes.len() == 1 {
         return Ok(bytes[0] as u16);
     }
 
-    Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16))
+    Err(Error::InvalidTransactionId(bytes))
 }
 
 fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr> {
@@ -344,6 +344,7 @@ mod tests {
     fn test_transaction_id() {
         assert_eq!(transaction_id(vec![255]).unwrap(), 255);
         assert_eq!(transaction_id(vec![1, 2]).unwrap(), 258);
+        assert!(transaction_id(vec![]).is_err());
     }
 
     #[test]
