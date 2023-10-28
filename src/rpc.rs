@@ -57,6 +57,7 @@ impl Rpc {
             Ok(socket) => Ok(socket),
             Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
         }?;
+        socket.set_nonblocking(true)?;
 
         Ok(Rpc {
             id,
@@ -127,9 +128,6 @@ impl Rpc {
     }
 
     fn try_recv_from(&self) -> Result<Option<(Message, SocketAddr)>> {
-        self.socket
-            .set_read_timeout(Some(Duration::from_millis(1)))?;
-
         let mut buf = [0u8; MTU];
         match self.socket.recv_from(&mut buf) {
             Ok((amt, from)) => {
