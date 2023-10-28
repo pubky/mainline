@@ -16,6 +16,7 @@ use crate::Result;
 const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_TIMEOUT_MILLIS: u64 = 2000;
 const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
+const MTU: usize = 2048;
 
 #[derive(Debug)]
 pub struct Rpc {
@@ -56,9 +57,6 @@ impl Rpc {
             Ok(socket) => Ok(socket),
             Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
         }?;
-
-        // TICK interval
-        socket.set_read_timeout(Some(Duration::from_millis(DEFAULT_TIMEOUT_MILLIS / 4)))?;
 
         Ok(Rpc {
             id,
@@ -129,17 +127,19 @@ impl Rpc {
     }
 
     fn try_recv_from(&self) -> Result<Option<(Message, SocketAddr)>> {
-        let mut buf = [0u8; 1024];
+        self.socket
+            .set_read_timeout(Some(Duration::from_millis(1)))?;
+
+        let mut buf = [0u8; MTU];
         match self.socket.recv_from(&mut buf) {
             Ok((amt, from)) => {
                 let message = Message::from_bytes(&buf[..amt])?;
                 Ok(Some((message, from)))
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // No data received within the timeout
-                // println!("No data received");
-                Ok(None)
-            }
+            // Windows
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(None),
+            // Unix
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
@@ -148,6 +148,7 @@ impl Rpc {
     /// - Receives a message from the udp socket.
     /// - Sends responses or errors to outstanding_requests.
     /// - Cleans up timeout outstanding_requests.
+    /// - Returns the incoming message and the sender address.
     ///
     /// Because it awaits a message from the udp socket for 1/4 of the request timeout, calling
     /// this in a loop will behave as a tick function with that interval.
@@ -156,7 +157,7 @@ impl Rpc {
 
         let mut lock = self.outstanding_requests.lock().unwrap();
 
-        if let Some((message, from)) = request {
+        if let Some((message, _)) = &request {
             match message.message_type {
                 // Requests
                 MessageType::Request(_) => {
@@ -164,12 +165,9 @@ impl Rpc {
                     if self.read_only {
                         return Ok(None);
                     };
-                    return Ok(Some((message, from)));
                 }
                 // Responses and errors
                 _ => {
-                    // TODO: emit responses and errors to the caller ... sorry.
-                    println!("Received response or error: from({}) {:?}\n", from, message);
                     // Send responses or errors to outstanding_requests.
                     if let Some(outstanding_request) = lock.remove(&message.transaction_id) {
                         let _ = outstanding_request.sender.send(message.clone());
@@ -183,7 +181,7 @@ impl Rpc {
             outstanding_request.sent_at.elapsed() <= self.request_timeout
         });
 
-        Ok(None)
+        Ok(request)
     }
 
     /// === Requests methods ===
@@ -326,30 +324,24 @@ mod test {
     }
 
     #[test]
+    fn test_try_recv() {
+        let server = Rpc::new().unwrap().with_request_timout(100000000).unwrap();
+        server.try_recv_from().unwrap();
+        // Does not block.
+    }
+
+    #[test]
     fn test_tick() {
         let server = Rpc::new().unwrap().with_read_only(true);
 
         let server_addr = server.server_addr();
 
-        let mut server_clone = server.clone();
-        thread::spawn(move || loop {
-            let incoming = server_clone.tick().unwrap();
-            assert_eq!(incoming, None, "read_only server does not receive requests")
-        });
+        server.clone().run();
 
         // Start the client.
         let mut client = Rpc::new().unwrap().with_request_timout(100).unwrap();
 
         client.clone().run();
-
-        // Test that tick does not return responses;
-        client.respond(
-            0,
-            server_addr,
-            ResponseSpecific::PingResponse(PingResponseArguments {
-                responder_id: client.id,
-            }),
-        );
 
         client.ping(server_addr).unwrap();
         assert_eq!(client.outstanding_requests.lock().unwrap().len(), 1);
