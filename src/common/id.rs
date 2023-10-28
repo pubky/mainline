@@ -70,3 +70,55 @@ impl Debug for Id {
         write!(f, "Id({})", hex_string)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn distance_to_self() {
+        let id = Id::random();
+        let distance = id.distance(&id);
+        assert_eq!(distance, 0)
+    }
+
+    #[test]
+    fn distance_to_id() {
+        let id = Id([
+            6, 57, 161, 226, 79, 187, 138, 178, 119, 223, 3, 52, 118, 171, 13, 225, 15, 171, 59,
+            220,
+        ]);
+        let target = Id([
+            3, 91, 26, 235, 151, 55, 173, 225, 168, 9, 51, 89, 79, 64, 93, 63, 119, 42, 160, 142,
+        ]);
+
+        let distance = id.distance(&target);
+
+        assert_eq!(distance, 155)
+    }
+
+    #[test]
+    fn distance_to_random_id() {
+        let id = Id::random();
+        let target = Id::random();
+
+        let distance = id.distance(&target);
+
+        assert_ne!(distance, 0)
+    }
+
+    #[test]
+    fn distance_to_furthest() {
+        let id = Id::random();
+
+        let mut opposite = [0_u8; 20];
+        for (i, &value) in id.0.iter().enumerate() {
+            opposite[i] = value ^ 0xff;
+        }
+        let target = Id(opposite);
+
+        let distance = id.distance(&target);
+
+        assert_eq!(distance, MAX_DISTANCE)
+    }
+}
