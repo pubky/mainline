@@ -11,6 +11,7 @@ mod messages;
 /// Kademlia routing table to keep track of local view of the Mainline network.
 mod routing_table;
 mod rpc;
+mod socket;
 
 // Re-exports
 pub use crate::error::Error;
