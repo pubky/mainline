@@ -24,6 +24,8 @@ pub struct KrpcSocket {
     inflight_requests: Arc<Mutex<HashMap<u16, InflightRequest>>>,
 }
 
+/// A registered Sender for an inflight request waiting for a response or be removed after a
+/// timeout period since the `sent_at` Instant.
 #[derive(Debug)]
 struct InflightRequest {
     sent_at: Instant,
@@ -59,6 +61,8 @@ impl KrpcSocket {
         })
     }
 
+    // === OPTIONS ===
+
     /// Set read-only mode
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
@@ -77,15 +81,29 @@ impl KrpcSocket {
         self.socket.local_addr().unwrap()
     }
 
+    // === Public Methods ===
+
     /// Send a request to the given address and return a receiver for the response.
-    pub fn request(
-        &mut self,
-        address: SocketAddr,
-        request: &RequestSpecific,
-    ) -> Result<Receiver<Message>> {
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let mut client = KrpcSocket::new().unwrap();
+    ///
+    /// let clone = client.clone();
+    /// thread::spawn(move || loop {
+    ///     clone.recv_from();
+    /// })
+    ///
+    /// let response = client.request(server_addr, &request)
+    ///                     .recv()
+    ///                     .expect("timeout");
+    /// ```
+    pub fn request(&mut self, address: SocketAddr, request: &RequestSpecific) -> Receiver<Message> {
         let message = self.wrap_message(MessageType::Request(request.clone()), None);
 
         let (response_tx, response_rx) = mpsc::channel();
+
         self.inflight_requests.lock().unwrap().insert(
             message.transaction_id,
             InflightRequest {
@@ -96,7 +114,7 @@ impl KrpcSocket {
 
         self.send(address, message);
 
-        Ok(response_rx)
+        response_rx
     }
 
     /// Send a response to the given address.
@@ -111,60 +129,74 @@ impl KrpcSocket {
         self.send(address, message)
     }
 
-    /// Process incoming messages and manage outstanding requests.
+    /// Receives a single krpc message on the socket. On success, returns the dht message
+    /// and the origin.
     ///
-    /// This method performs the following tasks:
-    /// 1. Tries to receive a message from the UDP socket.
-    /// 2. If the message is a response, sends it to the corresponding inflight request.
-    /// 3. Cleans up timed-out inflight requests.
-    /// 4. Returns the incoming message and its sender(requester/responder) address.
-    pub fn tick(&mut self) -> Result<Option<(Message, SocketAddr)>> {
-        let request = self.try_recv_from()?;
+    /// Additionally it performs the followind tasks:
+    /// 1. Sends incoming response or error to the corresponding inflight request.
+    /// 2. Removes the inflight request that received a response or error.
+    /// 3. Claens up timed-out inflight requests.
+    ///
+    /// This for tht reason, this method should be called in a loop in a separate thread,
+    /// to process incoming messages and clean up inflight requests.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use mainline::socket::KrpcSocket;
+    ///
+    /// let socket = KrpcSocket.new().unwrap();
+    ///
+    /// let clone = socket.clone()
+    /// thread::spawn(move || loop {
+    ///     if let Some(message, src_addr) = clone.recv_from() {
+    ///         // Handle incoming message
+    ///     }
+    /// })
+    /// ```
+    pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
+        let mut buf = [0u8; MTU];
 
         let mut lock = self.inflight_requests.lock().unwrap();
 
-        if let Some((message, _)) = &request {
-            match message.message_type {
-                // Requests
-                MessageType::Request(_) => {
-                    // Return requests to be handled by the caller, if the RPC is not read_only.
-                    if self.read_only {
-                        return Ok(None);
-                    };
+        if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
+            match Message::from_bytes(&buf[..amt]) {
+                Ok(message) => {
+                    match message.message_type {
+                        // Requests
+                        MessageType::Request(_) => {
+                            // Return requests to be handled by the caller,
+                            // if the RPC is not read_only.
+                            if self.read_only {
+                                return None;
+                            };
+                        }
+                        // Responses and errors
+                        _ => {
+                            // Send responses or errors to inflight_requests.
+                            if let Some(inflight_request) = lock.remove(&message.transaction_id) {
+                                let _ = inflight_request.sender.send(message.clone());
+                            };
+                        }
+                    }
+
+                    return Some((message, from));
                 }
-                // Responses and errors
-                _ => {
-                    // Send responses or errors to outstanding_requests.
-                    if let Some(outstanding_request) = lock.remove(&message.transaction_id) {
-                        let _ = outstanding_request.sender.send(message.clone());
-                    };
+                Err(err) => {
+                    println!("Error parsing incoming message from {:?}: {:?}", from, err);
                 }
-            }
+            };
         };
 
-        // Use the locked reference to iterate and remove timed-out requests
-        lock.retain(|_, outstanding_request| {
-            outstanding_request.sent_at.elapsed() <= self.request_timeout
+        // Clean up timed out requests.
+        lock.retain(|_, inflight_request| {
+            inflight_request.sent_at.elapsed() <= self.request_timeout
         });
 
-        Ok(request)
+        None
     }
 
-    /// Try to receive a message from the socket.
-    fn try_recv_from(&self) -> Result<Option<(Message, SocketAddr)>> {
-        let mut buf = [0u8; MTU];
-        match self.socket.recv_from(&mut buf) {
-            Ok((amt, from)) => {
-                let message = Message::from_bytes(&buf[..amt])?;
-                Ok(Some((message, from)))
-            }
-            // Windows
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(None),
-            // Unix
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
+    // === Private Methods ===
 
     /// Increments self.next_tid and returns the previous value.
     fn tid(&mut self) -> u16 {
@@ -190,13 +222,6 @@ impl KrpcSocket {
     fn send(&mut self, address: SocketAddr, message: Message) -> Result<()> {
         self.socket.send_to(&message.to_bytes()?, address)?;
         Ok(())
-    }
-
-    /// Helper function to spawn a background thread
-    fn run(mut self) -> thread::JoinHandle<()> {
-        thread::spawn(move || loop {
-            self.tick();
-        })
     }
 }
 
@@ -259,7 +284,7 @@ mod test {
 
         let mut server_clone = server.clone();
         thread::spawn(move || loop {
-            if let Ok(Some((message, from))) = server_clone.tick() {
+            if let Some((message, from)) = server_clone.recv_from() {
                 match message.message_type {
                     MessageType::Request(request_specific) => match request_specific {
                         RequestSpecific::PingRequest(_) => match message.transaction_id {
@@ -294,17 +319,16 @@ mod test {
         // Start the client.
         let mut client = KrpcSocket::new().unwrap();
 
-        client.clone().run();
+        let mut clone = client.clone();
+        thread::spawn(move || loop {
+            clone.recv_from();
+        });
 
         let request = RequestSpecific::PingRequest(PingRequestArguments {
             requester_id: Id::random(),
         });
 
-        let response = client
-            .request(server_addr, &request)
-            .unwrap()
-            .recv()
-            .unwrap();
+        let response = client.request(server_addr, &request).recv().unwrap();
 
         assert_eq!(
             response.requester_ip.unwrap().port(),
@@ -319,11 +343,7 @@ mod test {
             }))
         );
 
-        let error = client
-            .request(server_addr, &request)
-            .unwrap()
-            .recv()
-            .unwrap();
+        let error = client.request(server_addr, &request).recv().unwrap();
 
         assert_eq!(error.transaction_id, 1);
         assert_eq!(error.version, Some(VERSION.into()), "local version 'rs'");
@@ -340,5 +360,26 @@ mod test {
             0,
             "Outstandng requests should be empty after receiving a response"
         );
+    }
+
+    #[test]
+    fn timeout() {
+        let server = KrpcSocket::new().unwrap();
+        let server_addr = server.local_addr();
+
+        let mut client = KrpcSocket::new().unwrap().with_request_timeout(10);
+
+        let mut clone = client.clone();
+        thread::spawn(move || loop {
+            clone.recv_from();
+        });
+
+        let request = RequestSpecific::PingRequest(PingRequestArguments {
+            requester_id: Id::random(),
+        });
+
+        let response = client.request(server_addr, &request).recv();
+
+        assert!(response.is_err(), "timeout")
     }
 }

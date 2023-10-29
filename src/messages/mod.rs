@@ -1,4 +1,6 @@
-//! Copied from https://github.com/raptorswing/rustydht-lib/blob/main/src/packets/public.rs
+//! Serealize and decerealize Krpc messages.
+
+// Copied from <https://github.com/raptorswing/rustydht-lib/blob/main/src/packets/public.rs>
 
 mod internal;
 
