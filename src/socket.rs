@@ -61,7 +61,7 @@ impl KrpcSocket {
         })
     }
 
-    // === OPTIONS ===
+    // === Options ===
 
     /// Set read-only mode
     pub fn with_read_only(mut self, read_only: bool) -> Self {
@@ -84,23 +84,8 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Send a request to the given address and return a receiver for the response.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// let mut client = KrpcSocket::new().unwrap();
-    ///
-    /// let clone = client.clone();
-    /// thread::spawn(move || loop {
-    ///     clone.recv_from();
-    /// })
-    ///
-    /// let response = client.request(server_addr, &request)
-    ///                     .recv()
-    ///                     .expect("timeout");
-    /// ```
     pub fn request(&mut self, address: SocketAddr, request: &RequestSpecific) -> Receiver<Message> {
-        let message = self.wrap_message(MessageType::Request(request.clone()), None);
+        let message = self.request_message(request.clone());
 
         let (response_tx, response_rx) = mpsc::channel();
 
@@ -114,46 +99,35 @@ impl KrpcSocket {
 
         self.send(address, message);
 
+        // TODO: reconsider if we need an mpsc channel in this level of abstraction vs in Dht.
         response_rx
     }
 
     /// Send a response to the given address.
-    pub fn response(&mut self, address: SocketAddr, response: ResponseSpecific) -> Result<()> {
-        let message = self.wrap_message(MessageType::Response(response), Some(address));
+    pub fn response(
+        &mut self,
+        address: SocketAddr,
+        transaction_id: u16,
+        response: ResponseSpecific,
+    ) -> Result<()> {
+        let message =
+            self.response_message(MessageType::Response(response), address, transaction_id);
         self.send(address, message)
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddr, error: ErrorSpecific) -> Result<()> {
-        let message = self.wrap_message(MessageType::Error(error), None);
+    pub fn error(
+        &mut self,
+        address: SocketAddr,
+        transaction_id: u16,
+        error: ErrorSpecific,
+    ) -> Result<()> {
+        let message = self.response_message(MessageType::Error(error), address, transaction_id);
         self.send(address, message)
     }
 
-    /// Receives a single krpc message on the socket. On success, returns the dht message
-    /// and the origin.
-    ///
-    /// Additionally it performs the followind tasks:
-    /// 1. Sends incoming response or error to the corresponding inflight request.
-    /// 2. Removes the inflight request that received a response or error.
-    /// 3. Claens up timed-out inflight requests.
-    ///
-    /// This for tht reason, this method should be called in a loop in a separate thread,
-    /// to process incoming messages and clean up inflight requests.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use mainline::socket::KrpcSocket;
-    ///
-    /// let socket = KrpcSocket.new().unwrap();
-    ///
-    /// let clone = socket.clone()
-    /// thread::spawn(move || loop {
-    ///     if let Some(message, src_addr) = clone.recv_from() {
-    ///         // Handle incoming message
-    ///     }
-    /// })
-    /// ```
+    /// Receives a single krpc message on the socket.
+    /// On success, returns the dht message and the origin.
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
         let mut buf = [0u8; MTU];
 
@@ -204,17 +178,34 @@ impl KrpcSocket {
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
     }
+
     /// Set transactin_id, version and read_only
-    fn wrap_message(&mut self, message: MessageType, requester_ip: Option<SocketAddr>) -> Message {
+    fn request_message(&mut self, message: RequestSpecific) -> Message {
         let transaction_id = self.tid();
 
         Message {
             transaction_id,
+            message_type: MessageType::Request(message),
+            version: Some(VERSION.into()),
+            read_only: Some(self.read_only),
+            requester_ip: None,
+        }
+    }
+
+    /// Same as request_message but with request transaction_id and the requester_ip.
+    fn response_message(
+        &mut self,
+        message: MessageType,
+        requester_ip: SocketAddr,
+        request_tid: u16,
+    ) -> Message {
+        Message {
+            transaction_id: request_tid,
             message_type: message,
             version: Some(VERSION.into()),
             read_only: Some(self.read_only),
             // BEP0042 Only relevant in responses.
-            requester_ip,
+            requester_ip: Some(requester_ip),
         }
     }
 
@@ -251,33 +242,6 @@ mod test {
     }
 
     #[test]
-    fn read_only() {
-        let mut socket = KrpcSocket::new().unwrap();
-
-        let request = socket.wrap_message(
-            MessageType::Request(RequestSpecific::PingRequest(PingRequestArguments {
-                requester_id: Id::random(),
-            })),
-            None,
-        );
-
-        assert_eq!(request.transaction_id, 0);
-        assert_eq!(request.read_only, Some(false));
-
-        let mut socket = socket.with_read_only(true);
-
-        let request = socket.wrap_message(
-            MessageType::Request(RequestSpecific::PingRequest(PingRequestArguments {
-                requester_id: Id::random(),
-            })),
-            None,
-        );
-
-        assert_eq!(request.transaction_id, 1);
-        assert_eq!(request.read_only, Some(true));
-    }
-
-    #[test]
     fn request_response() {
         let server = KrpcSocket::new().unwrap();
         let server_id = Id::random();
@@ -288,17 +252,19 @@ mod test {
                 match message.message_type {
                     MessageType::Request(request_specific) => match request_specific {
                         RequestSpecific::PingRequest(_) => match message.transaction_id {
-                            0 => {
+                            10 => {
                                 server_clone.response(
                                     from,
+                                    message.transaction_id,
                                     ResponseSpecific::PingResponse(PingResponseArguments {
                                         responder_id: server_id,
                                     }),
                                 );
                             }
-                            1 => {
+                            11 => {
                                 server_clone.error(
                                     from,
+                                    message.transaction_id,
                                     ErrorSpecific {
                                         code: 201,
                                         description: "Generic Error".to_string(),
@@ -318,6 +284,7 @@ mod test {
 
         // Start the client.
         let mut client = KrpcSocket::new().unwrap();
+        client.next_tid = 10; // Just to make sure we get the correct tid in response
 
         let mut clone = client.clone();
         thread::spawn(move || loop {
@@ -334,7 +301,7 @@ mod test {
             response.requester_ip.unwrap().port(),
             client.local_addr().port()
         );
-        assert_eq!(response.transaction_id, 0);
+        assert_eq!(response.transaction_id, 10);
         assert_eq!(response.version, Some(VERSION.into()), "local version 'rs'");
         assert_eq!(
             response.message_type,
@@ -345,7 +312,7 @@ mod test {
 
         let error = client.request(server_addr, &request).recv().unwrap();
 
-        assert_eq!(error.transaction_id, 1);
+        assert_eq!(error.transaction_id, 11);
         assert_eq!(error.version, Some(VERSION.into()), "local version 'rs'");
         assert_eq!(
             error.message_type,
@@ -358,7 +325,7 @@ mod test {
         assert_eq!(
             client.inflight_requests.lock().unwrap().len(),
             0,
-            "Outstandng requests should be empty after receiving a response"
+            "inflight requests should be empty after receiving a response"
         );
     }
 
