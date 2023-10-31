@@ -1,102 +1,79 @@
-//! Kademlia routing table based on the simplifications described [here](https://web.archive.org/web/20191122230423/https://github.com/ethereum/wiki/wiki/Kademlia-Peer-Selection)
+//! Simplified Kademlia routing table
 
+use std::collections::btree_map::Values;
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
-use std::sync::{Arc, Mutex};
+use std::iter::Take;
+use std::slice::Iter;
+use std::time::Instant;
 
 use crate::common::{Id, Node, MAX_DISTANCE};
+use crate::kbucket::KBucket;
 
-/// The capacity of each row in the routing table.
-const K: usize = 20;
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RoutingTable {
-    rows: Arc<Mutex<BTreeMap<u8, Row>>>,
     id: Id,
-}
-
-struct Row {
-    nodes: Vec<Node>,
-}
-
-impl Row {
-    fn new() -> Self {
-        Row {
-            nodes: Vec::with_capacity(K),
-        }
-    }
-
-    fn add(&mut self, node: Node) -> bool {
-        if self.nodes.len() < K {
-            // TODO: revisit the ordering of this row!
-            let index = match self.nodes.binary_search_by(|a| a.id.cmp(&node.id)) {
-                Ok(existing_index) => existing_index,
-                Err(insertion_index) => insertion_index,
-            };
-
-            self.nodes.insert(index, node);
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl Debug for Row {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Row{{ nodes: {} }}", &self.nodes.len())
-    }
+    pub buckets: BTreeMap<u8, KBucket>,
+    /// Keep track of the last time this bucket or any of its nodes were updated.
+    last_updated: Instant,
 }
 
 impl RoutingTable {
     pub fn new() -> Self {
-        let rows = BTreeMap::new();
+        let buckets = BTreeMap::new();
 
         RoutingTable {
-            rows: Mutex::new(rows).into(),
             id: Id::random(),
+            buckets,
+            last_updated: Instant::now(),
         }
     }
+
+    // === Options ===
 
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
         self
     }
 
+    // === Public Methods ===
+
     pub fn add(&mut self, node: Node) -> bool {
         // TODO: Verify the type of ip v4 or v6?
 
         let distance = self.id.distance(&node.id);
 
-        let mut lock = self.rows.lock().unwrap();
-        let row = lock.get_mut(&distance);
-
-        if row.is_none() {
-            let row = Row::new();
-            lock.insert(distance, row);
+        if distance == 0 {
+            // Do not add self to the routing_table
+            return false;
         }
 
-        let row = lock.get_mut(&distance).unwrap();
+        let bucket = self.buckets.get_mut(&distance);
 
-        row.add(node)
+        if bucket.is_none() {
+            let bucket = KBucket::new();
+            self.buckets.insert(distance, bucket);
+        }
+
+        let bucket = self.buckets.get_mut(&distance).unwrap();
+
+        bucket.add(node)
     }
 
     pub fn closest(&self, target: &Id) -> Vec<Node> {
-        let mut result = Vec::with_capacity(K);
+        let mut result = Vec::with_capacity(20);
         let distance = self.id.distance(target);
-
-        let lock = self.rows.lock().unwrap();
 
         for i in
             // First search in closest nodes
             (distance..=MAX_DISTANCE)
-                // if we don't have enough close nodes, populate from other rows
+                // if we don't have enough close nodes, populate from other buckets
                 .chain((0..distance).rev())
         {
-            match &lock.get(&i) {
-                Some(row) => {
-                    for node in row.nodes.iter() {
-                        if result.len() < K {
+            match &self.buckets.get(&i) {
+                Some(bucket) => {
+                    for node in bucket.iter() {
+                        if result.len() < 20 {
                             // TODO: Do we need to keep full nodes in the table? can't we just keep track of the ids and keep
                             // nodes somewhere else that doesn't cross threads, or at least keep this pure?
                             result.push(node.clone());
@@ -111,6 +88,10 @@ impl RoutingTable {
 
         result
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.buckets.values().all(|bucket| bucket.is_empty())
+    }
 }
 
 impl Default for RoutingTable {
@@ -121,59 +102,36 @@ impl Default for RoutingTable {
 
 #[cfg(test)]
 mod test {
+    use std::convert::TryInto;
     use std::net::SocketAddr;
 
     use crate::{
         common::{Id, Node},
-        routing_table::RoutingTable,
-        routing_table::MAX_DISTANCE,
+        routing_table::{KBucket, RoutingTable},
     };
 
     #[test]
-    fn distance_to_self() {
-        let id = Id::random();
-        let distance = id.distance(&id);
-        assert_eq!(distance, 0)
+    fn table_is_empty() {
+        let mut table = RoutingTable::new();
+        assert_eq!(table.is_empty(), true);
+
+        table.add(Node {
+            id: Id::random(),
+            address: SocketAddr::from(([0, 0, 0, 0], 0)),
+        });
+        assert_eq!(table.is_empty(), false);
     }
 
     #[test]
-    fn distance_to_id() {
-        let id = Id([
-            6, 57, 161, 226, 79, 187, 138, 178, 119, 223, 3, 52, 118, 171, 13, 225, 15, 171, 59,
-            220,
-        ]);
-        let target = Id([
-            3, 91, 26, 235, 151, 55, 173, 225, 168, 9, 51, 89, 79, 64, 93, 63, 119, 42, 160, 142,
-        ]);
+    fn should_not_add_self() {
+        let mut table = RoutingTable::new();
+        let node = Node {
+            id: table.id,
+            address: SocketAddr::from(([0, 0, 0, 0], 0)),
+        };
 
-        let distance = id.distance(&target);
-
-        assert_eq!(distance, 155)
-    }
-
-    #[test]
-    fn distance_to_random_id() {
-        let id = Id::random();
-        let target = Id::random();
-
-        let distance = id.distance(&target);
-
-        assert_ne!(distance, 0)
-    }
-
-    #[test]
-    fn distance_to_furthest() {
-        let id = Id::random();
-
-        let mut opposite = [0_u8; 20];
-        for (i, &value) in id.0.iter().enumerate() {
-            opposite[i] = value ^ 0xff;
-        }
-        let target = Id(opposite);
-
-        let distance = id.distance(&target);
-
-        assert_eq!(distance, MAX_DISTANCE)
+        assert_eq!(table.add(node), false);
+        assert_eq!(table.is_empty(), true)
     }
 
     #[test]
@@ -283,7 +241,7 @@ mod test {
         let nodes: Vec<Node> = ids
             .iter()
             .map(|id| Node {
-                id: Id(id.to_owned()),
+                id: Id::from_bytes(id.to_owned()).unwrap(),
                 address: SocketAddr::from(([0, 0, 0, 0], 0)),
             })
             .collect();
@@ -370,18 +328,16 @@ mod test {
             ],
         ]
         .iter()
-        .map(|u| Id(*u))
+        .map(|u| Id::from_bytes(*u).unwrap())
         .collect::<Vec<Id>>();
 
-        let local_id = Id([
-            174, 251, 127, 172, 104, 156, 17, 34, 16, 125, 252, 222, 8, 246, 250, 46, 196, 207,
-            236, 102,
-        ]);
+        let local_id: Id = "aefb7fac689c1122107dfcde08f6fa2ec4cfec66"
+            .try_into()
+            .unwrap();
 
-        let target = Id([
-            209, 64, 106, 61, 58, 131, 84, 213, 102, 242, 29, 186, 139, 208, 108, 83, 124, 222, 42,
-            32,
-        ]);
+        let target: Id = "d1406a3d3a8354d566f21dba8bd06c537cde2a20"
+            .try_into()
+            .unwrap();
 
         let mut table = RoutingTable::new().with_id(local_id);
 

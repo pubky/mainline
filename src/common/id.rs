@@ -1,6 +1,10 @@
 //! Kademlia node Id or a lookup target
 use rand::Rng;
-use std::fmt::{self, Debug, Formatter};
+use std::{
+    convert::TryInto,
+    fmt::{self, Debug, Formatter},
+    net::ToSocketAddrs,
+};
 
 use crate::{Error, Result};
 
@@ -10,14 +14,16 @@ pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
 
 #[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq)]
 /// Kademlia node Id or a lookup target
-pub struct Id(pub [u8; ID_SIZE]);
+pub struct Id {
+    bytes: [u8; ID_SIZE],
+}
 
 impl Id {
     pub fn random() -> Id {
         let mut rng = rand::thread_rng();
-        let random_bytes: [u8; 20] = rng.gen();
+        let bytes: [u8; 20] = rng.gen();
 
-        Id(random_bytes)
+        Id { bytes }
     }
     /// Create a new Id from some bytes. Returns Err if `bytes` is not of length
     /// [ID_SIZE](crate::common::ID_SIZE).
@@ -30,7 +36,7 @@ impl Id {
         let mut tmp: [u8; ID_SIZE] = [0; ID_SIZE];
         tmp[..ID_SIZE].clone_from_slice(&bytes[..ID_SIZE]);
 
-        Ok(Id(tmp))
+        Ok(Id { bytes: tmp })
     }
 
     /// Simplified XOR distance between this Id and a target Id.
@@ -42,8 +48,8 @@ impl Id {
     /// Distance to an Id with 5 leading matching bits is 155
     pub fn distance(&self, other: &Id) -> u8 {
         for i in 0..ID_SIZE {
-            let a = self.0[i];
-            let b = other.0[i];
+            let a = self.bytes[i];
+            let b = other.bytes[i];
 
             if a != b {
                 // leading zeros so far + laedinge zeros of this byte
@@ -57,17 +63,48 @@ impl Id {
     }
 
     pub fn to_vec(self) -> Vec<u8> {
-        self.0.to_vec()
+        self.bytes.to_vec()
+    }
+}
+
+impl ToString for Id {
+    fn to_string(&self) -> String {
+        let hex_chars: Vec<String> = self
+            .bytes
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect();
+
+        hex_chars.join("")
+    }
+}
+
+impl TryInto<Id> for &str {
+    type Error = Error;
+
+    fn try_into(self) -> Result<Id> {
+        if self.len() % 2 != 0 {
+            return Err(Error::Static("Number of Hex characters should be even"));
+        }
+
+        let mut bytes = Vec::with_capacity(self.len() / 2);
+
+        for i in 0..self.len() / 2 {
+            let byte_str = &self[i * 2..(i * 2) + 2];
+            if let Ok(byte) = u8::from_str_radix(byte_str, 16) {
+                bytes.push(byte);
+            } else {
+                return Err(Error::Static("Invalid hex character")); // Invalid hex character
+            }
+        }
+
+        Id::from_bytes(bytes)
     }
 }
 
 impl Debug for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        // Create a hexadecimal string from the bytes
-        let hex_string: String = self.0.iter().map(|byte| format!("{:02x}", byte)).collect();
-
-        // Write the formatted string to the formatter
-        write!(f, "Id({})", hex_string)
+        write!(f, "Id({})", self.to_string())
     }
 }
 
@@ -84,13 +121,13 @@ mod test {
 
     #[test]
     fn distance_to_id() {
-        let id = Id([
-            6, 57, 161, 226, 79, 187, 138, 178, 119, 223, 3, 52, 118, 171, 13, 225, 15, 171, 59,
-            220,
-        ]);
-        let target = Id([
-            3, 91, 26, 235, 151, 55, 173, 225, 168, 9, 51, 89, 79, 64, 93, 63, 119, 42, 160, 142,
-        ]);
+        let id: Id = "0639A1E24FBB8AB277DF033476AB0DE10FAB3BDC"
+            .try_into()
+            .unwrap();
+
+        let target: Id = "035b1aeb9737ade1a80933594f405d3f772aa08e"
+            .try_into()
+            .unwrap();
 
         let distance = id.distance(&target);
 
@@ -112,10 +149,10 @@ mod test {
         let id = Id::random();
 
         let mut opposite = [0_u8; 20];
-        for (i, &value) in id.0.iter().enumerate() {
+        for (i, &value) in id.bytes.iter().enumerate() {
             opposite[i] = value ^ 0xff;
         }
-        let target = Id(opposite);
+        let target = Id::from_bytes(opposite).unwrap();
 
         let distance = id.distance(&target);
 
