@@ -1,129 +1,65 @@
+//! Dht node.
+
 use std::{
-    net::ToSocketAddrs,
-    sync::{Arc, Mutex, MutexGuard},
-    thread,
-    time::Duration,
+    sync::mpsc::{self, Receiver, Sender},
+    thread::{self, JoinHandle},
 };
 
-use crate::{
-    common::Id,
-    messages::{MessageType, ResponseSpecific},
-    routing_table::RoutingTable,
-    rpc::Rpc,
-};
+use crate::Result;
 
-const DEFAULT_BOOTSTRAP_NODES: [&str; 7] = [
-    "dht.anacrolix.link:42069",
-    "dht.transmissionbt.com:6881",
-    "dht.libtorrent.org:25401", // @arvidn's
-    // Above work reliably in home network.
-    "router.bittorrent.com:6881",
-    "router.utorrent.com:6881",
-    "dht.aelitis.com:6881", // Vuze
-    // "router.bittorrent.cloud:42069", // Seems to be read-only.
-    "router.silotis.us:6881", // IPv6
-];
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Dht {
-    id: Id,
-    rpc: Rpc,
-    routing_table: Arc<Mutex<RoutingTable>>,
+    sender: Sender<ActorMessage>,
+    handle: Option<JoinHandle<()>>,
 }
 
-impl Default for Dht {
-    fn default() -> Self {
-        Self::new()
+impl Clone for Dht {
+    fn clone(&self) -> Self {
+        Dht {
+            sender: self.sender.clone(),
+            handle: None,
+        }
     }
 }
 
 impl Dht {
-    pub fn new() -> Self {
-        let id = Id::random();
-        let mut rpc = Rpc::new()
-            .unwrap()
-            .with_id(id)
-            .with_request_timout(10000)
-            .unwrap();
+    pub fn new() -> Result<Self> {
+        // let mut rpc = Rpc::new().unwrap();
+        let (sender, receiver) = mpsc::channel();
 
-        let mut routing_table = RoutingTable::new().with_id(id);
+        // let rpc = Rpc::new()?;
+        let handle = thread::spawn(|| run(receiver));
 
-        Self {
-            id,
-            rpc,
-            routing_table: Mutex::new(routing_table).into(),
-        }
-    }
-
-    pub fn bootstrap(&mut self) {}
-
-    pub fn tick(&mut self) {
-        let mut routing_table = self.routing_table.lock().unwrap();
-
-        let incoming_message = self.rpc.tick();
-
-        // TODO: Add node to the routing table.
-        if let Ok(Some((message, from))) = incoming_message {
-            println!(
-                "Incoming message: from({:?})\nmessage:{:?}\n",
-                from, message
-            );
-            dbg!(&routing_table);
-
-            match &message.message_type {
-                MessageType::Request(request) => {
-                    // TODO: Handle requests.
-                }
-                MessageType::Response(response_specific) => match response_specific {
-                    ResponseSpecific::PingResponse(find_node_response) => {
-                        // TODO: how should we handle ping response?
-                    }
-                    ResponseSpecific::FindNodeResponse(find_node_response) => {
-                        // TODO add the bootstrap node.
-
-                        for node in find_node_response.nodes.iter() {
-                            routing_table.add(node.clone());
-                        }
-                    }
-                    _ => {}
-                },
-                MessageType::Error(error) => {
-                    // TODO: use tracing.
-                    println!("Got Error from {:?}: {:?}", from, error);
-                }
-            }
-
-            // TODO: Add the node to the routing table if it makes sense.
-        };
-
-        // TODO: Verify Id according to bep42
-
-        // TODO: If isolated try bootstrapping again.
-        if routing_table.is_empty() {
-            dbg!("Routing table is empty so we are bootstrapping");
-
-            for bootstrap_node in DEFAULT_BOOTSTRAP_NODES {
-                if let Ok(iter) = bootstrap_node.to_socket_addrs() {
-                    for address in iter {
-                        // TODO: Support IPv6, and don't call same node twice.
-                        self.rpc.find_node(address, self.id);
-                    }
-                }
-            }
-        } else {
-            dbg!("finding nodes from routing table");
-            for node in routing_table.nodes() {
-                self.rpc.find_node(node.address, self.id);
-            }
-        }
-
-        thread::sleep(Duration::from_millis(500));
-    }
-
-    pub fn run(mut self) -> thread::JoinHandle<()> {
-        thread::spawn(move || loop {
-            self.tick();
+        Ok(Dht {
+            sender,
+            handle: Some(handle),
         })
+    }
+
+    pub fn shutdown(&self) {
+        self.sender.send(ActorMessage::Shutdown).unwrap();
+    }
+
+    pub fn block_until_shutdown(self) {
+        if let Some(handle) = self.handle {
+            let _ = handle.join();
+        }
+    }
+}
+
+enum ActorMessage {
+    Shutdown,
+}
+
+fn run(receiver: Receiver<ActorMessage>) {
+    loop {
+        if let Ok(actor_message) = receiver.try_recv() {
+            match actor_message {
+                ActorMessage::Shutdown => {
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -134,12 +70,16 @@ mod test {
     use super::*;
 
     #[test]
-    fn bootstrap() {
-        let dht = Dht::default();
+    fn shutdown() {
+        let dht = Dht::new().unwrap();
 
-        dht.clone().run();
+        let clone = dht.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(500));
 
-        // dht.bootstrap();
-        thread::sleep(Duration::from_secs(3600));
+            clone.shutdown();
+        });
+
+        dht.block_until_shutdown();
     }
 }
