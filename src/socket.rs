@@ -8,25 +8,24 @@ use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, Resp
 use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000);
 const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
 const MTU: usize = 2048;
 
-/// A UdpSocket wrapper that manages inflight requests and receive incoming messages.
+/// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
     read_only: bool,
+    request_timeout: Duration,
+    inflight_requests: HashMap<u16, InflightRequest>,
 }
 
-impl Clone for KrpcSocket {
-    fn clone(&self) -> Self {
-        Self {
-            socket: self.socket.try_clone().unwrap(),
-            next_tid: self.next_tid,
-            read_only: self.read_only,
-        }
-    }
+#[derive(Debug)]
+pub struct InflightRequest {
+    to: SocketAddr,
+    sent_at: Instant,
 }
 
 impl KrpcSocket {
@@ -41,6 +40,8 @@ impl KrpcSocket {
             socket,
             next_tid: 0,
             read_only: false,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            inflight_requests: HashMap::new(),
         })
     }
 
@@ -49,14 +50,6 @@ impl KrpcSocket {
     /// Set read-only mode
     pub fn with_read_only(self, read_only: bool) -> Self {
         Self { read_only, ..self }
-    }
-
-    /// Set the starting transaciton_id mostly for testing purposes.
-    fn with_tid(self, tid: u16) -> Self {
-        Self {
-            next_tid: tid,
-            ..self
-        }
     }
 
     /// Returns the address the server is listening to.
@@ -68,8 +61,17 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Send a request to the given address and return a receiver for the response.
-    pub fn request(&mut self, address: SocketAddr, request: &RequestSpecific) {
-        let message = self.request_message(request.clone());
+    pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) {
+        let message = self.request_message(request);
+
+        self.inflight_requests.insert(
+            message.transaction_id,
+            InflightRequest {
+                to: address,
+                sent_at: Instant::now(),
+            },
+        );
+
         self.send(address, message);
     }
 
@@ -101,14 +103,37 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
         let mut buf = [0u8; MTU];
 
+        // Cleanup timedout transaction_ids.
+        let request_timeout = self.request_timeout;
+        self.inflight_requests
+            .retain(|_, request| request.sent_at.elapsed() < request_timeout);
+
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
             match Message::from_bytes(&buf[..amt]) {
                 Ok(message) => {
-                    return Some((message, from));
+                    // Parsed correctly.
+                    match message.message_type {
+                        MessageType::Request(_) => return Some((message, from)),
+                        // Response or an error to an inflight request.
+                        _ => {
+                            if let Some(inflight_request) =
+                                self.inflight_requests.get(&message.transaction_id)
+                            {
+                                if compare_socket_addr(&inflight_request.to, &from) {
+                                    // Confirm that it is a response we actually sent.
+                                    self.inflight_requests.remove(&message.transaction_id);
+                                    return Some((message, from));
+                                } else {
+                                    // TODO: handle/log response from wrong address.
+                                }
+                            } else {
+                                // TODO: handle/log unexpected transaction id.
+                            };
+                        }
+                    }
                 }
-                Err(err) => {
-                    println!("Error parsing incoming message from {:?}: {:?}", from, err);
-                }
+                // TODO: handle/log parsing errors.
+                Err(_) => {}
             };
         };
 
@@ -119,6 +144,9 @@ impl KrpcSocket {
 
     /// Increments self.next_tid and returns the previous value.
     fn tid(&mut self) -> u16 {
+        // We don't bother much with reusing freed transaction ids,
+        // since the timeout is so short we are unlikely to run out
+        // of 65535 ids in 2 seconds.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
@@ -161,6 +189,19 @@ impl KrpcSocket {
     }
 }
 
+// Same as SocketAddr::eq but ingores the ip if it is unspecified for testing reasons.
+fn compare_socket_addr(a: &SocketAddr, b: &SocketAddr) -> bool {
+    if a.port() != b.port() {
+        return false;
+    }
+
+    if a.ip().is_unspecified() {
+        return true;
+    }
+
+    a.ip() == b.ip()
+}
+
 #[cfg(test)]
 mod test {
     use std::thread;
@@ -191,10 +232,8 @@ mod test {
         let mut server = KrpcSocket::new().unwrap();
         let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::new()
-            .unwrap()
-            .with_tid(120)
-            .with_read_only(true);
+        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+        client.next_tid = 120;
 
         let client_address = client.local_addr();
         let request = RequestSpecific::PingRequest(PingRequestArguments {
@@ -218,7 +257,131 @@ mod test {
             }
         });
 
-        client.request(server_address, &request);
+        client.request(server_address, request);
+
+        server_loop.join().unwrap();
+    }
+
+    #[test]
+    fn recv_response() {
+        let mut server = KrpcSocket::new().unwrap();
+        let server_address = server.local_addr();
+
+        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+
+        let client_address = client.local_addr();
+
+        server.inflight_requests.insert(
+            8,
+            InflightRequest {
+                to: client_address,
+                sent_at: Instant::now(),
+            },
+        );
+
+        let response = ResponseSpecific::PingResponse(PingResponseArguments {
+            responder_id: Id::random(),
+        });
+
+        let expected_response = response.clone();
+
+        let server_loop = thread::spawn(move || loop {
+            if let Some((message, from)) = server.recv_from() {
+                assert_eq!(from.port(), client_address.port());
+                assert_eq!(message.transaction_id, 8);
+                assert_eq!(message.read_only, true, "Read-only should be true");
+                assert_eq!(
+                    message.version,
+                    Some(VERSION.to_vec()),
+                    "Version should be 'RS'"
+                );
+                assert_eq!(
+                    message.message_type,
+                    MessageType::Response(expected_response)
+                );
+                break;
+            }
+        });
+
+        client.response(server_address, 8, response);
+
+        server_loop.join().unwrap();
+    }
+
+    #[test]
+    fn ignore_unexcpected_response() {
+        let mut server = KrpcSocket::new().unwrap();
+        let server_address = server.local_addr();
+
+        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+
+        let client_address = client.local_addr();
+
+        let response = ResponseSpecific::PingResponse(PingResponseArguments {
+            responder_id: Id::random(),
+        });
+
+        let expected_response = response.clone();
+
+        let server_loop = thread::spawn(move || {
+            let mut count = 0;
+            loop {
+                if count > 300 {
+                    break;
+                }
+
+                if let Some((message, from)) = server.recv_from() {
+                    assert!(false, "Should not receive a unexpected response");
+                } else {
+                    count += 1;
+                }
+            }
+        });
+
+        client.response(server_address, 120, response);
+
+        server_loop.join().unwrap();
+    }
+
+    #[test]
+    fn ignore_response_from_wrong_address() {
+        let mut server = KrpcSocket::new().unwrap();
+        let server_address = server.local_addr();
+
+        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+
+        let client_address = client.local_addr();
+
+        server.inflight_requests.insert(
+            8,
+            InflightRequest {
+                to: SocketAddr::from(([127, 0, 0, 1], client_address.port() + 1)),
+                sent_at: Instant::now(),
+            },
+        );
+
+        let response = ResponseSpecific::PingResponse(PingResponseArguments {
+            responder_id: Id::random(),
+        });
+
+        let expected_response = response.clone();
+
+        let server_loop = thread::spawn(move || {
+            let mut count = 0;
+            loop {
+                if count > 300 {
+                    break;
+                }
+
+                if let Some((message, from)) = server.recv_from() {
+                    assert!(false, "Should not receive a response from wrong address");
+                } else {
+                    count += 1;
+                }
+            }
+        });
+
+        client.response(server_address, 120, response);
 
         server_loop.join().unwrap();
     }
