@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
@@ -10,26 +8,15 @@ use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, Resp
 use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
-const DEFAULT_TIMEOUT_MILLIS: u64 = 2000;
 const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
 const MTU: usize = 2048;
 
 /// A UdpSocket wrapper that manages inflight requests and receive incoming messages.
 #[derive(Debug)]
 pub struct KrpcSocket {
-    socket: UdpSocket,
     next_tid: u16,
-    pub request_timeout: Duration,
-    pub read_only: bool,
-    inflight_requests: Arc<Mutex<HashMap<u16, InflightRequest>>>,
-}
-
-/// A registered Sender for an inflight request waiting for a response or be removed after a
-/// timeout period since the `sent_at` Instant.
-#[derive(Debug)]
-struct InflightRequest {
-    sent_at: Instant,
-    sender: Sender<Message>,
+    socket: UdpSocket,
+    read_only: bool,
 }
 
 impl Clone for KrpcSocket {
@@ -37,9 +24,7 @@ impl Clone for KrpcSocket {
         Self {
             socket: self.socket.try_clone().unwrap(),
             next_tid: self.next_tid,
-            request_timeout: self.request_timeout,
             read_only: self.read_only,
-            inflight_requests: self.inflight_requests.clone(),
         }
     }
 }
@@ -55,24 +40,23 @@ impl KrpcSocket {
         Ok(Self {
             socket,
             next_tid: 0,
-            request_timeout: Duration::from_millis(DEFAULT_TIMEOUT_MILLIS),
             read_only: false,
-            inflight_requests: Mutex::new(HashMap::new()).into(),
         })
     }
 
     // === Options ===
 
     /// Set read-only mode
-    pub fn with_read_only(mut self, read_only: bool) -> Self {
-        self.read_only = read_only;
-        self
+    pub fn with_read_only(self, read_only: bool) -> Self {
+        Self { read_only, ..self }
     }
 
-    /// Set request timeout
-    pub fn with_request_timeout(mut self, timeout: u64) -> Self {
-        self.request_timeout = Duration::from_millis(timeout);
-        self
+    /// Set the starting transaciton_id mostly for testing purposes.
+    fn with_tid(self, tid: u16) -> Self {
+        Self {
+            next_tid: tid,
+            ..self
+        }
     }
 
     /// Returns the address the server is listening to.
@@ -84,23 +68,9 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Send a request to the given address and return a receiver for the response.
-    pub fn request(&mut self, address: SocketAddr, request: &RequestSpecific) -> Receiver<Message> {
+    pub fn request(&mut self, address: SocketAddr, request: &RequestSpecific) {
         let message = self.request_message(request.clone());
-
-        let (response_tx, response_rx) = mpsc::channel();
-
-        self.inflight_requests.lock().unwrap().insert(
-            message.transaction_id,
-            InflightRequest {
-                sent_at: Instant::now(),
-                sender: response_tx,
-            },
-        );
-
         self.send(address, message);
-
-        // TODO: reconsider if we need an mpsc channel in this level of abstraction vs in Dht.
-        response_rx
     }
 
     /// Send a response to the given address.
@@ -131,29 +101,9 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
         let mut buf = [0u8; MTU];
 
-        let mut lock = self.inflight_requests.lock().unwrap();
-
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
             match Message::from_bytes(&buf[..amt]) {
                 Ok(message) => {
-                    match message.message_type {
-                        // Requests
-                        MessageType::Request(_) => {
-                            // Return requests to be handled by the caller,
-                            // if the RPC is not read_only.
-                            if self.read_only {
-                                return None;
-                            };
-                        }
-                        // Responses and errors
-                        _ => {
-                            // Send responses or errors to inflight_requests.
-                            if let Some(inflight_request) = lock.remove(&message.transaction_id) {
-                                let _ = inflight_request.sender.send(message.clone());
-                            };
-                        }
-                    }
-
                     return Some((message, from));
                 }
                 Err(err) => {
@@ -161,11 +111,6 @@ impl KrpcSocket {
                 }
             };
         };
-
-        // Clean up timed out requests.
-        lock.retain(|_, inflight_request| {
-            inflight_request.sent_at.elapsed() <= self.request_timeout
-        });
 
         None
     }
@@ -187,7 +132,7 @@ impl KrpcSocket {
             transaction_id,
             message_type: MessageType::Request(message),
             version: Some(VERSION.into()),
-            read_only: Some(self.read_only),
+            read_only: self.read_only,
             requester_ip: None,
         }
     }
@@ -203,7 +148,7 @@ impl KrpcSocket {
             transaction_id: request_tid,
             message_type: message,
             version: Some(VERSION.into()),
-            read_only: Some(self.read_only),
+            read_only: self.read_only,
             // BEP0042 Only relevant in responses.
             requester_ip: Some(requester_ip),
         }
@@ -242,111 +187,39 @@ mod test {
     }
 
     #[test]
-    fn request_response() {
-        let server = KrpcSocket::new().unwrap();
-        let server_id = Id::random();
+    fn recv_request() {
+        let mut server = KrpcSocket::new().unwrap();
+        let server_address = server.local_addr();
 
-        let mut server_clone = server.clone();
-        thread::spawn(move || loop {
-            if let Some((message, from)) = server_clone.recv_from() {
-                match message.message_type {
-                    MessageType::Request(request_specific) => match request_specific {
-                        RequestSpecific::PingRequest(_) => match message.transaction_id {
-                            10 => {
-                                server_clone.response(
-                                    from,
-                                    message.transaction_id,
-                                    ResponseSpecific::PingResponse(PingResponseArguments {
-                                        responder_id: server_id,
-                                    }),
-                                );
-                            }
-                            11 => {
-                                server_clone.error(
-                                    from,
-                                    message.transaction_id,
-                                    ErrorSpecific {
-                                        code: 201,
-                                        description: "Generic Error".to_string(),
-                                    },
-                                );
-                            }
-                            _ => {}
-                        },
-                        _ => {}
-                    },
-                    _ => {}
-                }
+        let mut client = KrpcSocket::new()
+            .unwrap()
+            .with_tid(120)
+            .with_read_only(true);
+
+        let client_address = client.local_addr();
+        let request = RequestSpecific::PingRequest(PingRequestArguments {
+            requester_id: Id::random(),
+        });
+
+        let expected_request = request.clone();
+
+        let server_loop = thread::spawn(move || loop {
+            if let Some((message, from)) = server.recv_from() {
+                assert_eq!(from.port(), client_address.port());
+                assert_eq!(message.transaction_id, 120);
+                assert_eq!(message.read_only, true, "Read-only should be true");
+                assert_eq!(
+                    message.version,
+                    Some(VERSION.to_vec()),
+                    "Version should be 'RS'"
+                );
+                assert_eq!(message.message_type, MessageType::Request(expected_request));
+                break;
             }
         });
 
-        let server_addr = server.local_addr();
+        client.request(server_address, &request);
 
-        // Start the client.
-        let mut client = KrpcSocket::new().unwrap();
-        client.next_tid = 10; // Just to make sure we get the correct tid in response
-
-        let mut clone = client.clone();
-        thread::spawn(move || loop {
-            clone.recv_from();
-        });
-
-        let request = RequestSpecific::PingRequest(PingRequestArguments {
-            requester_id: Id::random(),
-        });
-
-        let response = client.request(server_addr, &request).recv().unwrap();
-
-        assert_eq!(
-            response.requester_ip.unwrap().port(),
-            client.local_addr().port()
-        );
-        assert_eq!(response.transaction_id, 10);
-        assert_eq!(response.version, Some(VERSION.into()), "local version 'rs'");
-        assert_eq!(
-            response.message_type,
-            MessageType::Response(ResponseSpecific::PingResponse(PingResponseArguments {
-                responder_id: server_id
-            }))
-        );
-
-        let error = client.request(server_addr, &request).recv().unwrap();
-
-        assert_eq!(error.transaction_id, 11);
-        assert_eq!(error.version, Some(VERSION.into()), "local version 'rs'");
-        assert_eq!(
-            error.message_type,
-            MessageType::Error(ErrorSpecific {
-                code: 201,
-                description: "Generic Error".to_string(),
-            })
-        );
-
-        assert_eq!(
-            client.inflight_requests.lock().unwrap().len(),
-            0,
-            "inflight requests should be empty after receiving a response"
-        );
-    }
-
-    #[test]
-    fn timeout() {
-        let server = KrpcSocket::new().unwrap();
-        let server_addr = server.local_addr();
-
-        let mut client = KrpcSocket::new().unwrap().with_request_timeout(10);
-
-        let mut clone = client.clone();
-        thread::spawn(move || loop {
-            clone.recv_from();
-        });
-
-        let request = RequestSpecific::PingRequest(PingRequestArguments {
-            requester_id: Id::random(),
-        });
-
-        let response = client.request(server_addr, &request).recv();
-
-        assert!(response.is_err(), "timeout")
+        server_loop.join().unwrap();
     }
 }

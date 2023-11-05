@@ -25,7 +25,7 @@ pub struct Message {
 
     /// For bep0043. When set true on a request, indicates that the requester can't reply to requests and that responders should not add requester to their routing tables.
     /// Should only be set on requests - undefined behavior when set on a response.
-    pub read_only: Option<bool>,
+    pub read_only: bool,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -88,9 +88,7 @@ impl Message {
             ip: self
                 .requester_ip
                 .map(|sockaddr| sockaddr_to_bytes(&sockaddr)),
-            read_only: self
-                .read_only
-                .map(|read_only| if read_only { 1 } else { 0 }),
+            read_only: if (self.read_only) { Some(1) } else { Some(0) },
             variant: match self.message_type {
                 MessageType::Request(req) => internal::DHTMessageVariant::Request(match req {
                     RequestSpecific::PingRequest(ping_args) => internal::DHTRequestSpecific::Ping {
@@ -146,8 +144,11 @@ impl Message {
                 Some(ip) => Some(bytes_to_sockaddr(ip)?),
                 _ => None,
             },
-            read_only: msg.read_only.map(|read_only| read_only >= 1),
-
+            read_only: if let Some(read_only) = msg.read_only {
+                read_only > 0
+            } else {
+                false
+            },
             message_type: match msg.variant {
                 internal::DHTMessageVariant::Request(req_variant) => {
                     MessageType::Request(match req_variant {
@@ -358,7 +359,7 @@ mod tests {
             transaction_id: 258,
             version: None,
             requester_ip: None,
-            read_only: None,
+            read_only: false,
             message_type: MessageType::Request(RequestSpecific::PingRequest(
                 PingRequestArguments {
                     requester_id: Id::random(),
@@ -379,7 +380,7 @@ mod tests {
             transaction_id: 258,
             version: Some(vec![0xde, 0xad]),
             requester_ip: Some("99.100.101.102:1030".parse().unwrap()),
-            read_only: None,
+            read_only: false,
             message_type: MessageType::Response(ResponseSpecific::PingResponse(
                 PingResponseArguments {
                     responder_id: Id::random(),
@@ -400,7 +401,7 @@ mod tests {
             transaction_id: 258,
             version: Some(vec![0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
-            read_only: None,
+            read_only: false,
             message_type: MessageType::Request(RequestSpecific::FindNodeRequest(
                 FindNodeRequestArguments {
                     target: Id::random(),
@@ -422,7 +423,7 @@ mod tests {
             transaction_id: 258,
             version: Some(vec![0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
-            read_only: Some(true),
+            read_only: true,
             message_type: MessageType::Request(RequestSpecific::FindNodeRequest(
                 FindNodeRequestArguments {
                     target: Id::random(),
@@ -444,7 +445,7 @@ mod tests {
             transaction_id: 258,
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
-            read_only: None,
+            read_only: false,
             message_type: MessageType::Response(ResponseSpecific::FindNodeResponse(
                 FindNodeResponseArguments {
                     responder_id: Id::random(),
