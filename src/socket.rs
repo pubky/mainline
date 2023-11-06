@@ -112,7 +112,13 @@ impl KrpcSocket {
             if let Ok(message) = Message::from_bytes(&buf[..amt]) {
                 // Parsed correctly.
                 match message.message_type {
-                    MessageType::Request(_) => return Some((message, from)),
+                    MessageType::Request(_) => {
+                        if (self.read_only) {
+                            return None;
+                        }
+
+                        return Some((message, from));
+                    }
                     // Response or an error to an inflight request.
                     _ => {
                         if let Some(inflight_request) =
@@ -322,18 +328,11 @@ mod test {
         let expected_response = response.clone();
 
         let server_loop = thread::spawn(move || {
-            let mut count = 0;
-            loop {
-                if count > 300 {
-                    break;
-                }
-
-                if let Some((message, from)) = server.recv_from() {
-                    assert!(false, "Should not receive a unexpected response");
-                } else {
-                    count += 1;
-                }
-            }
+            thread::sleep(Duration::from_millis(5));
+            assert!(
+                server.recv_from().is_none(),
+                "Should not receive a unexpected response"
+            );
         });
 
         client.response(server_address, 120, response);
@@ -365,21 +364,42 @@ mod test {
         let expected_response = response.clone();
 
         let server_loop = thread::spawn(move || {
-            let mut count = 0;
-            loop {
-                if count > 300 {
-                    break;
-                }
-
-                if let Some((message, from)) = server.recv_from() {
-                    assert!(false, "Should not receive a response from wrong address");
-                } else {
-                    count += 1;
-                }
-            }
+            thread::sleep(Duration::from_millis(5));
+            assert!(
+                server.recv_from().is_none(),
+                "Should not receive a response from wrong address"
+            );
         });
 
         client.response(server_address, 120, response);
+
+        server_loop.join().unwrap();
+    }
+
+    #[test]
+    fn ignore_request_in_read_only() {
+        let mut server = KrpcSocket::new().unwrap().with_read_only(true);
+        let server_address = server.local_addr();
+
+        let mut client = KrpcSocket::new().unwrap();
+        client.next_tid = 120;
+
+        let client_address = client.local_addr();
+        let request = RequestSpecific::PingRequest(PingRequestArguments {
+            requester_id: Id::random(),
+        });
+
+        let expected_request = request.clone();
+
+        let server_loop = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(5));
+            assert!(
+                server.recv_from().is_none(),
+                "should not receieve requests in read-only mode"
+            );
+        });
+
+        client.request(server_address, request);
 
         server_loop.join().unwrap();
     }
