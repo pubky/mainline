@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 
 use crate::common::Id;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 /// Node entry in Kademlia routing table
 pub struct Node {
     pub id: Id,
@@ -14,5 +14,13 @@ impl Node {
     /// Creates a new Node from an id and socket address.
     pub fn new(id: Id, address: SocketAddr) -> Node {
         Node { id, address }
+    }
+
+    /// Creates a random node for testing purposes.
+    pub fn random() -> Node {
+        Node {
+            id: Id::random(),
+            address: SocketAddr::from(([0, 0, 0, 0], 0)),
+        }
     }
 }

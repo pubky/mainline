@@ -8,14 +8,14 @@ use std::slice::Iter;
 use std::time::Instant;
 
 use crate::common::{Id, Node, MAX_DISTANCE};
-use crate::kbucket::KBucket;
+
+/// K = the default maximum size of a k-bucket.
+const MAX_BUCKET_SIZE_K: usize = 20;
 
 #[derive(Debug)]
 pub struct RoutingTable {
     id: Id,
-    pub buckets: BTreeMap<u8, KBucket>,
-    /// Keep track of the last time this bucket or any of its nodes were updated.
-    last_updated: Instant,
+    buckets: BTreeMap<u8, KBucket>,
 }
 
 impl RoutingTable {
@@ -25,7 +25,6 @@ impl RoutingTable {
         RoutingTable {
             id: Id::random(),
             buckets,
-            last_updated: Instant::now(),
         }
     }
 
@@ -39,8 +38,6 @@ impl RoutingTable {
     // === Public Methods ===
 
     pub fn add(&mut self, node: Node) -> bool {
-        // TODO: Verify the type of ip v4 or v6?
-
         let distance = self.id.distance(&node.id);
 
         if distance == 0 {
@@ -48,16 +45,19 @@ impl RoutingTable {
             return false;
         }
 
-        let bucket = self.buckets.get_mut(&distance);
-
-        if bucket.is_none() {
-            let bucket = KBucket::new();
-            self.buckets.insert(distance, bucket);
-        }
+        self.buckets.entry(distance).or_insert(KBucket::new());
 
         let bucket = self.buckets.get_mut(&distance).unwrap();
 
         bucket.add(node)
+    }
+
+    pub fn remove(&mut self, node_id: &Id) {
+        let distance = self.id.distance(node_id);
+
+        if let Some(bucket) = self.buckets.get_mut(&distance) {
+            bucket.remove(node_id)
+        }
     }
 
     pub fn closest(&self, target: &Id) -> Vec<Node> {
@@ -74,8 +74,6 @@ impl RoutingTable {
                 Some(bucket) => {
                     for node in bucket.iter() {
                         if result.len() < 20 {
-                            // TODO: Do we need to keep full nodes in the table? can't we just keep track of the ids and keep
-                            // nodes somewhere else that doesn't cross threads, or at least keep this pure?
                             result.push(node.clone());
                         } else {
                             return result;
@@ -92,11 +90,87 @@ impl RoutingTable {
     pub fn is_empty(&self) -> bool {
         self.buckets.values().all(|bucket| bucket.is_empty())
     }
+
+    pub fn contains(&self, node_id: &Id) -> bool {
+        let distance = self.id.distance(node_id);
+
+        if let Some(bucket) = self.buckets.get(&distance) {
+            if bucket.contains(node_id) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns all nodes in the routing_table.
+    pub fn to_vec(&self) -> Vec<&Node> {
+        let mut nodes: Vec<&Node> = vec![];
+
+        for bucket in self.buckets.values() {
+            for node in &bucket.nodes {
+                nodes.push(node);
+            }
+        }
+
+        nodes
+    }
 }
 
 impl Default for RoutingTable {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Kbuckets are similar to LRU caches that checks and evicts unresponsive nodes,
+/// without dropping any responsive nodes in the process.
+pub struct KBucket {
+    /// Nodes in the k-bucket, sorted by the least recently seen.
+    nodes: Vec<Node>,
+}
+
+impl KBucket {
+    pub fn new() -> Self {
+        KBucket {
+            nodes: Vec::with_capacity(MAX_BUCKET_SIZE_K),
+        }
+    }
+
+    // === Public Methods ===
+
+    pub fn add(&mut self, node: Node) -> bool {
+        if self.nodes.contains(&node) {
+            return false;
+        }
+
+        if self.nodes.len() < MAX_BUCKET_SIZE_K {
+            self.nodes.push(node);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn remove(&mut self, node_id: &Id) {
+        self.nodes.retain(|node| node.id != *node_id);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    pub fn contains(&self, id: &Id) -> bool {
+        self.iter().any(|node| node.id == *id)
+    }
+
+    pub fn iter(&self) -> Iter<'_, Node> {
+        self.nodes.iter()
+    }
+}
+
+impl Debug for KBucket {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Bucket{{ nodes: {:?} }}", &self.nodes.len())
     }
 }
 
@@ -123,6 +197,61 @@ mod test {
     }
 
     #[test]
+    fn to_vec() {
+        let mut table = RoutingTable::new();
+
+        let mut expected_nodes: Vec<Node> = vec![];
+
+        for i in 0..20 {
+            expected_nodes.push(Node::random());
+        }
+
+        for node in &expected_nodes {
+            table.add(node.clone());
+        }
+
+        assert_eq!(table.to_vec().sort(), expected_nodes.sort());
+    }
+
+    #[test]
+    fn contains() {
+        let mut table = RoutingTable::new();
+
+        let node = Node::random();
+
+        assert!(!table.contains(&node.id));
+
+        table.add(node.clone());
+        assert!(table.contains(&node.id));
+    }
+
+    #[test]
+    fn remove() {
+        let mut table = RoutingTable::new();
+
+        let node = Node::random();
+
+        table.add(node.clone());
+        assert!(table.contains(&node.id));
+
+        table.remove(&node.id);
+        assert!(!table.contains(&node.id));
+    }
+
+    #[test]
+    fn buckets_are_sets() {
+        let mut table = RoutingTable::new();
+
+        let node = Node::random();
+
+        table.add(node.clone());
+        table.add(node.clone());
+        table.add(node.clone());
+
+        assert_eq!(table.to_vec().len(), 1);
+    }
+
+    #[test]
     fn should_not_add_self() {
         let mut table = RoutingTable::new();
         let node = Node {
@@ -132,6 +261,28 @@ mod test {
 
         assert_eq!(table.add(node), false);
         assert_eq!(table.is_empty(), true)
+    }
+
+    #[test]
+    fn should_not_add_more_than_k() {
+        let id = Id::random();
+        let mut table = RoutingTable::new().with_id(id);
+
+        for i in 0..20 {
+            let mut cloned = id.to_vec();
+            cloned[19] = i;
+            let mutated = Id::from_bytes(cloned).unwrap();
+
+            let node = Node::new(mutated, SocketAddr::from(([0, 0, 0, 0], 0)));
+            assert!(table.add(node));
+        }
+
+        let mut cloned = id.to_vec();
+        cloned[19] = 21;
+        let mutated = Id::from_bytes(cloned).unwrap();
+        let node = Node::new(mutated, SocketAddr::from(([0, 0, 0, 0], 0)));
+
+        assert!(!table.add(node));
     }
 
     #[test]
@@ -252,6 +403,13 @@ mod test {
                 101, 90,
             ],
             [
+                243, 1, 91, 100, 255, 108, 49, 49, 122, 242, 133, 118, 68, 21, 0, 6, 27, 26, 54, 19,
+            ],
+            [
+                235, 153, 116, 42, 159, 145, 132, 237, 232, 111, 29, 215, 6, 188, 13, 238, 39, 87,
+                250, 75,
+            ],
+            [
                 211, 152, 2, 51, 215, 119, 115, 11, 164, 64, 114, 99, 102, 255, 186, 151, 240, 244,
                 68, 36,
             ],
@@ -260,55 +418,44 @@ mod test {
                 11, 38, 115,
             ],
             [
-                235, 153, 116, 42, 159, 145, 132, 237, 232, 111, 29, 215, 6, 188, 13, 238, 39, 87,
-                250, 75,
-            ],
-            [
-                243, 1, 91, 100, 255, 108, 49, 49, 122, 242, 133, 118, 68, 21, 0, 6, 27, 26, 54, 19,
-            ],
-            [
-                33, 104, 9, 5, 146, 30, 62, 218, 18, 118, 218, 53, 54, 162, 110, 123, 143, 189,
-                208, 171,
+                49, 77, 141, 49, 37, 34, 125, 4, 3, 202, 105, 227, 99, 63, 59, 214, 51, 193, 67,
+                223,
             ],
             [
                 35, 72, 247, 238, 239, 1, 98, 211, 202, 100, 95, 234, 37, 22, 229, 154, 115, 4,
                 189, 33,
             ],
             [
-                49, 77, 141, 49, 37, 34, 125, 4, 3, 202, 105, 227, 99, 63, 59, 214, 51, 193, 67,
-                223,
-            ],
-            [
-                60, 52, 23, 181, 245, 29, 59, 34, 85, 129, 28, 217, 154, 41, 106, 111, 180, 62,
-                223, 198,
-            ],
-            [
-                60, 55, 207, 21, 8, 172, 206, 21, 170, 148, 32, 225, 214, 141, 74, 141, 84, 35,
-                186, 161,
+                105, 242, 97, 157, 47, 111, 153, 190, 40, 170, 104, 88, 80, 148, 169, 254, 124, 81,
+                136, 124,
             ],
             [
                 71, 91, 187, 15, 18, 155, 221, 117, 140, 228, 72, 121, 179, 211, 229, 249, 138,
                 244, 66, 3,
             ],
             [
-                89, 245, 92, 6, 188, 249, 5, 85, 55, 210, 210, 101, 172, 154, 230, 87, 142, 157,
-                145, 190,
-            ],
-            [
-                97, 132, 193, 109, 91, 137, 139, 151, 224, 190, 136, 186, 156, 245, 74, 217, 105,
-                105, 112, 167,
-            ],
-            [
-                105, 242, 97, 157, 47, 111, 153, 190, 40, 170, 104, 88, 80, 148, 169, 254, 124, 81,
-                136, 124,
+                60, 52, 23, 181, 245, 29, 59, 34, 85, 129, 28, 217, 154, 41, 106, 111, 180, 62,
+                223, 198,
             ],
             [
                 120, 43, 115, 248, 107, 101, 184, 136, 150, 254, 252, 187, 202, 56, 156, 136, 246,
                 197, 26, 22,
             ],
             [
-                128, 54, 141, 150, 217, 125, 36, 35, 108, 93, 72, 99, 141, 100, 96, 7, 5, 146, 230,
-                25,
+                33, 104, 9, 5, 146, 30, 62, 218, 18, 118, 218, 53, 54, 162, 110, 123, 143, 189,
+                208, 171,
+            ],
+            [
+                97, 132, 193, 109, 91, 137, 139, 151, 224, 190, 136, 186, 156, 245, 74, 217, 105,
+                105, 112, 167,
+            ],
+            [
+                89, 245, 92, 6, 188, 249, 5, 85, 55, 210, 210, 101, 172, 154, 230, 87, 142, 157,
+                145, 190,
+            ],
+            [
+                60, 55, 207, 21, 8, 172, 206, 21, 170, 148, 32, 225, 214, 141, 74, 141, 84, 35,
+                186, 161,
             ],
             [
                 145, 29, 158, 179, 233, 233, 100, 59, 36, 191, 43, 114, 13, 241, 21, 164, 120, 217,
@@ -319,12 +466,16 @@ mod test {
                 108, 119,
             ],
             [
-                179, 233, 172, 40, 206, 103, 33, 113, 105, 67, 62, 14, 146, 254, 141, 233, 166,
-                159, 179, 181,
+                128, 54, 141, 150, 217, 125, 36, 35, 108, 93, 72, 99, 141, 100, 96, 7, 5, 146, 230,
+                25,
             ],
             [
                 190, 73, 17, 132, 55, 150, 216, 209, 198, 6, 156, 204, 66, 98, 128, 118, 131, 108,
                 137, 45,
+            ],
+            [
+                179, 233, 172, 40, 206, 103, 33, 113, 105, 67, 62, 14, 146, 254, 141, 233, 166,
+                159, 179, 181,
             ],
         ]
         .iter()
@@ -349,6 +500,6 @@ mod test {
 
         let closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
 
-        assert_eq!(closest_ids, expected_closest_ids)
+        assert_eq!(closest_ids, expected_closest_ids);
     }
 }

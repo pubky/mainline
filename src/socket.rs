@@ -109,32 +109,30 @@ impl KrpcSocket {
             .retain(|_, request| request.sent_at.elapsed() < request_timeout);
 
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
-            match Message::from_bytes(&buf[..amt]) {
-                Ok(message) => {
-                    // Parsed correctly.
-                    match message.message_type {
-                        MessageType::Request(_) => return Some((message, from)),
-                        // Response or an error to an inflight request.
-                        _ => {
-                            if let Some(inflight_request) =
-                                self.inflight_requests.get(&message.transaction_id)
-                            {
-                                if compare_socket_addr(&inflight_request.to, &from) {
-                                    // Confirm that it is a response we actually sent.
-                                    self.inflight_requests.remove(&message.transaction_id);
-                                    return Some((message, from));
-                                } else {
-                                    // TODO: handle/log response from wrong address.
-                                }
+            if let Ok(message) = Message::from_bytes(&buf[..amt]) {
+                // Parsed correctly.
+                match message.message_type {
+                    MessageType::Request(_) => return Some((message, from)),
+                    // Response or an error to an inflight request.
+                    _ => {
+                        if let Some(inflight_request) =
+                            self.inflight_requests.get(&message.transaction_id)
+                        {
+                            if compare_socket_addr(&inflight_request.to, &from) {
+                                // Confirm that it is a response we actually sent.
+                                self.inflight_requests.remove(&message.transaction_id);
+                                return Some((message, from));
                             } else {
-                                // TODO: handle/log unexpected transaction id.
-                            };
-                        }
+                                // TODO: handle/log response from wrong address.
+                            }
+                        } else {
+                            // TODO: handle/log unexpected transaction id.
+                        };
                     }
                 }
-                // TODO: handle/log parsing errors.
-                Err(_) => {}
             };
+
+            // TODO: handle/log parsing errors.
         };
 
         None
