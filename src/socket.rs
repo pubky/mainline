@@ -73,7 +73,7 @@ impl KrpcSocket {
             },
         );
 
-        self.send(address, message);
+        let _ = self.send(address, message);
     }
 
     /// Send a response to the given address.
@@ -82,10 +82,10 @@ impl KrpcSocket {
         address: SocketAddr,
         transaction_id: u16,
         response: ResponseSpecific,
-    ) -> Result<()> {
+    ) {
         let message =
             self.response_message(MessageType::Response(response), address, transaction_id);
-        self.send(address, message)
+        let _ = self.send(address, message);
     }
 
     /// Send an error to the given address.
@@ -114,7 +114,7 @@ impl KrpcSocket {
                 // Parsed correctly.
                 match message.message_type {
                     MessageType::Request(_) => {
-                        if (self.read_only) {
+                        if self.read_only {
                             return None;
                         }
 

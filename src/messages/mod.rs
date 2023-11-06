@@ -88,7 +88,7 @@ impl Message {
             ip: self
                 .requester_ip
                 .map(|sockaddr| sockaddr_to_bytes(&sockaddr)),
-            read_only: if (self.read_only) { Some(1) } else { Some(0) },
+            read_only: if self.read_only { Some(1) } else { Some(0) },
             variant: match self.message_type {
                 MessageType::Request(req) => internal::DHTMessageVariant::Request(match req {
                     RequestSpecific::PingRequest(ping_args) => internal::DHTRequestSpecific::Ping {
