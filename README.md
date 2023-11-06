@@ -10,7 +10,7 @@ For the foreseeable future, this library is limited to the scope of [read-only](
     - [x] Response
   - [ ] Find node
     - [x] Request
-    - [ ] Response
+    - [x] Response
   - [ ] query (incrementally get closer nodes)
   - [ ] Announce/Get peers
     - [ ] Request

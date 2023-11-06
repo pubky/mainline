@@ -17,8 +17,8 @@ const MTU: usize = 2048;
 pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
-    read_only: bool,
-    request_timeout: Duration,
+    pub read_only: bool,
+    pub request_timeout: Duration,
     inflight_requests: HashMap<u16, InflightRequest>,
 }
 
@@ -48,8 +48,9 @@ impl KrpcSocket {
     // === Options ===
 
     /// Set read-only mode
-    pub fn with_read_only(self, read_only: bool) -> Self {
-        Self { read_only, ..self }
+    pub fn with_read_only(mut self, read_only: bool) -> Self {
+        self.read_only = read_only;
+        self
     }
 
     /// Returns the address the server is listening to.
@@ -246,7 +247,7 @@ mod test {
 
         let expected_request = request.clone();
 
-        let server_loop = thread::spawn(move || loop {
+        let server_thread = thread::spawn(move || loop {
             if let Some((message, from)) = server.recv_from() {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 120);
@@ -263,7 +264,7 @@ mod test {
 
         client.request(server_address, request);
 
-        server_loop.join().unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]
@@ -289,7 +290,7 @@ mod test {
 
         let expected_response = response.clone();
 
-        let server_loop = thread::spawn(move || loop {
+        let server_thread = thread::spawn(move || loop {
             if let Some((message, from)) = server.recv_from() {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 8);
@@ -309,7 +310,7 @@ mod test {
 
         client.response(server_address, 8, response);
 
-        server_loop.join().unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]
@@ -327,7 +328,7 @@ mod test {
 
         let expected_response = response.clone();
 
-        let server_loop = thread::spawn(move || {
+        let server_thread = thread::spawn(move || {
             thread::sleep(Duration::from_millis(5));
             assert!(
                 server.recv_from().is_none(),
@@ -337,7 +338,7 @@ mod test {
 
         client.response(server_address, 120, response);
 
-        server_loop.join().unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]
@@ -363,7 +364,7 @@ mod test {
 
         let expected_response = response.clone();
 
-        let server_loop = thread::spawn(move || {
+        let server_thread = thread::spawn(move || {
             thread::sleep(Duration::from_millis(5));
             assert!(
                 server.recv_from().is_none(),
@@ -373,7 +374,7 @@ mod test {
 
         client.response(server_address, 120, response);
 
-        server_loop.join().unwrap();
+        server_thread.join().unwrap();
     }
 
     #[test]
@@ -391,7 +392,7 @@ mod test {
 
         let expected_request = request.clone();
 
-        let server_loop = thread::spawn(move || {
+        let server_thread = thread::spawn(move || {
             thread::sleep(Duration::from_millis(5));
             assert!(
                 server.recv_from().is_none(),
@@ -401,6 +402,6 @@ mod test {
 
         client.request(server_address, request);
 
-        server_loop.join().unwrap();
+        server_thread.join().unwrap();
     }
 }
