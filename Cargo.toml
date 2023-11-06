@@ -17,3 +17,4 @@ serde_bencode = "^0.2.4"
 serde = { version = "1.0.133", features = ["derive"] }
 serde_bytes = "0.11.5"
 serde_derive = "^1.0.0"
+lru = "0.12.0"

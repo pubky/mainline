@@ -9,8 +9,8 @@ pub mod dht;
 
 /// Errors
 mod error;
-mod kbucket;
 mod messages;
+mod query;
 mod routing_table;
 mod rpc;
 mod socket;
