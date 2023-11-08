@@ -249,6 +249,17 @@ impl Message {
 
         Some(id)
     }
+
+    /// If the response contains a closer nodes to the target, return that!
+    pub fn get_closer_nodes(&self) -> Option<Vec<Node>> {
+        match &self.message_type {
+            MessageType::Response(response_variant) => match response_variant {
+                ResponseSpecific::FindNodeResponse(arguments) => Some(arguments.nodes.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 // Return the transaction Id as a u16

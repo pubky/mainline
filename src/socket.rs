@@ -8,8 +8,8 @@ use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, Resp
 use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000);
-const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
+const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
@@ -62,7 +62,7 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Send a request to the given address and return a receiver for the response.
-    pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) {
+    pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
         let message = self.request_message(request);
 
         self.inflight_requests.insert(
@@ -73,7 +73,10 @@ impl KrpcSocket {
             },
         );
 
+        let tid = message.transaction_id;
         let _ = self.send(address, message);
+
+        tid
     }
 
     /// Send a response to the given address.

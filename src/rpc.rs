@@ -20,7 +20,6 @@ use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_TIMEOUT_MILLIS: u64 = 500;
-const VERSION: &[u8] = "RS".as_bytes(); // The Mainline rust implementation.
 const MTU: usize = 2048;
 const TICK_INTERVAL: Duration = Duration::from_millis(500);
 const QUERIES_CACHE_SIZE: usize = 1000;
@@ -39,8 +38,7 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 9] = [
 #[derive(Debug)]
 pub struct Rpc {
     socket: KrpcSocket,
-    routing_table: RoutingTable,
-    bootstrapping: bool,
+    own_query: Query,
     queries: LruCache<Id, Query>,
 
     // Options
@@ -65,8 +63,13 @@ impl Rpc {
             interval: TICK_INTERVAL,
 
             socket,
-            routing_table: RoutingTable::new().with_id(id),
-            bootstrapping: false,
+            own_query: Query::new(
+                id,
+                RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+                    target: id,
+                    requester_id: id,
+                }),
+            ),
             queries: LruCache::new(NonZeroUsize::new(QUERIES_CACHE_SIZE).unwrap()),
         })
     }
@@ -112,6 +115,9 @@ impl Rpc {
         self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
+            self.add_node(&message, from);
+            self.add_closer_nodes(&message, from);
+
             match &message.message_type {
                 MessageType::Request(request_specific) => {
                     self.handle_request(from, message.transaction_id, request_specific);
@@ -125,7 +131,12 @@ impl Rpc {
             }
         };
 
-        // === Advance queries ===
+        // === Refresh own query ===
+        if !self.own_query.is_done() {
+            self.own_query.next(&mut self.socket);
+        }
+
+        // === Refresh queries ===
         // for query in self.queries.values() {
         //     for node in query.closest.iter() {
         //         self.socket.request(node.address, &query.request);
@@ -136,30 +147,31 @@ impl Rpc {
         None
     }
 
-    pub fn ping(&mut self, address: SocketAddr) {
+    pub fn ping(&mut self, address: SocketAddr) -> u16 {
         self.socket.request(
             address,
             RequestSpecific::PingRequest(PingRequestArguments {
                 requester_id: self.id,
             }),
-        );
+        )
     }
 
-    pub fn find_node(&mut self, address: SocketAddr, target: Id) {
+    pub fn find_node(&mut self, address: SocketAddr, target: Id) -> u16 {
         self.socket.request(
             address,
             RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
                 target,
                 requester_id: self.id,
             }),
-        );
+        )
     }
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
     pub fn query(&mut self, target: Id, request: RequestSpecific) {
         // If query exists and it's set to done, restart it.
         if let Some(query) = self.queries.get_mut(&target) {
-            query.restart();
+            // TODO restart queries.
+            // query.start();
             return;
         }
 
@@ -169,20 +181,14 @@ impl Rpc {
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     pub fn populate(&mut self) {
-        if !self.routing_table.is_empty() || self.bootstrapping {
+        if !self.own_query.table.is_empty() || !self.own_query.is_done() {
             return;
         }
-
-        self.bootstrapping = true;
 
         for bootstrapping_node in self.bootstrap.clone() {
             if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
                 for address in addresses {
-                    if address.is_ipv6() {
-                        // TODO: Add support for IPV6.
-                        continue;
-                    }
-                    self.find_node(address, self.id);
+                    self.own_query.visit(&mut self.socket, address);
                 }
             }
         }
@@ -194,8 +200,6 @@ impl Rpc {
         match request {
             // TODO: Handle bad requests (send an error message).
             RequestSpecific::PingRequest(PingRequestArguments { requester_id }) => {
-                self.update_routing_table(*requester_id, from, None);
-
                 self.socket.response(
                     from,
                     transaction_id,
@@ -208,14 +212,12 @@ impl Rpc {
                 target,
                 requester_id,
             }) => {
-                self.update_routing_table(*requester_id, from, None);
-
                 self.socket.response(
                     from,
                     transaction_id,
                     ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
                         responder_id: self.id,
-                        nodes: self.routing_table.closest(target),
+                        nodes: self.own_query.table.closest(target),
                     }),
                 );
             }
@@ -235,33 +237,44 @@ impl Rpc {
         transaction_id: u16,
         response: &ResponseSpecific,
     ) {
-        // println!("Got response from {:?}:\n === {:?}\n", &from, &message);
-
         match response {
             ResponseSpecific::PingResponse(PingResponseArguments { responder_id }) => {
-                self.update_routing_table(*responder_id, from, None);
+                //
             }
             //  === Responses to queries with closer nodes. ===
             ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
                 responder_id,
                 nodes,
             }) => {
-                self.update_routing_table(*responder_id, from, Some(nodes));
                 // TODO: check a corresponding query
             }
             _ => {}
         }
     }
 
-    fn update_routing_table(&mut self, id: Id, from: SocketAddr, nodes: Option<&Vec<Node>>) {
-        self.routing_table.add(Node::new(id, from));
-
-        if let Some(nodes) = nodes {
-            for node in nodes {
-                if !self.routing_table.contains(&node.id) {
-                    self.ping(node.address)
-                }
+    fn add_node(&mut self, message: &Message, from: SocketAddr) {
+        if let Some(id) = message.get_author_id() {
+            if !self.own_query.table.contains(&id) {
+                self.own_query.table.add(Node::new(id, from));
             }
+        }
+    }
+
+    fn add_closer_nodes(&mut self, message: &Message, from: SocketAddr) {
+        if let Some(nodes) = message.get_closer_nodes() {
+            if nodes.is_empty() {
+                return;
+            }
+
+            // Check own_query first.
+            if self
+                .own_query
+                .closer_nodes(message.transaction_id, from, nodes)
+            {
+                return;
+            }
+
+            // TODO check all other queries.
         }
     }
 }
@@ -269,12 +282,13 @@ impl Rpc {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::convert::TryInto;
 
     #[test]
     fn bootstrap() {
         let mut bootstrap: Vec<String> = Vec::with_capacity(1);
 
-        for i in 0..10 {
+        for i in 0..50 {
             let mut rpc = Rpc::new().unwrap();
 
             if i > 0 {
@@ -284,26 +298,22 @@ mod test {
                 &bootstrap.push(format!("0.0.0.0:{}", rpc.local_addr().port()));
             }
 
-            let handler = thread::spawn(move || loop {
+            thread::spawn(move || loop {
                 rpc.tick();
             });
         }
 
+        let interval = 50;
         let mut client = Rpc::new()
             .unwrap()
             .with_bootstrap(bootstrap)
-            .with_interval(10);
+            .with_interval(interval);
 
-        let client_thread = thread::spawn(move || {
-            let started = Instant::now();
-            loop {
-                client.tick();
-                if client.routing_table.to_vec().len() == 10 {
-                    return;
-                }
-                if started.elapsed().as_millis() > 300 {
-                    assert!(false, "Should have added all nodes to the routing table");
-                }
+        let client_thread = thread::spawn(move || loop {
+            client.tick();
+            if client.own_query.is_done() {
+                assert!(client.own_query.table.to_vec().len() >= 20);
+                break;
             }
         });
 
