@@ -11,6 +11,9 @@ use crate::common::{Id, Node, MAX_DISTANCE};
 
 /// K = the default maximum size of a k-bucket.
 const MAX_BUCKET_SIZE_K: usize = 20;
+/// The age of a node's last_seen time before it is considered stale and removed from a full bucket
+/// on inserting a new node.
+// const
 
 #[derive(Debug)]
 pub struct RoutingTable {
@@ -139,7 +142,7 @@ impl KBucket {
     // === Public Methods ===
 
     pub fn add(&mut self, node: Node) -> bool {
-        if self.nodes.contains(&node) {
+        if self.contains(&node.id) {
             return false;
         }
 
@@ -170,7 +173,11 @@ impl KBucket {
 
 impl Debug for KBucket {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Bucket{{ nodes: {:?} }}", &self.nodes.len())
+        write!(f, "Bucket{{\n");
+        for node in &self.nodes {
+            write!(f, "  {:?}\n", node);
+        }
+        write!(f, "}}")
     }
 }
 
@@ -189,10 +196,7 @@ mod test {
         let mut table = RoutingTable::new();
         assert_eq!(table.is_empty(), true);
 
-        table.add(Node {
-            id: Id::random(),
-            address: SocketAddr::from(([0, 0, 0, 0], 0)),
-        });
+        table.add(Node::random());
         assert_eq!(table.is_empty(), false);
     }
 
@@ -242,11 +246,11 @@ mod test {
     fn buckets_are_sets() {
         let mut table = RoutingTable::new();
 
-        let node = Node::random();
+        let node1 = Node::random();
+        let node2 = Node::new(node1.id, node1.address);
 
-        table.add(node.clone());
-        table.add(node.clone());
-        table.add(node.clone());
+        table.add(node1);
+        table.add(node2);
 
         assert_eq!(table.to_vec().len(), 1);
     }
@@ -254,10 +258,9 @@ mod test {
     #[test]
     fn should_not_add_self() {
         let mut table = RoutingTable::new();
-        let node = Node {
-            id: table.id,
-            address: SocketAddr::from(([0, 0, 0, 0], 0)),
-        };
+        let node = Node::random().with_id(table.id);
+
+        table.add(node.clone());
 
         assert_eq!(table.add(node), false);
         assert_eq!(table.is_empty(), true)
@@ -391,10 +394,7 @@ mod test {
 
         let nodes: Vec<Node> = ids
             .iter()
-            .map(|id| Node {
-                id: Id::from_bytes(id.to_owned()).unwrap(),
-                address: SocketAddr::from(([0, 0, 0, 0], 0)),
-            })
+            .map(|id| Node::random().with_id(Id::from_bytes(id.to_owned()).unwrap()))
             .collect();
 
         let expected_closest_ids = [
