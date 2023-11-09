@@ -19,7 +19,7 @@ pub struct KrpcSocket {
     socket: UdpSocket,
     pub read_only: bool,
     pub request_timeout: Duration,
-    inflight_requests: HashMap<u16, InflightRequest>,
+    pub inflight_requests: HashMap<u16, InflightRequest>,
 }
 
 #[derive(Debug)]

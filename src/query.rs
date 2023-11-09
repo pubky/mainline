@@ -13,10 +13,11 @@ use crate::socket::KrpcSocket;
 #[derive(Debug)]
 pub struct Query {
     target: Id,
-    pub request: RequestSpecific,
-    pub table: RoutingTable,
+    request: RequestSpecific,
+    table: RoutingTable,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
+    // TODO add last refresed
 }
 
 impl Query {
@@ -27,18 +28,30 @@ impl Query {
             target,
             request,
             table,
-            // TODO: get timeout events from the socket.
             inflight_requests: Vec::new(),
             visited: HashSet::new(),
         }
+    }
+
+    // === Getters ===
+    pub fn is_empty(&self) -> bool {
+        self.table.is_empty()
     }
 
     pub fn is_done(&self) -> bool {
         self.inflight_requests.is_empty()
     }
 
-    pub fn finish(&mut self) {
-        self.visited.clear();
+    pub fn closest(&self, target: &Id) -> Vec<Node> {
+        self.table.closest(&self.target)
+    }
+
+    // === Public Methods ===
+
+    /// Add a node to the correct routing table.
+    pub fn add(&mut self, node: Node) {
+        // ready for a ipv6 routing table?
+        self.table.add(node);
     }
 
     pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddr) {
@@ -52,7 +65,8 @@ impl Query {
         self.visited.insert(address);
     }
 
-    pub fn closer_nodes(&mut self, tid: u16, from: SocketAddr, nodes: Vec<Node>) -> bool {
+    /// If the closer nodes are from a response to a request sent by this query, return true.
+    pub fn add_closer_nodes(&mut self, tid: u16, from: SocketAddr, nodes: Vec<Node>) -> bool {
         if let Some(index) = self.inflight_requests.iter().position(|&x| x == tid) {
             self.inflight_requests.remove(index);
 
@@ -66,19 +80,37 @@ impl Query {
         false
     }
 
-    pub fn next(&mut self, socket: &mut KrpcSocket) {
-        let closest = self.table.closest(&self.target);
+    /// Query closest nodes for this query's target and message.
+    pub fn tick(&mut self, socket: &mut KrpcSocket) {
+        self.timeout(socket);
+        self.next(socket);
+    }
 
-        if closest.is_empty() {
-            return if self.is_done() { self.finish() } else { () };
+    // === Private Methods ===
+    fn next(&mut self, socket: &mut KrpcSocket) {
+        let mut to_visit = self.table.closest(&self.target);
+        to_visit.retain(|node| !self.visited.contains(&node.address));
+
+        if to_visit.is_empty() && self.inflight_requests.is_empty() {
+            // No more closer nodes to visit, and no inflight requests to wait for
+            // reset the visited set.
+            self.finish();
+
+            return;
         }
 
-        for node in closest {
-            if self.visited.contains(&node.address) {
-                continue;
-            };
-
+        for node in to_visit {
             self.visit(socket, node.address);
         }
+    }
+
+    /// Remove timed out requests.
+    fn timeout(&mut self, socket: &KrpcSocket) {
+        self.inflight_requests
+            .retain(|&tid| socket.inflight_requests.contains_key(&tid));
+    }
+
+    fn finish(&mut self) {
+        self.visited.clear();
     }
 }

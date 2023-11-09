@@ -19,9 +19,8 @@ use crate::socket::KrpcSocket;
 use crate::Result;
 
 const DEFAULT_PORT: u16 = 6881;
-const DEFAULT_TIMEOUT_MILLIS: u64 = 500;
 const MTU: usize = 2048;
-const TICK_INTERVAL: Duration = Duration::from_millis(500);
+const TICK_INTERVAL: Duration = Duration::from_millis(15);
 const QUERIES_CACHE_SIZE: usize = 1000;
 const DEFAULT_BOOTSTRAP_NODES: [&str; 9] = [
     "dht.transmissionbt.com:6881",
@@ -132,11 +131,10 @@ impl Rpc {
         };
 
         // === Refresh own query ===
-        if !self.own_query.is_done() {
-            self.own_query.next(&mut self.socket);
-        }
+        self.own_query.tick(&mut self.socket);
 
         // === Refresh queries ===
+        // TODO: timeout queres
         // for query in self.queries.values() {
         //     for node in query.closest.iter() {
         //         self.socket.request(node.address, &query.request);
@@ -170,8 +168,10 @@ impl Rpc {
     pub fn query(&mut self, target: Id, request: RequestSpecific) {
         // If query exists and it's set to done, restart it.
         if let Some(query) = self.queries.get_mut(&target) {
-            // TODO restart queries.
-            // query.start();
+            // TODO query closest if it is done.
+            // if query.is_done() {
+            //   query.tick();
+            // }
             return;
         }
 
@@ -181,7 +181,7 @@ impl Rpc {
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     pub fn populate(&mut self) {
-        if !self.own_query.table.is_empty() || !self.own_query.is_done() {
+        if !self.own_query.is_empty() || !self.own_query.is_done() {
             return;
         }
 
@@ -217,7 +217,7 @@ impl Rpc {
                     transaction_id,
                     ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
                         responder_id: self.id,
-                        nodes: self.own_query.table.closest(target),
+                        nodes: self.own_query.closest(target),
                     }),
                 );
             }
@@ -254,9 +254,7 @@ impl Rpc {
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
         if let Some(id) = message.get_author_id() {
-            if !self.own_query.table.contains(&id) {
-                self.own_query.table.add(Node::new(id, from));
-            }
+            self.own_query.add(Node::new(id, from));
         }
     }
 
@@ -269,7 +267,7 @@ impl Rpc {
             // Check own_query first.
             if self
                 .own_query
-                .closer_nodes(message.transaction_id, from, nodes)
+                .add_closer_nodes(message.transaction_id, from, nodes)
             {
                 return;
             }
@@ -303,16 +301,29 @@ mod test {
             });
         }
 
-        let interval = 50;
-        let mut client = Rpc::new()
-            .unwrap()
-            .with_bootstrap(bootstrap)
-            .with_interval(interval);
+        let mut client = Rpc::new().unwrap().with_bootstrap(bootstrap);
 
         let client_thread = thread::spawn(move || loop {
             client.tick();
             if client.own_query.is_done() {
-                assert!(client.own_query.table.to_vec().len() >= 20);
+                assert!(client.own_query.closest(&client.id).len() >= 20);
+                break;
+            }
+        });
+
+        client_thread.join().unwrap();
+    }
+
+    // Live tests that shouldn't run in CI etc.
+
+    // #[test]
+    fn live_bootstrap() {
+        let mut client = Rpc::new().unwrap();
+
+        let client_thread = thread::spawn(move || loop {
+            client.tick();
+            if client.own_query.is_done() {
+                assert!(client.own_query.closest(&client.id).len() >= 20);
                 break;
             }
         });
