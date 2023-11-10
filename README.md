@@ -13,15 +13,15 @@ For the foreseeable future, this library is limited to the scope of [read-only](
     - [x] Response
   - [x] query (incrementally get closer nodes)
   - [ ] Announce/Get peers
-    - [ ] Request
-    - [ ] Response
+    - [ ] Get
+    - [ ] Put
 - [ ] BEP0044 arbitrary storage
   - [ ] Mutable data
-    - [ ] Request
-    - [ ] Response
+    - [ ] Get
+    - [ ] Put
   - [ ] Immutable data
-    - [ ] Request
-    - [ ] Response
+    - [ ] Get
+    - [ ] Put
 - [x] BEP0043 read-only
   - [x] Does not handle incoming requests if read-only
   - [x] Inform other nodes that this node is read-only
