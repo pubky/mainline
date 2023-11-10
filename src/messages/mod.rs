@@ -93,13 +93,8 @@ pub struct GetPeersRequestArguments {
 pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
-    pub values: GetPeersResponseValues,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum GetPeersResponseValues {
-    Nodes(Vec<Node>),
-    Peers(Vec<SocketAddr>),
+    pub nodes: Option<Vec<Node>>,
+    pub values: Option<Vec<SocketAddr>>,
 }
 
 impl Message {
@@ -157,18 +152,11 @@ impl Message {
                             arguments: internal::DHTGetPeersResponseArguments {
                                 id: get_peers_args.responder_id.to_vec(),
                                 token: get_peers_args.token.clone(),
-                                nodes: match &get_peers_args.values {
-                                    GetPeersResponseValues::Nodes(nodes) => {
-                                        Some(nodes4_to_bytes(nodes))
-                                    }
-                                    _ => None,
-                                },
-                                values: match &get_peers_args.values {
-                                    GetPeersResponseValues::Peers(peers) => {
-                                        Some(peers_to_bytes(peers))
-                                    }
-                                    _ => None,
-                                },
+                                nodes: get_peers_args
+                                    .nodes
+                                    .as_ref()
+                                    .map(|nodes| nodes4_to_bytes(nodes)),
+                                values: get_peers_args.values.as_ref().map(peers_to_bytes),
                             },
                         }
                     }
@@ -239,16 +227,13 @@ impl Message {
                             ResponseSpecific::GetPeersResponse(GetPeersResponseArguments {
                                 responder_id: Id::from_bytes(&arguments.id)?,
                                 token: arguments.token.clone(),
-                                values: if arguments.values.is_some() {
-                                    GetPeersResponseValues::Peers(bytes_to_peers(
-                                        &arguments.values.as_ref().unwrap(),
-                                    )?)
-                                } else if arguments.nodes.is_some() {
-                                    GetPeersResponseValues::Nodes(bytes_to_nodes4(
-                                        &arguments.nodes.as_ref().unwrap(),
-                                    )?)
-                                } else {
-                                    GetPeersResponseValues::Nodes(vec![])
+                                nodes: match arguments.nodes {
+                                    Some(nodes) => Some(bytes_to_nodes4(nodes)?),
+                                    None => None,
+                                },
+                                values: match arguments.values {
+                                    Some(values) => Some(bytes_to_peers(values)?),
+                                    None => None,
                                 },
                             })
                         }
@@ -330,6 +315,7 @@ impl Message {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::FindNodeResponse(arguments) => Some(arguments.nodes.clone()),
+                ResponseSpecific::GetPeersResponse(arguments) => arguments.nodes.as_ref().cloned(),
                 _ => None,
             },
             _ => None,
@@ -593,10 +579,11 @@ mod tests {
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
-                    values: GetPeersResponseValues::Nodes(vec![Node::new(
+                    nodes: Some(vec![Node::new(
                         Id::random(),
                         "49.50.52.52:5354".parse().unwrap(),
                     )]),
+                    values: None,
                 },
             )),
         };
@@ -619,9 +606,8 @@ mod tests {
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
-                    values: GetPeersResponseValues::Peers(vec!["123.123.123.123:123"
-                        .parse()
-                        .unwrap()]),
+                    nodes: None,
+                    values: Some(vec!["123.123.123.123:123".parse().unwrap()]),
                 },
             )),
         };

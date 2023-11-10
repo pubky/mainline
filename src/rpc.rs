@@ -9,8 +9,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::common::{Id, Node};
 use crate::messages::{
-    FindNodeRequestArguments, FindNodeResponseArguments, Message, MessageType,
-    PingRequestArguments, PingResponseArguments, RequestSpecific, ResponseSpecific,
+    FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
+    GetPeersResponseArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
+    RequestSpecific, ResponseSpecific,
 };
 
 use crate::query::Query;
@@ -22,11 +23,10 @@ const DEFAULT_PORT: u16 = 6881;
 const MTU: usize = 2048;
 const TICK_INTERVAL: Duration = Duration::from_millis(15);
 const QUERIES_CACHE_SIZE: usize = 1000;
-const DEFAULT_BOOTSTRAP_NODES: [&str; 9] = [
+const DEFAULT_BOOTSTRAP_NODES: [&str; 8] = [
     "dht.transmissionbt.com:6881",
     "dht.libtorrent.org:25401", // @arvidn's
     "router.bittorrent.com:6881",
-    "router.pkarr.org:6881",
     "router.bittorrent.cloud:42069", // Seems to be read-only.
     "router.utorrent.com:6881",
     "dht.aelitis.com:6881",   // Vuze doesn't respond in home network.
@@ -125,7 +125,6 @@ impl Rpc {
         };
 
         // === Refresh queries ===
-        // TODO: timeout queres
         for (_, query) in self.queries.iter_mut() {
             query.tick(&mut self.socket);
         }
@@ -157,43 +156,53 @@ impl Rpc {
     pub fn query(&mut self, target: Id, request: RequestSpecific) {
         // If query exists and it's set to done, restart it.
         if let Some(query) = self.queries.get_mut(&target) {
-            // TODO query closest if it is done.
-            // if query.is_done() {
-            //   query.tick();
-            // }
+            if query.is_done() {
+                query.start(&mut self.socket);
+            }
             return;
         }
 
-        let query = Query::new(target, request);
+        let mut query = Query::new(target, request);
+
+        let closest = self.routing_table.closest(&target);
+
+        // If we don't have enough or any closest nodes, call the bootstraping nodes.
+        if closest.is_empty() || closest.len() < self.bootstrap.len() {
+            for bootstrapping_node in self.bootstrap.clone() {
+                if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
+                    for address in addresses {
+                        query.visit(&mut self.socket, address);
+                    }
+                }
+            }
+        } else {
+            // Seed this query with the closest nodes we know about.
+            for node in closest {
+                query.add(node)
+            }
+
+            // After adding the nodes, we need to start the query.
+            query.start(&mut self.socket);
+        }
+
         self.queries.put(target, query);
     }
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     pub fn populate(&mut self) {
         if !self.routing_table.is_empty() {
-            // No need for populating.
+            // No need for populating. Already called our bootstrap nodes?
             return;
         }
 
-        if let Some(query) = self.queries.get_mut(&self.id) {
-            // We are currently populating.
-            if !query.is_done() {
-                return;
-            }
-
-            self.visit_bootstrap();
-        } else {
-            // Start the query.
-            self.query(
-                self.id,
-                RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
-                    target: self.id,
-                    requester_id: self.id,
-                }),
-            );
-
-            self.visit_bootstrap();
-        }
+        // Start or restart the query.
+        self.query(
+            self.id,
+            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+                target: self.id,
+                requester_id: self.id,
+            }),
+        );
     }
 
     // === Private Methods ===
@@ -205,18 +214,6 @@ impl Rpc {
         } else {
             false
         };
-    }
-
-    fn visit_bootstrap(&mut self) {
-        if let Some(query) = self.queries.get_mut(&self.id) {
-            for bootstrapping_node in self.bootstrap.clone() {
-                if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
-                    for address in addresses {
-                        query.visit(&mut self.socket, address);
-                    }
-                }
-            }
-        }
     }
 
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
@@ -271,6 +268,19 @@ impl Rpc {
             }) => {
                 // TODO: check a corresponding query
             }
+            ResponseSpecific::GetPeersResponse(GetPeersResponseArguments {
+                responder_id,
+                token,
+                values,
+                ..
+            }) => {
+                if let Some(peers) = values {
+                    println!(
+                        "Got get peers response from: {:?}, values: {:?}\n",
+                        from, values
+                    )
+                };
+            }
             _ => {}
         }
     }
@@ -286,7 +296,6 @@ impl Rpc {
     }
 
     fn add_closer_nodes(&mut self, message: &Message) {
-        // TODO: don't add read-only nodes.
         if let Some(nodes) = message.get_closer_nodes() {
             if nodes.is_empty() {
                 return;
@@ -303,6 +312,8 @@ impl Rpc {
 
 #[cfg(test)]
 mod test {
+    use crate::messages::GetPeersRequestArguments;
+
     use super::*;
     use std::convert::TryInto;
 
@@ -361,6 +372,29 @@ mod test {
                 assert!(client.routing_table.closest(&client.id).len() >= 20);
                 break;
             }
+        });
+
+        client_thread.join().unwrap();
+    }
+
+    #[test]
+    fn live_get_peers() {
+        let mut client = Rpc::new().unwrap().with_read_only(true);
+
+        let target: Id = "74b91eb651b9fac2f09441ee73aafb49404cbd27"
+            .try_into()
+            .unwrap();
+
+        client.query(
+            target,
+            RequestSpecific::GetPeersRequest(GetPeersRequestArguments {
+                info_hash: target,
+                requester_id: client.id,
+            }),
+        );
+
+        let client_thread = thread::spawn(move || loop {
+            client.tick();
         });
 
         client_thread.join().unwrap();

@@ -39,7 +39,7 @@ impl Query {
     }
 
     pub fn is_done(&self) -> bool {
-        self.inflight_requests.is_empty()
+        self.inflight_requests.is_empty() && self.visited.is_empty()
     }
 
     pub fn closest(&self, target: &Id) -> Vec<Node> {
@@ -83,18 +83,24 @@ impl Query {
 
     /// Query closest nodes for this query's target and message.
     pub fn tick(&mut self, socket: &mut KrpcSocket) {
-        self.clear_timedout_requests(socket);
+        // If there are no more inflight requests, and visited is empty, then
+        // last tick we didn't add any closer nodes, so we are done traversing.
+        if !self.is_done() {
+            self.visit_closest(socket);
+        }
+
+        // First we clear timedout requests.
+        // If no requests remain, then visit_closest didn't add any closer nodes,
+        // so we remove all visited addresses to set the query to "done" again.
+        self.cleanup(socket);
+    }
+
+    /// Force start query traversal by visiting closest nodes.
+    pub fn start(&mut self, socket: &mut KrpcSocket) {
         self.visit_closest(socket);
-        self.cleanup_after_finish(socket);
     }
 
     // === Private Methods ===
-
-    /// Remove timed out requests.
-    fn clear_timedout_requests(&mut self, socket: &KrpcSocket) {
-        self.inflight_requests
-            .retain(|&tid| socket.inflight_requests.contains_key(&tid));
-    }
 
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
         let mut to_visit = self.table.closest(&self.target);
@@ -105,8 +111,16 @@ impl Query {
         }
     }
 
-    fn cleanup_after_finish(&mut self, socket: &mut KrpcSocket) {
+    fn cleanup(&mut self, socket: &mut KrpcSocket) {
+        self.inflight_requests
+            .retain(|&tid| socket.inflight_requests.contains_key(&tid));
+
         if self.inflight_requests.is_empty() && !self.visited.is_empty() {
+            println!(
+                "Query: {:?} done, visited: {}",
+                self.target,
+                self.visited.len()
+            );
             // No more closer nodes to visit, and no inflight requests to wait for
             // reset the visited set.
             self.visited.clear();
