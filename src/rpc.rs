@@ -37,7 +37,7 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 9] = [
 #[derive(Debug)]
 pub struct Rpc {
     socket: KrpcSocket,
-    own_query: Query,
+    routing_table: RoutingTable,
     queries: LruCache<Id, Query>,
 
     // Options
@@ -62,13 +62,7 @@ impl Rpc {
             interval: TICK_INTERVAL,
 
             socket,
-            own_query: Query::new(
-                id,
-                RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
-                    target: id,
-                    requester_id: id,
-                }),
-            ),
+            routing_table: RoutingTable::new().with_id(id),
             queries: LruCache::new(NonZeroUsize::new(QUERIES_CACHE_SIZE).unwrap()),
         })
     }
@@ -115,7 +109,7 @@ impl Rpc {
 
         if let Some((message, from)) = self.socket.recv_from() {
             self.add_node(&message, from);
-            self.add_closer_nodes(&message, from);
+            self.add_closer_nodes(&message);
 
             match &message.message_type {
                 MessageType::Request(request_specific) => {
@@ -130,16 +124,11 @@ impl Rpc {
             }
         };
 
-        // === Refresh own query ===
-        self.own_query.tick(&mut self.socket);
-
         // === Refresh queries ===
         // TODO: timeout queres
-        // for query in self.queries.values() {
-        //     for node in query.closest.iter() {
-        //         self.socket.request(node.address, &query.request);
-        //     }
-        // }
+        for (_, query) in self.queries.iter_mut() {
+            query.tick(&mut self.socket);
+        }
 
         thread::sleep(self.interval);
         None
@@ -181,20 +170,54 @@ impl Rpc {
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     pub fn populate(&mut self) {
-        if !self.own_query.is_empty() || !self.own_query.is_done() {
+        if !self.routing_table.is_empty() {
+            // No need for populating.
             return;
         }
 
-        for bootstrapping_node in self.bootstrap.clone() {
-            if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
-                for address in addresses {
-                    self.own_query.visit(&mut self.socket, address);
-                }
+        if let Some(query) = self.queries.get_mut(&self.id) {
+            // We are currently populating.
+            if !query.is_done() {
+                return;
             }
+
+            self.visit_bootstrap();
+        } else {
+            // Start the query.
+            self.query(
+                self.id,
+                RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+                    target: self.id,
+                    requester_id: self.id,
+                }),
+            );
+
+            self.visit_bootstrap();
         }
     }
 
     // === Private Methods ===
+
+    /// Return a boolean indicating whether the bootstrapping query is done.
+    fn is_ready(&mut self) -> bool {
+        return if let Some(query) = self.queries.get(&self.id) {
+            query.is_done()
+        } else {
+            false
+        };
+    }
+
+    fn visit_bootstrap(&mut self) {
+        if let Some(query) = self.queries.get_mut(&self.id) {
+            for bootstrapping_node in self.bootstrap.clone() {
+                if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
+                    for address in addresses {
+                        query.visit(&mut self.socket, address);
+                    }
+                }
+            }
+        }
+    }
 
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
         match request {
@@ -217,7 +240,7 @@ impl Rpc {
                     transaction_id,
                     ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
                         responder_id: self.id,
-                        nodes: self.own_query.closest(target),
+                        nodes: self.routing_table.closest(target),
                     }),
                 );
             }
@@ -253,26 +276,24 @@ impl Rpc {
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
+        // TODO: don't add read-only nodes.
         if let Some(id) = message.get_author_id() {
-            self.own_query.add(Node::new(id, from));
+            self.routing_table.add(Node::new(id, from));
         }
     }
 
-    fn add_closer_nodes(&mut self, message: &Message, from: SocketAddr) {
+    fn add_closer_nodes(&mut self, message: &Message) {
+        // TODO: don't add read-only nodes.
         if let Some(nodes) = message.get_closer_nodes() {
             if nodes.is_empty() {
                 return;
             }
 
-            // Check own_query first.
-            if self
-                .own_query
-                .add_closer_nodes(message.transaction_id, from, nodes)
-            {
-                return;
+            for (_, query) in self.queries.iter_mut() {
+                if (query.add_candidates(message.transaction_id, &mut self.socket, &nodes)) {
+                    return;
+                }
             }
-
-            // TODO check all other queries.
         }
     }
 }
@@ -282,17 +303,16 @@ mod test {
     use super::*;
     use std::convert::TryInto;
 
-    #[test]
-    fn bootstrap() {
+    fn testnet(n: usize) -> Vec<String> {
         let mut bootstrap: Vec<String> = Vec::with_capacity(1);
 
-        for i in 0..50 {
+        for i in 0..n {
             let mut rpc = Rpc::new().unwrap();
 
             if i > 0 {
-                rpc = rpc.with_bootstrap(bootstrap.clone()).with_interval(10);
+                rpc = rpc.with_bootstrap(bootstrap.clone());
             } else {
-                rpc = rpc.with_bootstrap(vec![]).with_interval(10);
+                rpc = rpc.with_bootstrap(vec![]);
                 &bootstrap.push(format!("0.0.0.0:{}", rpc.local_addr().port()));
             }
 
@@ -301,12 +321,23 @@ mod test {
             });
         }
 
+        bootstrap
+    }
+
+    #[test]
+    fn bootstrap() {
+        let bootstrap = testnet(50);
+
+        // Wait for nodes to connect to each other.
+        thread::sleep(Duration::from_secs(2));
+
         let mut client = Rpc::new().unwrap().with_bootstrap(bootstrap);
 
         let client_thread = thread::spawn(move || loop {
             client.tick();
-            if client.own_query.is_done() {
-                assert!(client.own_query.closest(&client.id).len() >= 20);
+
+            if client.is_ready() {
+                assert!(client.routing_table.closest(&client.id).len() >= 20);
                 break;
             }
         });
@@ -322,8 +353,9 @@ mod test {
 
         let client_thread = thread::spawn(move || loop {
             client.tick();
-            if client.own_query.is_done() {
-                assert!(client.own_query.closest(&client.id).len() >= 20);
+
+            if client.is_ready() {
+                assert!(client.routing_table.closest(&client.id).len() >= 20);
                 break;
             }
         });

@@ -65,13 +65,14 @@ impl Query {
         self.visited.insert(address);
     }
 
-    /// If the closer nodes are from a response to a request sent by this query, return true.
-    pub fn add_closer_nodes(&mut self, tid: u16, from: SocketAddr, nodes: Vec<Node>) -> bool {
+    /// If the claimed closer nodes are from a response to a request sent by this query, add to the
+    /// routing table and return true, otherwise return false.
+    pub fn add_candidates(&mut self, tid: u16, socket: &mut KrpcSocket, nodes: &Vec<Node>) -> bool {
         if let Some(index) = self.inflight_requests.iter().position(|&x| x == tid) {
             self.inflight_requests.remove(index);
 
             for node in nodes {
-                self.table.add(node);
+                self.add(node.clone());
             }
 
             return true;
@@ -82,35 +83,33 @@ impl Query {
 
     /// Query closest nodes for this query's target and message.
     pub fn tick(&mut self, socket: &mut KrpcSocket) {
-        self.timeout(socket);
-        self.next(socket);
+        self.clear_timedout_requests(socket);
+        self.visit_closest(socket);
+        self.cleanup_after_finish(socket);
     }
 
     // === Private Methods ===
-    fn next(&mut self, socket: &mut KrpcSocket) {
+
+    /// Remove timed out requests.
+    fn clear_timedout_requests(&mut self, socket: &KrpcSocket) {
+        self.inflight_requests
+            .retain(|&tid| socket.inflight_requests.contains_key(&tid));
+    }
+
+    fn visit_closest(&mut self, socket: &mut KrpcSocket) {
         let mut to_visit = self.table.closest(&self.target);
         to_visit.retain(|node| !self.visited.contains(&node.address));
-
-        if to_visit.is_empty() && self.inflight_requests.is_empty() {
-            // No more closer nodes to visit, and no inflight requests to wait for
-            // reset the visited set.
-            self.finish();
-
-            return;
-        }
 
         for node in to_visit {
             self.visit(socket, node.address);
         }
     }
 
-    /// Remove timed out requests.
-    fn timeout(&mut self, socket: &KrpcSocket) {
-        self.inflight_requests
-            .retain(|&tid| socket.inflight_requests.contains_key(&tid));
-    }
-
-    fn finish(&mut self) {
-        self.visited.clear();
+    fn cleanup_after_finish(&mut self, socket: &mut KrpcSocket) {
+        if self.inflight_requests.is_empty() && !self.visited.is_empty() {
+            // No more closer nodes to visit, and no inflight requests to wait for
+            // reset the visited set.
+            self.visited.clear();
+        }
     }
 }

@@ -60,6 +60,7 @@ impl Node {
         self
     }
 
+    /// Node is last seen more than a threshold ago.
     pub fn is_stale(&self) -> bool {
         self.last_seen.elapsed() > STALE_TIME
     }
