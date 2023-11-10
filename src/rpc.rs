@@ -276,7 +276,10 @@ impl Rpc {
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
-        // TODO: don't add read-only nodes.
+        if (message.read_only) {
+            return;
+        }
+
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }

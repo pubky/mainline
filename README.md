@@ -22,10 +22,10 @@ For the foreseeable future, this library is limited to the scope of [read-only](
   - [ ] Immutable data
     - [ ] Request
     - [ ] Response
-- [ ] BEP0043 read-only
+- [x] BEP0043 read-only
   - [x] Does not handle incoming requests if read-only
   - [x] Inform other nodes that this node is read-only
-  - [ ] Does not add read-only nodes to local routing tables
+  - [x] Does not add read-only nodes to local routing tables
 - [ ] Features for long living clients
   - [ ] Refresh nodes in the local rounting table frequently enough
   - [ ] Refresh cached queries to keep closest nodes fresh, skipping get before put
