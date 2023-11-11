@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
@@ -244,7 +243,7 @@ mod test {
         client.next_tid = 120;
 
         let client_address = client.local_addr();
-        let request = RequestSpecific::PingRequest(PingRequestArguments {
+        let request = RequestSpecific::Ping(PingRequestArguments {
             requester_id: Id::random(),
         });
 
@@ -287,7 +286,7 @@ mod test {
             },
         );
 
-        let response = ResponseSpecific::PingResponse(PingResponseArguments {
+        let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
         });
 
@@ -325,7 +324,7 @@ mod test {
 
         let client_address = client.local_addr();
 
-        let response = ResponseSpecific::PingResponse(PingResponseArguments {
+        let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
         });
 
@@ -361,7 +360,7 @@ mod test {
             },
         );
 
-        let response = ResponseSpecific::PingResponse(PingResponseArguments {
+        let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
         });
 
@@ -389,7 +388,7 @@ mod test {
         client.next_tid = 120;
 
         let client_address = client.local_addr();
-        let request = RequestSpecific::PingRequest(PingRequestArguments {
+        let request = RequestSpecific::Ping(PingRequestArguments {
             requester_id: Id::random(),
         });
 

@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::mpsc::{self, Receiver, Sender};
 
 use crate::common::{Id, Node};
-use crate::messages::{Message, RequestSpecific};
+use crate::messages::RequestSpecific;
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
 
@@ -22,7 +21,7 @@ pub struct Query {
 
 impl Query {
     pub fn new(target: Id, request: RequestSpecific) -> Self {
-        let mut table = RoutingTable::new().with_id(target);
+        let table = RoutingTable::new().with_id(target);
 
         Self {
             target,
@@ -86,6 +85,7 @@ impl Query {
         // If there are no more inflight requests, and visited is empty, then
         // last tick we didn't add any closer nodes, so we are done traversing.
         if !self.is_done() {
+            // TODO: if is_done() return;
             self.visit_closest(socket);
         }
 

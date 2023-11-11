@@ -1,17 +1,13 @@
 use lru::LruCache;
-use std::collections::BTreeMap;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crate::common::{Id, Node};
 use crate::messages::{
-    FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
-    GetPeersResponseArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
-    RequestSpecific, ResponseSpecific,
+    FindNodeRequestArguments, FindNodeResponseArguments, GetPeersResponseArguments, Message,
+    MessageType, PingRequestArguments, PingResponseArguments, RequestSpecific, ResponseSpecific,
 };
 
 use crate::query::Query;
@@ -19,8 +15,6 @@ use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
 use crate::Result;
 
-const DEFAULT_PORT: u16 = 6881;
-const MTU: usize = 2048;
 const TICK_INTERVAL: Duration = Duration::from_millis(15);
 const QUERIES_CACHE_SIZE: usize = 1000;
 const DEFAULT_BOOTSTRAP_NODES: [&str; 8] = [
@@ -108,15 +102,22 @@ impl Rpc {
         self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
-            self.add_node(&message, from);
-            self.add_closer_nodes(&message);
+            if !message.read_only {
+                self.add_node(&message, from);
+                self.add_closer_nodes(&message);
+            }
 
             match &message.message_type {
                 MessageType::Request(request_specific) => {
                     self.handle_request(from, message.transaction_id, request_specific);
                 }
                 MessageType::Response(response_specific) => {
-                    self.handle_response(from, message.transaction_id, response_specific);
+                    self.handle_response(
+                        from,
+                        message.transaction_id,
+                        response_specific,
+                        message.version,
+                    );
                 }
                 MessageType::Error(_) => {
                     // TODO: Handle error messages!
@@ -256,6 +257,7 @@ impl Rpc {
         from: SocketAddr,
         transaction_id: u16,
         response: &ResponseSpecific,
+        version: Option<Vec<u8>>,
     ) {
         match response {
             ResponseSpecific::Ping(PingResponseArguments { responder_id }) => {
@@ -276,8 +278,8 @@ impl Rpc {
             }) => {
                 if let Some(peers) = values {
                     println!(
-                        "Got get peers response from: {:?}, values: {:?}\n",
-                        from, values
+                        "Got get peers response from: {:?}, values: {:?} version: {:?}\n",
+                        from, values, version
                     )
                 };
             }
@@ -286,10 +288,6 @@ impl Rpc {
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
-        if (message.read_only) {
-            return;
-        }
-
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
@@ -302,7 +300,7 @@ impl Rpc {
             }
 
             for (_, query) in self.queries.iter_mut() {
-                if (query.add_candidates(message.transaction_id, &mut self.socket, &nodes)) {
+                if query.add_candidates(message.transaction_id, &mut self.socket, &nodes) {
                     return;
                 }
             }
@@ -327,7 +325,7 @@ mod test {
                 rpc = rpc.with_bootstrap(bootstrap.clone());
             } else {
                 rpc = rpc.with_bootstrap(vec![]);
-                &bootstrap.push(format!("0.0.0.0:{}", rpc.local_addr().port()));
+                let _ = &bootstrap.push(format!("0.0.0.0:{}", rpc.local_addr().port()));
             }
 
             thread::spawn(move || loop {
@@ -377,18 +375,17 @@ mod test {
         client_thread.join().unwrap();
     }
 
-    #[test]
+    // #[test]
     fn live_get_peers() {
         let mut client = Rpc::new().unwrap().with_read_only(true);
 
-        let target: Id = "74b91eb651b9fac2f09441ee73aafb49404cbd27"
+        let target: Id = "bbef239433fdfa3210bda92cbeb09c98cbce5d0a"
             .try_into()
             .unwrap();
 
-        let start = Instant::now();
         client.query(
             target,
-            RequestSpecific::GetPeersRequest(GetPeersRequestArguments {
+            RequestSpecific::GetPeers(GetPeersRequestArguments {
                 info_hash: target,
                 requester_id: client.id,
             }),

@@ -1,11 +1,8 @@
 //! Simplified Kademlia routing table
 
-use std::collections::btree_map::Values;
 use std::collections::BTreeMap;
 use std::fmt::{self, Debug, Formatter};
-use std::iter::Take;
 use std::slice::Iter;
-use std::time::{Duration, Instant};
 
 use crate::common::{Id, Node, MAX_DISTANCE};
 
