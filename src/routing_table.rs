@@ -61,7 +61,7 @@ impl RoutingTable {
     }
 
     pub fn closest(&self, target: &Id) -> Vec<Node> {
-        let mut result = Vec::with_capacity(20);
+        let mut result = Vec::with_capacity(MAX_BUCKET_SIZE_K);
         let distance = self.id.distance(target);
 
         for i in
@@ -184,12 +184,12 @@ impl KBucket {
 
 impl Debug for KBucket {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        // write!(f, "Bucket {{ nodes {} }}", self.nodes.len())
-        writeln!(f, "Bucket{{");
-        for node in &self.nodes {
-            writeln!(f, "  {:?}", node);
-        }
-        write!(f, "}}")
+        write!(f, "Bucket {{ nodes {} }}", self.nodes.len())
+        // writeln!(f, "Bucket{{");
+        // for node in &self.nodes {
+        //     writeln!(f, "  {:?}", node);
+        // }
+        // write!(f, "}}")
     }
 }
 
@@ -200,7 +200,7 @@ mod test {
 
     use crate::{
         common::{Id, Node},
-        routing_table::{KBucket, RoutingTable},
+        routing_table::{KBucket, RoutingTable, MAX_BUCKET_SIZE_K},
     };
 
     #[test]
@@ -283,7 +283,7 @@ mod test {
         let id = Id::random();
         let mut bucket = KBucket::new();
 
-        for i in 0..20 {
+        for i in 0..MAX_BUCKET_SIZE_K {
             let node = Node::random();
             assert!(bucket.add(node), "Failed to add node {}", i);
         }

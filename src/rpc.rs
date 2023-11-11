@@ -136,7 +136,7 @@ impl Rpc {
     pub fn ping(&mut self, address: SocketAddr) -> u16 {
         self.socket.request(
             address,
-            RequestSpecific::PingRequest(PingRequestArguments {
+            RequestSpecific::Ping(PingRequestArguments {
                 requester_id: self.id,
             }),
         )
@@ -145,7 +145,7 @@ impl Rpc {
     pub fn find_node(&mut self, address: SocketAddr, target: Id) -> u16 {
         self.socket.request(
             address,
-            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+            RequestSpecific::FindNode(FindNodeRequestArguments {
                 target,
                 requester_id: self.id,
             }),
@@ -198,7 +198,7 @@ impl Rpc {
         // Start or restart the query.
         self.query(
             self.id,
-            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+            RequestSpecific::FindNode(FindNodeRequestArguments {
                 target: self.id,
                 requester_id: self.id,
             }),
@@ -219,23 +219,23 @@ impl Rpc {
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
         match request {
             // TODO: Handle bad requests (send an error message).
-            RequestSpecific::PingRequest(PingRequestArguments { requester_id }) => {
+            RequestSpecific::Ping(PingRequestArguments { requester_id }) => {
                 self.socket.response(
                     from,
                     transaction_id,
-                    ResponseSpecific::PingResponse(PingResponseArguments {
+                    ResponseSpecific::Ping(PingResponseArguments {
                         responder_id: self.id,
                     }),
                 );
             }
-            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+            RequestSpecific::FindNode(FindNodeRequestArguments {
                 target,
                 requester_id,
             }) => {
                 self.socket.response(
                     from,
                     transaction_id,
-                    ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
+                    ResponseSpecific::FindNode(FindNodeResponseArguments {
                         responder_id: self.id,
                         nodes: self.routing_table.closest(target),
                     }),
@@ -258,17 +258,17 @@ impl Rpc {
         response: &ResponseSpecific,
     ) {
         match response {
-            ResponseSpecific::PingResponse(PingResponseArguments { responder_id }) => {
+            ResponseSpecific::Ping(PingResponseArguments { responder_id }) => {
                 //
             }
             //  === Responses to queries with closer nodes. ===
-            ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
+            ResponseSpecific::FindNode(FindNodeResponseArguments {
                 responder_id,
                 nodes,
             }) => {
                 // TODO: check a corresponding query
             }
-            ResponseSpecific::GetPeersResponse(GetPeersResponseArguments {
+            ResponseSpecific::GetPeers(GetPeersResponseArguments {
                 responder_id,
                 token,
                 values,
@@ -385,6 +385,7 @@ mod test {
             .try_into()
             .unwrap();
 
+        let start = Instant::now();
         client.query(
             target,
             RequestSpecific::GetPeersRequest(GetPeersRequestArguments {

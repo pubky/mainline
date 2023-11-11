@@ -45,16 +45,16 @@ pub struct ErrorSpecific {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum RequestSpecific {
-    PingRequest(PingRequestArguments),
-    FindNodeRequest(FindNodeRequestArguments),
-    GetPeersRequest(GetPeersRequestArguments),
+    Ping(PingRequestArguments),
+    FindNode(FindNodeRequestArguments),
+    GetPeers(GetPeersRequestArguments),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ResponseSpecific {
-    PingResponse(PingResponseArguments),
-    FindNodeResponse(FindNodeResponseArguments),
-    GetPeersResponse(GetPeersResponseArguments),
+    Ping(PingResponseArguments),
+    FindNode(FindNodeResponseArguments),
+    GetPeers(GetPeersResponseArguments),
 }
 
 // === PING ===
@@ -108,12 +108,12 @@ impl Message {
             read_only: if self.read_only { Some(1) } else { Some(0) },
             variant: match self.message_type {
                 MessageType::Request(req) => internal::DHTMessageVariant::Request(match req {
-                    RequestSpecific::PingRequest(ping_args) => internal::DHTRequestSpecific::Ping {
+                    RequestSpecific::Ping(ping_args) => internal::DHTRequestSpecific::Ping {
                         arguments: internal::DHTPingArguments {
                             id: ping_args.requester_id.to_vec(),
                         },
                     },
-                    RequestSpecific::FindNodeRequest(find_node_args) => {
+                    RequestSpecific::FindNode(find_node_args) => {
                         internal::DHTRequestSpecific::FindNode {
                             arguments: internal::DHTFindNodeArguments {
                                 id: find_node_args.requester_id.to_vec(),
@@ -121,7 +121,7 @@ impl Message {
                             },
                         }
                     }
-                    RequestSpecific::GetPeersRequest(get_peers_args) => {
+                    RequestSpecific::GetPeers(get_peers_args) => {
                         internal::DHTRequestSpecific::GetPeers {
                             arguments: internal::DHTGetPeersArguments {
                                 id: get_peers_args.requester_id.to_vec(),
@@ -132,14 +132,12 @@ impl Message {
                 }),
 
                 MessageType::Response(res) => internal::DHTMessageVariant::Response(match res {
-                    ResponseSpecific::PingResponse(ping_args) => {
-                        internal::DHTResponseSpecific::Ping {
-                            arguments: internal::DHTPingResponseArguments {
-                                id: ping_args.responder_id.to_vec(),
-                            },
-                        }
-                    }
-                    ResponseSpecific::FindNodeResponse(find_node_args) => {
+                    ResponseSpecific::Ping(ping_args) => internal::DHTResponseSpecific::Ping {
+                        arguments: internal::DHTPingResponseArguments {
+                            id: ping_args.responder_id.to_vec(),
+                        },
+                    },
+                    ResponseSpecific::FindNode(find_node_args) => {
                         internal::DHTResponseSpecific::FindNode {
                             arguments: internal::DHTFindNodeResponseArguments {
                                 id: find_node_args.responder_id.to_vec(),
@@ -147,7 +145,7 @@ impl Message {
                             },
                         }
                     }
-                    ResponseSpecific::GetPeersResponse(get_peers_args) => {
+                    ResponseSpecific::GetPeers(get_peers_args) => {
                         internal::DHTResponseSpecific::GetPeers {
                             arguments: internal::DHTGetPeersResponseArguments {
                                 id: get_peers_args.responder_id.to_vec(),
@@ -191,18 +189,18 @@ impl Message {
                 internal::DHTMessageVariant::Request(req_variant) => {
                     MessageType::Request(match req_variant {
                         internal::DHTRequestSpecific::Ping { arguments } => {
-                            RequestSpecific::PingRequest(PingRequestArguments {
+                            RequestSpecific::Ping(PingRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
                             })
                         }
                         internal::DHTRequestSpecific::FindNode { arguments } => {
-                            RequestSpecific::FindNodeRequest(FindNodeRequestArguments {
+                            RequestSpecific::FindNode(FindNodeRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
                                 target: Id::from_bytes(&arguments.target)?,
                             })
                         }
                         internal::DHTRequestSpecific::GetPeers { arguments } => {
-                            RequestSpecific::GetPeersRequest(GetPeersRequestArguments {
+                            RequestSpecific::GetPeers(GetPeersRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
                                 info_hash: Id::from_bytes(&arguments.info_hash)?,
                             })
@@ -213,18 +211,18 @@ impl Message {
                 internal::DHTMessageVariant::Response(res_variant) => {
                     MessageType::Response(match res_variant {
                         internal::DHTResponseSpecific::Ping { arguments } => {
-                            ResponseSpecific::PingResponse(PingResponseArguments {
+                            ResponseSpecific::Ping(PingResponseArguments {
                                 responder_id: Id::from_bytes(arguments.id)?,
                             })
                         }
                         internal::DHTResponseSpecific::FindNode { arguments } => {
-                            ResponseSpecific::FindNodeResponse(FindNodeResponseArguments {
+                            ResponseSpecific::FindNode(FindNodeResponseArguments {
                                 responder_id: Id::from_bytes(&arguments.id)?,
                                 nodes: bytes_to_nodes4(&arguments.nodes)?,
                             })
                         }
                         internal::DHTResponseSpecific::GetPeers { arguments } => {
-                            ResponseSpecific::GetPeersResponse(GetPeersResponseArguments {
+                            ResponseSpecific::GetPeers(GetPeersResponseArguments {
                                 responder_id: Id::from_bytes(&arguments.id)?,
                                 token: arguments.token.clone(),
                                 nodes: match arguments.nodes {
@@ -293,14 +291,14 @@ impl Message {
     pub fn get_author_id(&self) -> Option<Id> {
         let id = match &self.message_type {
             MessageType::Request(request_variant) => match request_variant {
-                RequestSpecific::PingRequest(arguments) => arguments.requester_id,
-                RequestSpecific::FindNodeRequest(arguments) => arguments.requester_id,
-                RequestSpecific::GetPeersRequest(arguments) => arguments.requester_id,
+                RequestSpecific::Ping(arguments) => arguments.requester_id,
+                RequestSpecific::FindNode(arguments) => arguments.requester_id,
+                RequestSpecific::GetPeers(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
-                ResponseSpecific::PingResponse(arguments) => arguments.responder_id,
-                ResponseSpecific::FindNodeResponse(arguments) => arguments.responder_id,
-                ResponseSpecific::GetPeersResponse(arguments) => arguments.responder_id,
+                ResponseSpecific::Ping(arguments) => arguments.responder_id,
+                ResponseSpecific::FindNode(arguments) => arguments.responder_id,
+                ResponseSpecific::GetPeers(arguments) => arguments.responder_id,
             },
             MessageType::Error(_) => {
                 return None;
@@ -314,8 +312,8 @@ impl Message {
     pub fn get_closer_nodes(&self) -> Option<Vec<Node>> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
-                ResponseSpecific::FindNodeResponse(arguments) => Some(arguments.nodes.clone()),
-                ResponseSpecific::GetPeersResponse(arguments) => arguments.nodes.as_ref().cloned(),
+                ResponseSpecific::FindNode(arguments) => Some(arguments.nodes.clone()),
+                ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_ref().cloned(),
                 _ => None,
             },
             _ => None,
@@ -445,11 +443,9 @@ mod tests {
             version: None,
             requester_ip: None,
             read_only: false,
-            message_type: MessageType::Request(RequestSpecific::PingRequest(
-                PingRequestArguments {
-                    requester_id: Id::random(),
-                },
-            )),
+            message_type: MessageType::Request(RequestSpecific::Ping(PingRequestArguments {
+                requester_id: Id::random(),
+            })),
         };
 
         let serde_msg = original_msg.clone().into_serde_message();
@@ -466,11 +462,9 @@ mod tests {
             version: Some(vec![0xde, 0xad]),
             requester_ip: Some("99.100.101.102:1030".parse().unwrap()),
             read_only: false,
-            message_type: MessageType::Response(ResponseSpecific::PingResponse(
-                PingResponseArguments {
-                    responder_id: Id::random(),
-                },
-            )),
+            message_type: MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                responder_id: Id::random(),
+            })),
         };
 
         let serde_msg = original_msg.clone().into_serde_message();
@@ -487,7 +481,7 @@ mod tests {
             version: Some(vec![0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: false,
-            message_type: MessageType::Request(RequestSpecific::FindNodeRequest(
+            message_type: MessageType::Request(RequestSpecific::FindNode(
                 FindNodeRequestArguments {
                     target: Id::random(),
                     requester_id: Id::random(),
@@ -509,7 +503,7 @@ mod tests {
             version: Some(vec![0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: true,
-            message_type: MessageType::Request(RequestSpecific::FindNodeRequest(
+            message_type: MessageType::Request(RequestSpecific::FindNode(
                 FindNodeRequestArguments {
                     target: Id::random(),
                     requester_id: Id::random(),
@@ -531,7 +525,7 @@ mod tests {
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
-            message_type: MessageType::Response(ResponseSpecific::FindNodeResponse(
+            message_type: MessageType::Response(ResponseSpecific::FindNode(
                 FindNodeResponseArguments {
                     responder_id: Id::random(),
                     nodes: vec![Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap())],
@@ -553,7 +547,7 @@ mod tests {
             version: Some(vec![72, 73]),
             requester_ip: None,
             read_only: false,
-            message_type: MessageType::Request(RequestSpecific::GetPeersRequest(
+            message_type: MessageType::Request(RequestSpecific::GetPeers(
                 GetPeersRequestArguments {
                     info_hash: Id::random(),
                     requester_id: Id::random(),
@@ -575,7 +569,7 @@ mod tests {
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: true,
-            message_type: MessageType::Response(ResponseSpecific::GetPeersResponse(
+            message_type: MessageType::Response(ResponseSpecific::GetPeers(
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
@@ -602,7 +596,7 @@ mod tests {
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
-            message_type: MessageType::Response(ResponseSpecific::GetPeersResponse(
+            message_type: MessageType::Response(ResponseSpecific::GetPeers(
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
@@ -640,9 +634,7 @@ mod tests {
         let parsed_msg = Message::from_serde_message(serde_message).unwrap();
         assert!(matches!(
             parsed_msg.message_type,
-            MessageType::Response(ResponseSpecific::GetPeersResponse(
-                GetPeersResponseArguments { .. }
-            ))
+            MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments { .. }))
         ));
     }
 }
