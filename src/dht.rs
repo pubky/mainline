@@ -61,8 +61,6 @@ impl Dht {
     fn run(&mut self, receiver: Receiver<ActorMessage>) -> Result<()> {
         let mut rpc = Rpc::new()?;
 
-        rpc.populate();
-
         loop {
             if let Ok(actor_message) = receiver.try_recv() {
                 match actor_message {
@@ -72,9 +70,7 @@ impl Dht {
                 }
             }
 
-            if let Some((message, from)) = rpc.tick() {
-                dbg!((message, from));
-            };
+            rpc.tick();
 
             thread::sleep(INTERVAL)
         }
@@ -99,7 +95,7 @@ mod test {
 
         let clone = dht.clone();
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5000));
+            thread::sleep(Duration::from_millis(50));
 
             clone.shutdown();
         });

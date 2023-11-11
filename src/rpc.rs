@@ -97,27 +97,19 @@ impl Rpc {
 
     // === Public Methods ===
 
-    pub fn tick(&mut self) -> Option<(Message, SocketAddr)> {
+    pub fn tick(&mut self) {
         // === Bootstrapping ===
         self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
-            if !message.read_only {
-                self.add_node(&message, from);
-                self.add_closer_nodes(&message);
-            }
+            self.add_node(&message, from);
 
             match &message.message_type {
                 MessageType::Request(request_specific) => {
                     self.handle_request(from, message.transaction_id, request_specific);
                 }
                 MessageType::Response(response_specific) => {
-                    self.handle_response(
-                        from,
-                        message.transaction_id,
-                        response_specific,
-                        message.version,
-                    );
+                    self.handle_response(from, &message);
                 }
                 MessageType::Error(_) => {
                     // TODO: Handle error messages!
@@ -131,7 +123,6 @@ impl Rpc {
         }
 
         thread::sleep(self.interval);
-        None
     }
 
     pub fn ping(&mut self, address: SocketAddr) -> u16 {
@@ -189,8 +180,10 @@ impl Rpc {
         self.queries.put(target, query);
     }
 
+    // === Private Methods ===
+
     /// Ping bootstrap nodes, add them to the routing table with closest query.
-    pub fn populate(&mut self) {
+    fn populate(&mut self) {
         if !self.routing_table.is_empty() {
             // No need for populating. Already called our bootstrap nodes?
             return;
@@ -205,8 +198,6 @@ impl Rpc {
             }),
         );
     }
-
-    // === Private Methods ===
 
     /// Return a boolean indicating whether the bootstrapping query is done.
     fn is_ready(&mut self) -> bool {
@@ -244,66 +235,58 @@ impl Rpc {
             }
             _ => {
                 // TODO: Handle queries (stuff with closer nodes in the response).
-                // TODO: How to deal with unknown requests?
                 // TODO: Send error message?
+                // TODO: How to deal with unknown requests?
                 // TODO: should we rsepond with FindNodeResponse anyways?
                 todo!()
             }
         }
     }
 
-    fn handle_response(
-        &mut self,
-        from: SocketAddr,
-        transaction_id: u16,
-        response: &ResponseSpecific,
-        version: Option<Vec<u8>>,
-    ) {
-        match response {
-            ResponseSpecific::Ping(PingResponseArguments { responder_id }) => {
-                //
+    fn handle_response(&mut self, from: SocketAddr, message: &Message) {
+        if (message.read_only) {
+            return;
+        }
+
+        // Get corresponing query for message.transaction_id
+        if let Some(query) = self.queries.iter_mut().find_map(|(_, query)| {
+            if query.remove_inflight_request(message.transaction_id) {
+                return Some(query);
             }
-            //  === Responses to queries with closer nodes. ===
-            ResponseSpecific::FindNode(FindNodeResponseArguments {
-                responder_id,
-                nodes,
-            }) => {
-                // TODO: check a corresponding query
+            None
+        }) {
+            if let Some(nodes) = message.get_closer_nodes() {
+                query.add_candidates(nodes);
             }
-            ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                responder_id,
-                token,
-                values,
-                ..
-            }) => {
-                if let Some(peers) = values {
-                    println!(
-                        "Got get peers response from: {:?}, values: {:?} version: {:?}\n",
-                        from, values, version
-                    )
-                };
+
+            match &message.message_type {
+                MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
+                    responder_id,
+                    token,
+                    values,
+                    ..
+                })) => {
+                    if let Some(peers) = values {
+                        println!(
+                            "Got get peers response from: {:?}, values: {:?} version: {:?}\n",
+                            from, values, message.version
+                        )
+                    };
+                }
+                // Ping response is already handled in add_node()
+                // FindNode response is alreadh handled in query.add_candidates()
+                _ => {}
             }
-            _ => {}
         }
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
+        if message.read_only {
+            return;
+        }
+
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
-        }
-    }
-
-    fn add_closer_nodes(&mut self, message: &Message) {
-        if let Some(nodes) = message.get_closer_nodes() {
-            if nodes.is_empty() {
-                return;
-            }
-
-            for (_, query) in self.queries.iter_mut() {
-                if query.add_candidates(message.transaction_id, &mut self.socket, &nodes) {
-                    return;
-                }
-            }
         }
     }
 }
@@ -313,7 +296,7 @@ mod test {
     use crate::messages::GetPeersRequestArguments;
 
     use super::*;
-    use std::convert::TryInto;
+    use std::{convert::TryInto, time::Instant};
 
     fn testnet(n: usize) -> Vec<String> {
         let mut bootstrap: Vec<String> = Vec::with_capacity(1);
@@ -379,9 +362,11 @@ mod test {
     fn live_get_peers() {
         let mut client = Rpc::new().unwrap().with_read_only(true);
 
-        let target: Id = "bbef239433fdfa3210bda92cbeb09c98cbce5d0a"
+        let target: Id = "13cdea75c1fc002d24eec080f4ba93f2892a62f9"
             .try_into()
             .unwrap();
+
+        let start = Instant::now();
 
         client.query(
             target,
@@ -393,6 +378,13 @@ mod test {
 
         let client_thread = thread::spawn(move || loop {
             client.tick();
+            if let Some(query) = client.queries.get(&target) {
+                if query.is_done() {
+                    dbg!(query);
+
+                    break;
+                }
+            }
         });
 
         client_thread.join().unwrap();

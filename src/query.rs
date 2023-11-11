@@ -19,6 +19,8 @@ pub struct Query {
     // TODO add last refresed
 }
 
+// TODO add abort method?
+
 impl Query {
     pub fn new(target: Id, request: RequestSpecific) -> Self {
         let table = RoutingTable::new().with_id(target);
@@ -64,20 +66,22 @@ impl Query {
         self.visited.insert(address);
     }
 
-    /// If the claimed closer nodes are from a response to a request sent by this query, add to the
-    /// routing table and return true, otherwise return false.
-    pub fn add_candidates(&mut self, tid: u16, socket: &mut KrpcSocket, nodes: &Vec<Node>) -> bool {
+    /// Remove an inflight_request and return true if it existed.
+    pub fn remove_inflight_request(&mut self, tid: u16) -> bool {
         if let Some(index) = self.inflight_requests.iter().position(|&x| x == tid) {
             self.inflight_requests.remove(index);
-
-            for node in nodes {
-                self.add(node.clone());
-            }
 
             return true;
         };
 
         false
+    }
+
+    /// Add claimed closer nodes to the target.
+    pub fn add_candidates(&mut self, nodes: Vec<Node>) {
+        for node in nodes {
+            self.add(node);
+        }
     }
 
     /// Query closest nodes for this query's target and message.
