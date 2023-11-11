@@ -1,15 +1,12 @@
 //! Dht node.
 
 use std::{
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
     sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
-    time::Duration,
 };
 
-use crate::{rpc::Rpc, socket::KrpcSocket, Result};
-
-const INTERVAL: Duration = Duration::from_millis(100);
+use crate::{common::Id, rpc::Rpc, Result};
 
 #[derive(Debug)]
 pub struct Dht {
@@ -50,6 +47,14 @@ impl Dht {
         self.sender.send(ActorMessage::Shutdown).unwrap();
     }
 
+    pub fn get_peers(&self, info_hash: Id) -> Response<SocketAddr> {
+        let (sender, receiver) = mpsc::channel::<Option<SocketAddr>>();
+
+        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+
+        Response { receiver }
+    }
+
     // === Private Methods ===
 
     fn block_until_shutdown(self) {
@@ -59,7 +64,8 @@ impl Dht {
     }
 
     fn run(&mut self, receiver: Receiver<ActorMessage>) -> Result<()> {
-        let mut rpc = Rpc::new()?;
+        // TODO: pass config
+        let mut rpc = Rpc::new()?.with_read_only(true);
 
         loop {
             if let Ok(actor_message) = receiver.try_recv() {
@@ -67,12 +73,13 @@ impl Dht {
                     ActorMessage::Shutdown => {
                         break;
                     }
+                    ActorMessage::GetPeers(info_hash, sender) => {
+                        rpc.get_peers(info_hash, ResponseSender::Peer(sender))
+                    }
                 }
             }
 
             rpc.tick();
-
-            thread::sleep(INTERVAL)
         }
 
         Ok(())
@@ -81,11 +88,37 @@ impl Dht {
 
 enum ActorMessage {
     Shutdown,
+    GetPeers(Id, Sender<Option<SocketAddr>>),
+}
+
+pub struct Response<ResponseItem> {
+    receiver: Receiver<Option<ResponseItem>>,
+}
+
+#[derive(Debug)]
+pub enum ResponseSender {
+    Peer(Sender<Option<SocketAddr>>),
+}
+
+pub enum ResponseItem {
+    Peer(SocketAddr),
+}
+
+impl Iterator for Response<SocketAddr> {
+    type Item = SocketAddr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Ok(item) = self.receiver.recv() {
+            return item;
+        }
+        None
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
+    use std::convert::TryInto;
+    use std::time::{Duration, Instant};
 
     use super::*;
 
@@ -101,5 +134,25 @@ mod test {
         });
 
         dht.block_until_shutdown();
+    }
+
+    // Live tests that shouldn't run in CI etc.
+
+    #[test]
+    fn live_get_peers() {
+        let dht = Dht::new().unwrap();
+
+        let info_hash: Id = "c87a1b64bf00a072cc937688908d1be4f7ad2489"
+            .try_into()
+            .unwrap();
+
+        let response = dht.get_peers(info_hash);
+
+        let instant = Instant::now();
+        for peer in response {
+            println!("\nFound Peer: {:?}", peer);
+            println!("Took {:?}\n", instant.elapsed());
+            break;
+        }
     }
 }

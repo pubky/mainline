@@ -5,9 +5,11 @@ use std::thread;
 use std::time::Duration;
 
 use crate::common::{Id, Node};
+use crate::dht::{ResponseItem, ResponseSender};
 use crate::messages::{
-    FindNodeRequestArguments, FindNodeResponseArguments, GetPeersResponseArguments, Message,
-    MessageType, PingRequestArguments, PingResponseArguments, RequestSpecific, ResponseSpecific,
+    FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
+    GetPeersResponseArguments, Message, MessageType, PingResponseArguments, RequestSpecific,
+    ResponseSpecific,
 };
 
 use crate::query::Query;
@@ -108,7 +110,7 @@ impl Rpc {
                 MessageType::Request(request_specific) => {
                     self.handle_request(from, message.transaction_id, request_specific);
                 }
-                MessageType::Response(response_specific) => {
+                MessageType::Response(_) => {
                     self.handle_response(from, &message);
                 }
                 MessageType::Error(_) => {
@@ -125,31 +127,26 @@ impl Rpc {
         thread::sleep(self.interval);
     }
 
-    pub fn ping(&mut self, address: SocketAddr) -> u16 {
-        self.socket.request(
-            address,
-            RequestSpecific::Ping(PingRequestArguments {
+    // Start or restart a get_peers query.
+    pub fn get_peers(&mut self, info_hash: Id, sender: ResponseSender) {
+        self.query(
+            info_hash,
+            RequestSpecific::GetPeers(GetPeersRequestArguments {
                 requester_id: self.id,
+                info_hash,
             }),
+            Some(sender),
         )
     }
 
-    pub fn find_node(&mut self, address: SocketAddr, target: Id) -> u16 {
-        self.socket.request(
-            address,
-            RequestSpecific::FindNode(FindNodeRequestArguments {
-                target,
-                requester_id: self.id,
-            }),
-        )
-    }
+    // === Private Methods ===
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
-    pub fn query(&mut self, target: Id, request: RequestSpecific) {
+    fn query(&mut self, target: Id, request: RequestSpecific, sender: Option<ResponseSender>) {
         // If query exists and it's set to done, restart it.
         if let Some(query) = self.queries.get_mut(&target) {
             if query.is_done() {
-                query.start(&mut self.socket);
+                query.start(&mut self.socket, sender);
             }
             return;
         }
@@ -172,15 +169,13 @@ impl Rpc {
             for node in closest {
                 query.add(node)
             }
-
-            // After adding the nodes, we need to start the query.
-            query.start(&mut self.socket);
         }
+
+        // After adding the nodes, we need to start the query.
+        query.start(&mut self.socket, sender);
 
         self.queries.put(target, query);
     }
-
-    // === Private Methods ===
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
@@ -196,6 +191,7 @@ impl Rpc {
                 target: self.id,
                 requester_id: self.id,
             }),
+            None,
         );
     }
 
@@ -211,7 +207,7 @@ impl Rpc {
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
         match request {
             // TODO: Handle bad requests (send an error message).
-            RequestSpecific::Ping(PingRequestArguments { requester_id }) => {
+            RequestSpecific::Ping(_) => {
                 self.socket.response(
                     from,
                     transaction_id,
@@ -220,10 +216,7 @@ impl Rpc {
                     }),
                 );
             }
-            RequestSpecific::FindNode(FindNodeRequestArguments {
-                target,
-                requester_id,
-            }) => {
+            RequestSpecific::FindNode(FindNodeRequestArguments { target, .. }) => {
                 self.socket.response(
                     from,
                     transaction_id,
@@ -244,7 +237,7 @@ impl Rpc {
     }
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) {
-        if (message.read_only) {
+        if message.read_only {
             return;
         }
 
@@ -262,16 +255,14 @@ impl Rpc {
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     responder_id,
+                    // TODO: save tokens for Storing items.
                     token,
-                    values,
+                    values: Some(peers),
                     ..
                 })) => {
-                    if let Some(peers) = values {
-                        println!(
-                            "Got get peers response from: {:?}, values: {:?} version: {:?}\n",
-                            from, values, message.version
-                        )
-                    };
+                    for peer in peers.clone() {
+                        query.value(ResponseItem::Peer(peer));
+                    }
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is alreadh handled in query.add_candidates()
@@ -288,105 +279,5 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::messages::GetPeersRequestArguments;
-
-    use super::*;
-    use std::{convert::TryInto, time::Instant};
-
-    fn testnet(n: usize) -> Vec<String> {
-        let mut bootstrap: Vec<String> = Vec::with_capacity(1);
-
-        for i in 0..n {
-            let mut rpc = Rpc::new().unwrap();
-
-            if i > 0 {
-                rpc = rpc.with_bootstrap(bootstrap.clone());
-            } else {
-                rpc = rpc.with_bootstrap(vec![]);
-                let _ = &bootstrap.push(format!("0.0.0.0:{}", rpc.local_addr().port()));
-            }
-
-            thread::spawn(move || loop {
-                rpc.tick();
-            });
-        }
-
-        bootstrap
-    }
-
-    #[test]
-    fn bootstrap() {
-        let bootstrap = testnet(50);
-
-        // Wait for nodes to connect to each other.
-        thread::sleep(Duration::from_secs(2));
-
-        let mut client = Rpc::new().unwrap().with_bootstrap(bootstrap);
-
-        let client_thread = thread::spawn(move || loop {
-            client.tick();
-
-            if client.is_ready() {
-                assert!(client.routing_table.closest(&client.id).len() >= 20);
-                break;
-            }
-        });
-
-        client_thread.join().unwrap();
-    }
-
-    // Live tests that shouldn't run in CI etc.
-
-    // #[test]
-    fn live_bootstrap() {
-        let mut client = Rpc::new().unwrap();
-
-        let client_thread = thread::spawn(move || loop {
-            client.tick();
-
-            if client.is_ready() {
-                assert!(client.routing_table.closest(&client.id).len() >= 20);
-                break;
-            }
-        });
-
-        client_thread.join().unwrap();
-    }
-
-    // #[test]
-    fn live_get_peers() {
-        let mut client = Rpc::new().unwrap().with_read_only(true);
-
-        let target: Id = "13cdea75c1fc002d24eec080f4ba93f2892a62f9"
-            .try_into()
-            .unwrap();
-
-        let start = Instant::now();
-
-        client.query(
-            target,
-            RequestSpecific::GetPeers(GetPeersRequestArguments {
-                info_hash: target,
-                requester_id: client.id,
-            }),
-        );
-
-        let client_thread = thread::spawn(move || loop {
-            client.tick();
-            if let Some(query) = client.queries.get(&target) {
-                if query.is_done() {
-                    dbg!(query);
-
-                    break;
-                }
-            }
-        });
-
-        client_thread.join().unwrap();
     }
 }

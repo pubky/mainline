@@ -322,13 +322,13 @@ mod test {
 
         let mut client = KrpcSocket::new().unwrap().with_read_only(true);
 
-        let client_address = client.local_addr();
+        let _ = client.local_addr();
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
         });
 
-        let expected_response = response.clone();
+        let _ = response.clone();
 
         let server_thread = thread::spawn(move || {
             thread::sleep(Duration::from_millis(5));
@@ -364,7 +364,7 @@ mod test {
             responder_id: Id::random(),
         });
 
-        let expected_response = response.clone();
+        let _ = response.clone();
 
         let server_thread = thread::spawn(move || {
             thread::sleep(Duration::from_millis(5));
@@ -387,12 +387,12 @@ mod test {
         let mut client = KrpcSocket::new().unwrap();
         client.next_tid = 120;
 
-        let client_address = client.local_addr();
+        let _ = client.local_addr();
         let request = RequestSpecific::Ping(PingRequestArguments {
             requester_id: Id::random(),
         });
 
-        let expected_request = request.clone();
+        let _ = request.clone();
 
         let server_thread = thread::spawn(move || {
             thread::sleep(Duration::from_millis(5));

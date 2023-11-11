@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use crate::common::{Id, Node};
+use crate::dht::{ResponseItem, ResponseSender};
 use crate::messages::RequestSpecific;
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
@@ -16,6 +17,7 @@ pub struct Query {
     table: RoutingTable,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
+    senders: Vec<ResponseSender>,
     // TODO add last refresed
 }
 
@@ -31,6 +33,7 @@ impl Query {
             table,
             inflight_requests: Vec::new(),
             visited: HashSet::new(),
+            senders: Vec::new(),
         }
     }
 
@@ -86,12 +89,13 @@ impl Query {
 
     /// Query closest nodes for this query's target and message.
     pub fn tick(&mut self, socket: &mut KrpcSocket) {
+        if self.is_done() {
+            return;
+        }
+
         // If there are no more inflight requests, and visited is empty, then
         // last tick we didn't add any closer nodes, so we are done traversing.
-        if !self.is_done() {
-            // TODO: if is_done() return;
-            self.visit_closest(socket);
-        }
+        self.visit_closest(socket);
 
         // First we clear timedout requests.
         // If no requests remain, then visit_closest didn't add any closer nodes,
@@ -100,8 +104,31 @@ impl Query {
     }
 
     /// Force start query traversal by visiting closest nodes.
-    pub fn start(&mut self, socket: &mut KrpcSocket) {
+    pub fn start(&mut self, socket: &mut KrpcSocket, sender: Option<ResponseSender>) {
         self.visit_closest(socket);
+
+        if let Some(sender) = sender {
+            self.senders.push(sender)
+        };
+    }
+
+    /// Add reveived value
+    pub fn value(&self, value: ResponseItem) {
+        for sender in &self.senders {
+            match sender {
+                ResponseSender::Peer(sender) => {
+                    let ResponseItem::Peer(peer) = value;
+                    let _ = sender.send(Some(peer));
+                }
+                // match value {
+                //     ResponseItem::Peer(peer) => {
+                //         sender.send(Some(peer));
+                //     }
+                //     _ => {}
+                // },
+                _ => {}
+            };
+        }
     }
 
     // === Private Methods ===
@@ -119,12 +146,25 @@ impl Query {
         self.inflight_requests
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
-        if self.inflight_requests.is_empty() && !self.visited.is_empty() {
+        if self.inflight_requests.is_empty() {
             println!(
                 "Query: {:?} done, visited: {}",
                 self.target,
                 self.visited.len()
             );
+
+            // Send None to all receivers to end iterators
+            for sender in &self.senders {
+                match sender {
+                    ResponseSender::Peer(sender) => {
+                        let _ = sender.send(None);
+                    }
+                    _ => {}
+                };
+            }
+            // Clear senders
+            self.senders.clear();
+
             // No more closer nodes to visit, and no inflight requests to wait for
             // reset the visited set.
             self.visited.clear();
