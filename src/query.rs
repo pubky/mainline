@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use crate::common::{Id, Node};
-use crate::dht::{ResponseItem, ResponseSender};
+use crate::dht::{GetPeerResponse, ResponseItem, ResponseSender};
 use crate::messages::RequestSpecific;
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
@@ -112,20 +112,14 @@ impl Query {
         };
     }
 
-    /// Add reveived value
-    pub fn value(&self, value: ResponseItem) {
+    /// Add reveived response
+    pub fn response(&self, response: ResponseItem) {
         for sender in &self.senders {
             match sender {
                 ResponseSender::Peer(sender) => {
-                    let ResponseItem::Peer(peer) = value;
-                    let _ = sender.send(Some(peer));
+                    let ResponseItem::Peer(response) = response.clone();
+                    let _ = sender.send(Some(response));
                 }
-                // match value {
-                //     ResponseItem::Peer(peer) => {
-                //         sender.send(Some(peer));
-                //     }
-                //     _ => {}
-                // },
                 _ => {}
             };
         }
@@ -147,12 +141,6 @@ impl Query {
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.inflight_requests.is_empty() {
-            println!(
-                "Query: {:?} done, visited: {}",
-                self.target,
-                self.visited.len()
-            );
-
             // Send None to all receivers to end iterators
             for sender in &self.senders {
                 match sender {

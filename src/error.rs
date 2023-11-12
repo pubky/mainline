@@ -19,6 +19,10 @@ pub enum Error {
     #[error("Invalid Id size, expected 20, got {0}")]
     InvalidIdSize(usize),
 
+    /// hex encoding issue
+    #[error("Invalid Id encoding: {0}")]
+    InvalidIdEncoding(String),
+
     // DHT messages
     /// Errors related to parsing DHT messages.
     #[error("Failed to parse packet bytes: {0}")]

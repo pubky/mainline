@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::common::{Id, Node};
-use crate::dht::{ResponseItem, ResponseSender};
+use crate::dht::{GetPeerResponse, ResponseItem, ResponseSender};
 use crate::messages::{
     FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
     GetPeersResponseArguments, Message, MessageType, PingResponseArguments, RequestSpecific,
@@ -261,7 +261,10 @@ impl Rpc {
                     ..
                 })) => {
                     for peer in peers.clone() {
-                        query.value(ResponseItem::Peer(peer));
+                        query.response(ResponseItem::Peer(GetPeerResponse {
+                            from: Node::new(responder_id.clone(), from),
+                            peer,
+                        }));
                     }
                 }
                 // Ping response is already handled in add_node()

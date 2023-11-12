@@ -11,10 +11,13 @@ categories = ["network-programming"]
 repository = "https://github.com/nuhvi/mainline"
 
 [dependencies]
+lru = "0.12.0"
 rand = "0.8.5"
-thiserror = "1.0.49"
 serde_bencode = "^0.2.4"
 serde = { version = "1.0.133", features = ["derive"] }
 serde_bytes = "0.11.5"
 serde_derive = "^1.0.0"
-lru = "0.12.0"
+thiserror = "1.0.49"
+
+[dev-dependencies]
+clap = { version = "4.4.8", features = ["derive"] }

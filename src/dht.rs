@@ -6,7 +6,11 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::{common::Id, rpc::Rpc, Result};
+use crate::{
+    common::{Id, Node},
+    rpc::Rpc,
+    Result,
+};
 
 #[derive(Debug)]
 pub struct Dht {
@@ -47,8 +51,8 @@ impl Dht {
         self.sender.send(ActorMessage::Shutdown).unwrap();
     }
 
-    pub fn get_peers(&self, info_hash: Id) -> Response<SocketAddr> {
-        let (sender, receiver) = mpsc::channel::<Option<SocketAddr>>();
+    pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
+        let (sender, receiver) = mpsc::channel::<Option<GetPeerResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
@@ -88,7 +92,7 @@ impl Dht {
 
 enum ActorMessage {
     Shutdown,
-    GetPeers(Id, Sender<Option<SocketAddr>>),
+    GetPeers(Id, Sender<Option<GetPeerResponse>>),
 }
 
 pub struct Response<ResponseItem> {
@@ -97,21 +101,28 @@ pub struct Response<ResponseItem> {
 
 #[derive(Debug)]
 pub enum ResponseSender {
-    Peer(Sender<Option<SocketAddr>>),
+    Peer(Sender<Option<GetPeerResponse>>),
 }
 
+#[derive(Clone, Debug)]
 pub enum ResponseItem {
-    Peer(SocketAddr),
+    Peer(GetPeerResponse),
 }
 
-impl Iterator for Response<SocketAddr> {
-    type Item = SocketAddr;
+#[derive(Clone, Debug)]
+pub struct GetPeerResponse {
+    pub from: Node,
+    pub peer: SocketAddr,
+}
+
+impl<T> Iterator for Response<T> {
+    type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Ok(item) = self.receiver.recv() {
-            return item;
+        match self.receiver.recv() {
+            Ok(Some(item)) => Some(item),
+            _ => None,
         }
-        None
     }
 }
 
@@ -134,25 +145,5 @@ mod test {
         });
 
         dht.block_until_shutdown();
-    }
-
-    // Live tests that shouldn't run in CI etc.
-
-    #[test]
-    fn live_get_peers() {
-        let dht = Dht::new().unwrap();
-
-        let info_hash: Id = "c87a1b64bf00a072cc937688908d1be4f7ad2489"
-            .try_into()
-            .unwrap();
-
-        let response = dht.get_peers(info_hash);
-
-        let instant = Instant::now();
-        for peer in response {
-            println!("\nFound Peer: {:?}", peer);
-            println!("Took {:?}\n", instant.elapsed());
-            break;
-        }
     }
 }

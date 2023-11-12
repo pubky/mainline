@@ -84,7 +84,9 @@ impl TryInto<Id> for &str {
 
     fn try_into(self) -> Result<Id> {
         if self.len() % 2 != 0 {
-            return Err(Error::Static("Number of Hex characters should be even"));
+            return Err(Error::InvalidIdEncoding(
+                "Number of Hex characters should be even".into(),
+            ));
         }
 
         let mut bytes = Vec::with_capacity(self.len() / 2);

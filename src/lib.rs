@@ -15,6 +15,9 @@ mod routing_table;
 mod rpc;
 mod socket;
 
+pub use crate::common::Id;
+pub use dht::Dht;
+
 // Re-exports
 pub use crate::error::Error;
 
