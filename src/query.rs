@@ -18,10 +18,8 @@ pub struct Query {
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
-    // TODO add last refresed
+    responses: Vec<ResponseItem>,
 }
-
-// TODO add abort method?
 
 impl Query {
     pub fn new(target: Id, request: RequestSpecific) -> Self {
@@ -34,6 +32,7 @@ impl Query {
             inflight_requests: Vec::new(),
             visited: HashSet::new(),
             senders: Vec::new(),
+            responses: Vec::new(),
         }
     }
 
@@ -42,6 +41,7 @@ impl Query {
         self.table.is_empty()
     }
 
+    /// No more inflight_requests and visited addresses were reset.
     pub fn is_done(&self) -> bool {
         self.inflight_requests.is_empty() && self.visited.is_empty()
     }
@@ -52,12 +52,30 @@ impl Query {
 
     // === Public Methods ===
 
-    /// Add a node to the correct routing table.
-    pub fn add(&mut self, node: Node) {
+    /// Add a sender to the query and send all replies we found so far to it.
+    pub fn add_sender(&mut self, sender: Option<ResponseSender>) {
+        if let Some(sender) = sender {
+            self.senders.push(sender);
+            let sender = self.senders.last().unwrap();
+
+            for response in &self.responses {
+                self.send_response(sender, Some(response))
+            }
+        };
+    }
+
+    /// Force start query traversal by visiting closest nodes.
+    pub fn start(&mut self, socket: &mut KrpcSocket) {
+        self.visit_closest(socket);
+    }
+
+    /// Add a node to the routing table.
+    pub fn add_node(&mut self, node: Node) {
         // ready for a ipv6 routing table?
         self.table.add(node);
     }
 
+    /// Visit explicitly given addresses, and add them to the visited set.
     pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddr) {
         if self.visited.contains(&address) || address.is_ipv6() {
             // TODO: Add support for IPV6.
@@ -80,10 +98,12 @@ impl Query {
         false
     }
 
-    /// Add claimed closer nodes to the target.
-    pub fn add_candidates(&mut self, nodes: Vec<Node>) {
-        for node in nodes {
-            self.add(node);
+    /// Add reveived response
+    pub fn response(&mut self, response: ResponseItem) {
+        self.responses.push(response.clone());
+
+        for sender in &self.senders {
+            self.send_response(sender, Some(&response))
         }
     }
 
@@ -99,33 +119,27 @@ impl Query {
 
         // First we clear timedout requests.
         // If no requests remain, then visit_closest didn't add any closer nodes,
-        // so we remove all visited addresses to set the query to "done" again.
-        self.cleanup(socket);
-    }
-
-    /// Force start query traversal by visiting closest nodes.
-    pub fn start(&mut self, socket: &mut KrpcSocket, sender: Option<ResponseSender>) {
-        self.visit_closest(socket);
-
-        if let Some(sender) = sender {
-            self.senders.push(sender)
-        };
-    }
-
-    /// Add reveived response
-    pub fn response(&self, response: ResponseItem) {
-        for sender in &self.senders {
-            match sender {
-                ResponseSender::Peer(sender) => {
-                    let ResponseItem::Peer(response) = response.clone();
-                    let _ = sender.send(Some(response));
-                }
-                _ => {}
-            };
-        }
+        //  so we remove all visited addresses to set the query to "done" again.
+        // If any senders are still waiting for response, send None to end the iterator,
+        //  then clear them too.
+        self.after_tick(socket);
     }
 
     // === Private Methods ===
+
+    fn send_response(&self, sender: &ResponseSender, response: Option<&ResponseItem>) {
+        match sender {
+            ResponseSender::Peer(sender) => {
+                if let Some(response) = response {
+                    let ResponseItem::Peer(response) = response.clone();
+                    let _ = sender.send(Some(response));
+                } else {
+                    let _ = sender.send(None);
+                }
+            }
+            _ => {}
+        };
+    }
 
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
         let mut to_visit = self.table.closest(&self.target);
@@ -136,25 +150,22 @@ impl Query {
         }
     }
 
-    fn cleanup(&mut self, socket: &mut KrpcSocket) {
+    fn after_tick(&mut self, socket: &mut KrpcSocket) {
         self.inflight_requests
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.inflight_requests.is_empty() {
             // Send None to all receivers to end iterators
             for sender in &self.senders {
-                match sender {
-                    ResponseSender::Peer(sender) => {
-                        let _ = sender.send(None);
-                    }
-                    _ => {}
-                };
+                self.send_response(sender, None);
+                // println!("Visited {} nodes", self.visited.len());
             }
-            // Clear senders
-            self.senders.clear();
 
             // No more closer nodes to visit, and no inflight requests to wait for
             // reset the visited set.
+            //
+            // Effectively this sets the query to "done" again.
+            // This query will then be deleted from the rpc.queries map in the next tick.
             self.visited.clear();
         }
     }

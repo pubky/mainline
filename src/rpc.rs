@@ -1,4 +1,4 @@
-use lru::LruCache;
+use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::thread;
@@ -34,7 +34,7 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 8] = [
 pub struct Rpc {
     socket: KrpcSocket,
     routing_table: RoutingTable,
-    queries: LruCache<Id, Query>,
+    queries: HashMap<Id, Query>,
 
     // Options
     id: Id,
@@ -59,7 +59,7 @@ impl Rpc {
 
             socket,
             routing_table: RoutingTable::new().with_id(id),
-            queries: LruCache::new(NonZeroUsize::new(QUERIES_CACHE_SIZE).unwrap()),
+            queries: HashMap::new(),
         })
     }
 
@@ -104,6 +104,7 @@ impl Rpc {
         self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
+            // Add a node to our routing table on any incoming request or response.
             self.add_node(&message, from);
 
             match &message.message_type {
@@ -119,10 +120,13 @@ impl Rpc {
             }
         };
 
-        // === Refresh queries ===
-        for (_, query) in self.queries.iter_mut() {
+        // === Tick queries ===
+        for (target, query) in self.queries.iter_mut() {
             query.tick(&mut self.socket);
         }
+
+        // === Remove done queries ===
+        self.queries.retain(|_, query| !query.is_done());
 
         thread::sleep(self.interval);
     }
@@ -142,16 +146,26 @@ impl Rpc {
     // === Private Methods ===
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
+    ///
+    /// Queries take few seconds to traverse the network, once it is done, it will be removed from
+    /// self.queries. But until then, calling `rpc.query()` multiple times, will just add the
+    /// sender to the query, send all the responses seen so far, as well as subsequent responses.
+    ///
+    /// Effectively, we are caching responses and backing off the network for the duration it takes
+    /// to traverse it.
     fn query(&mut self, target: Id, request: RequestSpecific, sender: Option<ResponseSender>) {
-        // If query exists and it's set to done, restart it.
+        // If query is still active, add the sender to it.
         if let Some(query) = self.queries.get_mut(&target) {
-            if query.is_done() {
-                query.start(&mut self.socket, sender);
-            }
+            query.add_sender(sender);
             return;
         }
 
         let mut query = Query::new(target, request);
+
+        query.add_sender(sender);
+
+        // Seed the query either with the closest nodes from the routing table, or the
+        // bootstrapping nodes if the closest nodes are not enough.
 
         let closest = self.routing_table.closest(&target);
 
@@ -167,14 +181,14 @@ impl Rpc {
         } else {
             // Seed this query with the closest nodes we know about.
             for node in closest {
-                query.add(node)
+                query.add_node(node)
             }
         }
 
         // After adding the nodes, we need to start the query.
-        query.start(&mut self.socket, sender);
+        query.start(&mut self.socket);
 
-        self.queries.put(target, query);
+        self.queries.insert(target, query);
     }
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
@@ -249,7 +263,9 @@ impl Rpc {
             None
         }) {
             if let Some(nodes) = message.get_closer_nodes() {
-                query.add_candidates(nodes);
+                for node in nodes {
+                    query.add_node(node);
+                }
             }
 
             match &message.message_type {
@@ -262,7 +278,7 @@ impl Rpc {
                 })) => {
                     for peer in peers.clone() {
                         query.response(ResponseItem::Peer(GetPeerResponse {
-                            from: Node::new(responder_id.clone(), from),
+                            from: Node::new(*responder_id, from),
                             peer,
                         }));
                     }
