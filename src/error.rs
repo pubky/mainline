@@ -31,4 +31,8 @@ pub enum Error {
     /// Indicates that the message transaction_id is not two bytes.
     #[error("Invalid transaction_id: {0:?}")]
     InvalidTransactionId(Vec<u8>),
+
+    #[error(transparent)]
+    /// Transparent [std::io::Error]
+    Receive(#[from] std::sync::mpsc::RecvError),
 }

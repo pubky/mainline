@@ -54,19 +54,25 @@ pub enum DHTRequestSpecific {
     #[serde(rename = "ping")]
     Ping {
         #[serde(rename = "a")]
-        arguments: DHTPingArguments,
+        arguments: DHTPingRequestArguments,
     },
 
     #[serde(rename = "find_node")]
     FindNode {
         #[serde(rename = "a")]
-        arguments: DHTFindNodeArguments,
+        arguments: DHTFindNodeRequestArguments,
     },
 
     #[serde(rename = "get_peers")]
     GetPeers {
         #[serde(rename = "a")]
-        arguments: DHTGetPeersArguments,
+        arguments: DHTGetPeersRequestArguments,
+    },
+
+    #[serde(rename = "announce_peer")]
+    AnnouncePeer {
+        #[serde(rename = "a")]
+        arguments: DHTAnnouncePeerRequestArguments,
     },
 }
 
@@ -105,7 +111,7 @@ pub enum DHTErrorValue {
 // === PING ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct DHTPingArguments {
+pub struct DHTPingRequestArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
 }
@@ -119,7 +125,7 @@ pub struct DHTPingResponseArguments {
 // === FIND NODE ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct DHTFindNodeArguments {
+pub struct DHTFindNodeRequestArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
 
@@ -139,7 +145,7 @@ pub struct DHTFindNodeResponseArguments {
 // === Get Peers ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct DHTGetPeersArguments {
+pub struct DHTGetPeersRequestArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
 
@@ -161,4 +167,23 @@ pub struct DHTGetPeersResponseArguments {
 
     #[serde(default)]
     pub values: Option<Vec<serde_bytes::ByteBuf>>,
+}
+
+// === Announce Peer ===
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTAnnouncePeerRequestArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub info_hash: Vec<u8>,
+
+    pub port: u16,
+
+    #[serde(with = "serde_bytes")]
+    pub token: Vec<u8>,
+
+    #[serde(default)]
+    pub implied_port: Option<u8>,
 }
