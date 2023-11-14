@@ -7,7 +7,7 @@ use std::slice::Iter;
 use crate::common::{Id, Node, MAX_DISTANCE};
 
 /// K = the default maximum size of a k-bucket.
-const MAX_BUCKET_SIZE_K: usize = 20;
+pub const MAX_BUCKET_SIZE_K: usize = 20;
 
 #[derive(Debug)]
 pub struct RoutingTable {

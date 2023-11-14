@@ -12,9 +12,11 @@ use crate::messages::{
     ResponseSpecific,
 };
 
+use crate::peers::PeersStore;
 use crate::query::Query;
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
+use crate::tokens::Tokens;
 use crate::Result;
 
 const TICK_INTERVAL: Duration = Duration::from_millis(15);
@@ -35,6 +37,8 @@ pub struct Rpc {
     socket: KrpcSocket,
     routing_table: RoutingTable,
     queries: HashMap<Id, Query>,
+    tokens: Tokens,
+    peers: PeersStore,
 
     // Options
     id: Id,
@@ -60,6 +64,8 @@ impl Rpc {
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
+            tokens: Tokens::new(),
+            peers: PeersStore::new(),
         })
     }
 
@@ -239,6 +245,31 @@ impl Rpc {
                         nodes: self.routing_table.closest(target),
                     }),
                 );
+            }
+            RequestSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
+                if let Some(values) = self.peers.get_random_peers(info_hash) {
+                    self.socket.response(
+                        from,
+                        transaction_id,
+                        ResponseSpecific::GetPeers(GetPeersResponseArguments {
+                            responder_id: self.id,
+                            token: self.tokens.generate_token(from).into(),
+                            nodes: None,
+                            values: Some(values),
+                        }),
+                    );
+                } else {
+                    self.socket.response(
+                        from,
+                        transaction_id,
+                        ResponseSpecific::GetPeers(GetPeersResponseArguments {
+                            responder_id: self.id,
+                            token: self.tokens.generate_token(from).into(),
+                            nodes: Some(self.routing_table.closest(info_hash)),
+                            values: None,
+                        }),
+                    );
+                }
             }
             _ => {
                 // TODO: Handle queries (stuff with closer nodes in the response).
