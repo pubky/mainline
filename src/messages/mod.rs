@@ -373,8 +373,7 @@ pub fn sockaddr_to_bytes(sockaddr: &SocketAddr) -> Vec<u8> {
     }
 
     let port_bytes = sockaddr.port().to_be_bytes();
-    bytes.push(port_bytes[0]);
-    bytes.push(port_bytes[1]);
+    bytes.extend(port_bytes);
 
     bytes
 }

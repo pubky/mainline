@@ -48,7 +48,7 @@ impl Dht {
     // === Public Methods ===
 
     pub fn shutdown(&self) {
-        self.sender.send(ActorMessage::Shutdown).unwrap();
+        let _ = self.sender.send(ActorMessage::Shutdown);
     }
 
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
@@ -77,6 +77,7 @@ impl Dht {
 
     // === Private Methods ===
 
+    #[cfg(test)]
     fn block_until_shutdown(self) {
         if let Some(handle) = self.handle {
             let _ = handle.join();

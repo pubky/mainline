@@ -1,4 +1,4 @@
-use std::{convert::TryInto, time::Instant};
+use std::{str::FromStr, time::Instant};
 
 use mainline::{Dht, Id};
 
@@ -14,7 +14,7 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    let infohash_parse_result: Result<Id, _> = cli.infohash.as_str().try_into();
+    let infohash_parse_result: Result<Id, _> = Id::from_str(cli.infohash.as_str());
 
     match infohash_parse_result {
         Ok(infohash) => {

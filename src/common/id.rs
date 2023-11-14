@@ -2,8 +2,9 @@
 use rand::Rng;
 use std::{
     convert::TryInto,
-    fmt::{self, Debug, Formatter},
+    fmt::{self, Debug, Display, Formatter},
     net::ToSocketAddrs,
+    str::FromStr,
 };
 
 use crate::{Error, Result};
@@ -47,11 +48,8 @@ impl Id {
     /// Distance to the furthest Id is 160
     /// Distance to an Id with 5 leading matching bits is 155
     pub fn distance(&self, other: &Id) -> u8 {
-        for i in 0..ID_SIZE {
-            let a = self.bytes[i];
-            let b = other.bytes[i];
-
-            if a != b {
+        for (i, (a, b)) in self.bytes.iter().zip(other.bytes).enumerate() {
+            if a != &b {
                 // leading zeros so far + laedinge zeros of this byte
                 let leading_zeros = (i as u32 * 8 + (a ^ b).leading_zeros()) as u8;
 
@@ -67,32 +65,34 @@ impl Id {
     }
 }
 
-impl ToString for Id {
-    fn to_string(&self) -> String {
-        let hex_chars: Vec<String> = self
+impl Display for Id {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let hex_chars: String = self
             .bytes
             .iter()
             .map(|byte| format!("{:02x}", byte))
             .collect();
 
-        hex_chars.join("")
+        write!(f, "{}", hex_chars);
+
+        Ok(())
     }
 }
 
-impl TryInto<Id> for &str {
-    type Error = Error;
+impl FromStr for Id {
+    type Err = Error;
 
-    fn try_into(self) -> Result<Id> {
-        if self.len() % 2 != 0 {
+    fn from_str(s: &str) -> Result<Id> {
+        if s.len() % 2 != 0 {
             return Err(Error::InvalidIdEncoding(
                 "Number of Hex characters should be even".into(),
             ));
         }
 
-        let mut bytes = Vec::with_capacity(self.len() / 2);
+        let mut bytes = Vec::with_capacity(s.len() / 2);
 
-        for i in 0..self.len() / 2 {
-            let byte_str = &self[i * 2..(i * 2) + 2];
+        for i in 0..s.len() / 2 {
+            let byte_str = &s[i * 2..(i * 2) + 2];
             if let Ok(byte) = u8::from_str_radix(byte_str, 16) {
                 bytes.push(byte);
             } else {
@@ -106,7 +106,7 @@ impl TryInto<Id> for &str {
 
 impl Debug for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Id({})", self.to_string())
+        write!(f, "Id({})", self)
     }
 }
 
@@ -123,13 +123,9 @@ mod test {
 
     #[test]
     fn distance_to_id() {
-        let id: Id = "0639A1E24FBB8AB277DF033476AB0DE10FAB3BDC"
-            .try_into()
-            .unwrap();
+        let id = Id::from_str("0639A1E24FBB8AB277DF033476AB0DE10FAB3BDC").unwrap();
 
-        let target: Id = "035b1aeb9737ade1a80933594f405d3f772aa08e"
-            .try_into()
-            .unwrap();
+        let target = Id::from_str("035b1aeb9737ade1a80933594f405d3f772aa08e").unwrap();
 
         let distance = id.distance(&target);
 

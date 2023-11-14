@@ -194,6 +194,7 @@ impl Debug for KBucket {
 mod test {
     use std::convert::TryInto;
     use std::net::SocketAddr;
+    use std::str::FromStr;
 
     use crate::{
         common::{Id, Node},
@@ -437,15 +438,13 @@ mod test {
 
         let nodes: Vec<Node> = ids
             .iter()
-            .map(|id| {
-                let id: Id = (*id).try_into().unwrap();
+            .map(|str| {
+                let id = Id::from_str(*str).unwrap();
                 Node::random().with_id(id)
             })
             .collect();
 
-        let local_id: Id = "ba3042eb2d373b19e7c411ce6826e31b37be0b2e"
-            .try_into()
-            .unwrap();
+        let local_id = Id::from_str("ba3042eb2d373b19e7c411ce6826e31b37be0b2e").unwrap();
 
         let mut table = RoutingTable::new().with_id(local_id);
 
@@ -500,10 +499,7 @@ mod test {
                 "b61fbd992a13af05feba939f597b5f6ee61188e3",
             ]
             .iter()
-            .map(|id| {
-                let id: Id = (*id).try_into().unwrap();
-                id
-            })
+            .map(|id| Id::from_str(*id).unwrap())
             .collect();
 
             let target = local_id;
@@ -562,15 +558,10 @@ mod test {
                 "fd042ff1404b495720ad8345404ff5f25acd02a8",
             ]
             .iter()
-            .map(|id| {
-                let id: Id = (*id).try_into().unwrap();
-                id
-            })
+            .map(|str| Id::from_str(*str).unwrap())
             .collect();
 
-            let target: Id = "d1406a3d3a8354d566f21dba8bd06c537cde2a20"
-                .try_into()
-                .unwrap();
+            let target = Id::from_str("d1406a3d3a8354d566f21dba8bd06c537cde2a20").unwrap();
             let closest = table.closest(&target);
 
             let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
