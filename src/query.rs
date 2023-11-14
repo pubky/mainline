@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-use crate::common::{Id, Node, ResponseItem, ResponseSender};
+use crate::common::{Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue};
 use crate::messages::RequestSpecific;
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
@@ -17,7 +17,7 @@ pub struct Query {
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
-    responses: Vec<ResponseItem>,
+    responses: Vec<ResponseValue>,
 }
 
 impl Query {
@@ -58,7 +58,7 @@ impl Query {
             let sender = self.senders.last().unwrap();
 
             for response in &self.responses {
-                self.send_response(sender, Some(response))
+                self.send_value(sender, response.clone())
             }
         };
     }
@@ -98,11 +98,11 @@ impl Query {
     }
 
     /// Add reveived response
-    pub fn response(&mut self, response: ResponseItem) {
+    pub fn response(&mut self, response: ResponseValue) {
         self.responses.push(response.clone());
 
         for sender in &self.senders {
-            self.send_response(sender, Some(&response))
+            self.send_value(sender, response.clone())
         }
     }
 
@@ -126,15 +126,26 @@ impl Query {
 
     // === Private Methods ===
 
-    fn send_response(&self, sender: &ResponseSender, response: Option<&ResponseItem>) {
+    fn send_value(&self, sender: &ResponseSender, value: ResponseValue) {
         match sender {
             ResponseSender::Peer(sender) => {
-                if let Some(response) = response {
-                    let ResponseItem::Peer(response) = response.clone();
-                    let _ = sender.send(Some(response));
-                } else {
-                    let _ = sender.send(None);
-                }
+                let ResponseValue::Peer(peer) = value.clone();
+                let _ = sender.send(ResponseMessage::ResponseValue(peer));
+            }
+            _ => {}
+        };
+    }
+
+    fn send_done(&self, sender: &ResponseSender) {
+        let done = ResponseDone {
+            visited: self.visited.len(),
+            closest_nodes: self.table.closest(&self.target),
+        };
+
+        match sender {
+            ResponseSender::Peer(sender) => {
+                ///
+                sender.send(ResponseMessage::ResponseDone(done));
             }
             _ => {}
         };
@@ -154,10 +165,9 @@ impl Query {
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.inflight_requests.is_empty() {
-            // Send None to all receivers to end iterators
+            // Send Done to all receivers to end iterators
             for sender in &self.senders {
-                self.send_response(sender, None);
-                // println!("Visited {} nodes", self.visited.len());
+                self.send_done(sender);
             }
 
             // No more closer nodes to visit, and no inflight requests to wait for

@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    common::{GetPeerResponse, Id, Node, Response, ResponseSender},
+    common::{GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage, ResponseSender},
     rpc::Rpc,
     Result,
 };
@@ -52,11 +52,27 @@ impl Dht {
     }
 
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
-        let (sender, receiver) = mpsc::channel::<Option<GetPeerResponse>>();
+        let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
         Response::new(receiver)
+    }
+
+    pub fn announce_peer(&self, info_hash: Id, port: u16) {
+        // let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
+        //
+        // let _ = self
+        //     .sender
+        //     .send(ActorMessage::AnnouncePeer(info_hash, sender));
+        //
+        // let result = Response::new(receiver);
+        //
+        // // let
+        // //
+        // // for response in result {}
+        // //
+        // // result
     }
 
     // === Private Methods ===
@@ -80,6 +96,9 @@ impl Dht {
                     ActorMessage::GetPeers(info_hash, sender) => {
                         rpc.get_peers(info_hash, ResponseSender::Peer(sender))
                     }
+                    ActorMessage::AnnouncePeer(info_hash, sender) => {
+                        todo!();
+                    }
                 }
             }
 
@@ -92,7 +111,8 @@ impl Dht {
 
 enum ActorMessage {
     Shutdown,
-    GetPeers(Id, Sender<Option<GetPeerResponse>>),
+    GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
+    AnnouncePeer(Id, Sender<ResponseMessage<GetPeerResponse>>),
 }
 
 #[cfg(test)]

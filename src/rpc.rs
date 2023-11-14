@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 
-use crate::common::{GetPeerResponse, Id, Node, ResponseFrom, ResponseItem, ResponseSender};
+use crate::common::{GetPeerResponse, Id, Node, ResponseFrom, ResponseSender, ResponseValue};
 use crate::messages::{
     FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
     GetPeersResponseArguments, Message, MessageType, PingResponseArguments, RequestSpecific,
@@ -306,7 +306,7 @@ impl Rpc {
                     ..
                 })) => {
                     for peer in peers.clone() {
-                        query.response(ResponseItem::Peer(GetPeerResponse {
+                        query.response(ResponseValue::Peer(GetPeerResponse {
                             from: ResponseFrom {
                                 id: *responder_id,
                                 address: from,

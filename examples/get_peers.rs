@@ -2,23 +2,13 @@ use std::{convert::TryInto, time::Instant};
 
 use mainline::{Dht, Id};
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     /// Optional name to operate on
     infohash: String,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// does testing things
-    Test {
-        /// lists test values
-        #[arg(short, long)]
-        list: bool,
-    },
 }
 
 fn main() {
