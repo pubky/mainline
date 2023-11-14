@@ -12,9 +12,9 @@ For the foreseeable future, this library is limited to the scope of [read-only](
     - [x] Request
     - [x] Response
   - [x] query (incrementally get closer nodes)
-  - [ ] Announce/Get peers
-    - [ ] Get
-    - [ ] Put
+  - [x] Announce/Get peers
+    - [x] Get
+    - [x] Put
 - [ ] BEP0044 arbitrary storage
   - [ ] Mutable data
     - [ ] Get

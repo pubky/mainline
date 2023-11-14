@@ -7,9 +7,12 @@ use std::{
 };
 
 use crate::{
-    common::{GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage, ResponseSender},
+    common::{
+        AnnouncePeerResponse, GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage,
+        ResponseSender, ResponseValue,
+    },
     rpc::Rpc,
-    Result,
+    Error, Result,
 };
 
 #[derive(Debug)]
@@ -51,6 +54,9 @@ impl Dht {
         self.sender.send(ActorMessage::Shutdown).unwrap();
     }
 
+    /// Get peers for a given infohash.
+    ///
+    /// Returns an blocking iterator over responses as they are received.
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
         let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
 
@@ -59,20 +65,37 @@ impl Dht {
         Response::new(receiver)
     }
 
-    pub fn announce_peer(&self, info_hash: Id, port: u16) {
-        // let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
-        //
-        // let _ = self
-        //     .sender
-        //     .send(ActorMessage::AnnouncePeer(info_hash, sender));
-        //
-        // let result = Response::new(receiver);
-        //
-        // // let
-        // //
-        // // for response in result {}
-        // //
-        // // result
+    /// Announce a peer for a given infohash.
+    ///
+    /// The peer will be announced on this process IP.
+    /// If explicit port is passed, it will be used, otherwise the port will be implicitly
+    /// assumed by remote nodes to be the same ase port they recieved the request from.
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<AnnouncePeerResponse> {
+        let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
+
+        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+
+        let mut response = Response::new(receiver);
+
+        // Block until we got a Done response!
+        for value in &mut response {}
+
+        self.announce_peer_to(info_hash, response.closest_nodes, port)
+    }
+
+    pub fn announce_peer_to(
+        &self,
+        info_hash: Id,
+        nodes: Vec<Node>,
+        port: Option<u16>,
+    ) -> Result<AnnouncePeerResponse> {
+        let (sender, receiver) = mpsc::channel::<AnnouncePeerResponse>();
+
+        let _ = self
+            .sender
+            .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
+
+        receiver.recv().map_err(|e| e.into())
     }
 
     // === Private Methods ===
@@ -94,11 +117,15 @@ impl Dht {
                         break;
                     }
                     ActorMessage::GetPeers(info_hash, sender) => {
-                        rpc.get_peers(info_hash, ResponseSender::Peer(sender))
+                        rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
                     }
-                    ActorMessage::AnnouncePeer(info_hash, sender) => {
-                        todo!();
-                    }
+                    ActorMessage::AnnouncePeer(info_hash, nodes, port, sender) => rpc
+                        .announce_peer(
+                            info_hash,
+                            nodes,
+                            port,
+                            ResponseSender::AnnouncePeer(sender),
+                        ),
                 }
             }
 
@@ -112,7 +139,7 @@ impl Dht {
 enum ActorMessage {
     Shutdown,
     GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
-    AnnouncePeer(Id, Sender<ResponseMessage<GetPeerResponse>>),
+    AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<AnnouncePeerResponse>),
 }
 
 #[cfg(test)]

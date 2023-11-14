@@ -5,40 +5,46 @@ use std::{
 
 use super::{Id, Node};
 
+#[derive(Debug)]
 pub struct Response<T> {
     receiver: Receiver<ResponseMessage<T>>,
+    pub closest_nodes: Vec<Node>,
+    pub visited: usize,
 }
 
 impl<T> Response<T> {
     pub fn new(receiver: Receiver<ResponseMessage<T>>) -> Self {
-        Self { receiver }
+        Self {
+            receiver,
+            visited: 0,
+            closest_nodes: Vec::new(),
+        }
     }
 }
 
 #[derive(Debug)]
 pub enum ResponseSender {
-    Peer(Sender<ResponseMessage<GetPeerResponse>>),
+    GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
+    AnnouncePeer(Sender<AnnouncePeerResponse>),
 }
 
 #[derive(Clone, Debug)]
 pub enum ResponseValue {
-    Peer(GetPeerResponse),
+    GetPeer(GetPeerResponse),
 }
 
 #[derive(Clone, Debug)]
 pub struct GetPeerResponse {
-    pub from: ResponseFrom,
+    pub from: Node,
     pub peer: SocketAddr,
 }
 
 #[derive(Clone, Debug)]
-pub struct ResponseFrom {
-    pub id: Id,
-    pub address: SocketAddr,
-    /// Mainline implementation version, useful for debugging.
-    pub version: Option<Vec<u8>>,
-    /// Opaque token used to authunticate our IP when we try to PUT a value in that node.
-    pub token: Vec<u8>,
+pub struct AnnouncePeerResponse {
+    /// Nodes that responded with success.
+    pub success: Vec<Id>,
+    /// Ids of the nodes that successfully stored the peer.
+    pub closest_nodes: Vec<Node>,
 }
 
 pub enum ResponseMessage<T> {
@@ -54,7 +60,7 @@ pub struct ResponseDone {
     pub closest_nodes: Vec<Node>,
 }
 
-impl<T> Iterator for Response<T> {
+impl<T> Iterator for &mut Response<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -65,7 +71,9 @@ impl<T> Iterator for Response<T> {
                     visited,
                     closest_nodes,
                 }) => {
-                    // Do stuff;
+                    self.visited = visited;
+                    self.closest_nodes = closest_nodes;
+
                     None
                 }
             },

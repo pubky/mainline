@@ -4,15 +4,15 @@ use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 
-use crate::common::{GetPeerResponse, Id, Node, ResponseFrom, ResponseSender, ResponseValue};
+use crate::common::{GetPeerResponse, Id, Node, ResponseSender, ResponseValue};
 use crate::messages::{
-    FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
-    GetPeersResponseArguments, Message, MessageType, PingResponseArguments, RequestSpecific,
-    ResponseSpecific,
+    AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
+    GetPeersRequestArguments, GetPeersResponseArguments, Message, MessageType,
+    PingRequestArguments, PingResponseArguments, RequestSpecific, ResponseSpecific,
 };
 
 use crate::peers::PeersStore;
-use crate::query::Query;
+use crate::query::{Query, StoreQuery};
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
 use crate::tokens::Tokens;
@@ -36,6 +36,7 @@ pub struct Rpc {
     socket: KrpcSocket,
     routing_table: RoutingTable,
     queries: HashMap<Id, Query>,
+    store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
     peers: PeersStore,
 
@@ -63,6 +64,7 @@ impl Rpc {
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
+            store_queries: HashMap::new(),
             tokens: Tokens::new(),
             peers: PeersStore::new(),
         })
@@ -126,17 +128,21 @@ impl Rpc {
         };
 
         // === Tick queries ===
-        for (target, query) in self.queries.iter_mut() {
+        for (_, query) in self.queries.iter_mut() {
+            query.tick(&mut self.socket);
+        }
+        for (_, query) in self.store_queries.iter_mut() {
             query.tick(&mut self.socket);
         }
 
         // === Remove done queries ===
         self.queries.retain(|_, query| !query.is_done());
+        self.store_queries.retain(|_, query| !query.is_done());
 
         thread::sleep(self.interval);
     }
 
-    // Start or restart a get_peers query.
+    /// Start or restart a get_peers query.
     pub fn get_peers(&mut self, info_hash: Id, sender: ResponseSender) {
         self.query(
             info_hash,
@@ -146,6 +152,40 @@ impl Rpc {
             }),
             Some(sender),
         )
+    }
+
+    /// Send an announce_peer request to a list of nodes.
+    pub fn announce_peer(
+        &mut self,
+        info_hash: Id,
+        nodes: Vec<Node>,
+        port: Option<u16>,
+        sender: ResponseSender,
+    ) {
+        let (port, implied_port) = match port {
+            Some(port) => (port, None),
+            None => (0, Some(true)),
+        };
+
+        let mut query = StoreQuery::new(sender);
+
+        for node in nodes {
+            if let Some(token) = node.token.clone() {
+                query.request(
+                    node,
+                    RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+                        requester_id: self.id,
+                        info_hash,
+                        port,
+                        implied_port,
+                        token,
+                    }),
+                    &mut self.socket,
+                );
+            }
+        }
+
+        self.store_queries.insert(info_hash, query);
     }
 
     // === Private Methods ===
@@ -186,7 +226,7 @@ impl Rpc {
         } else {
             // Seed this query with the closest nodes we know about.
             for node in closest {
-                query.add_node(node)
+                query.add_candidate(node)
             }
         }
 
@@ -285,6 +325,25 @@ impl Rpc {
             return;
         }
 
+        // If the response looks like a Ping response, check StoreQueries for the transaction_id.
+        if let Some(query) = self.store_queries.iter_mut().find_map(|(_, query)| {
+            if query.remove_inflight_request(message.transaction_id) {
+                return Some(query);
+            }
+            None
+        }) {
+            match message.message_type {
+                MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                    responder_id,
+                })) => {
+                    query.success(responder_id);
+                }
+                _ => {}
+            }
+
+            return;
+        }
+
         // Get corresponing query for message.transaction_id
         if let Some(query) = self.queries.iter_mut().find_map(|(_, query)| {
             if query.remove_inflight_request(message.transaction_id) {
@@ -294,7 +353,7 @@ impl Rpc {
         }) {
             if let Some(nodes) = message.get_closer_nodes() {
                 for node in nodes {
-                    query.add_node(node);
+                    query.add_candidate(node);
                 }
             }
 
@@ -302,19 +361,23 @@ impl Rpc {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     responder_id,
                     token,
-                    values: Some(peers),
+                    values,
                     ..
                 })) => {
-                    for peer in peers.clone() {
-                        query.response(ResponseValue::Peer(GetPeerResponse {
-                            from: ResponseFrom {
-                                id: *responder_id,
-                                address: from,
-                                token: token.clone(),
-                                version: message.version.clone(),
-                            },
-                            peer,
-                        }));
+                    query.add_responding_node(
+                        Node::new(*responder_id, from).with_token(token.clone()),
+                    );
+
+                    match values {
+                        Some(peers) => {
+                            for peer in peers.clone() {
+                                query.response(ResponseValue::GetPeer(GetPeerResponse {
+                                    from: Node::new(*responder_id, from),
+                                    peer,
+                                }));
+                            }
+                        }
+                        None => {}
                     }
                 }
                 // Ping response is already handled in add_node()

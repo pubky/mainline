@@ -48,6 +48,7 @@ pub enum RequestSpecific {
     Ping(PingRequestArguments),
     FindNode(FindNodeRequestArguments),
     GetPeers(GetPeersRequestArguments),
+    AnnouncePeer(AnnouncePeerRequestArguments),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -97,6 +98,17 @@ pub struct GetPeersResponseArguments {
     pub values: Option<Vec<SocketAddr>>,
 }
 
+// === Announce Peer ===
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct AnnouncePeerRequestArguments {
+    pub requester_id: Id,
+    pub info_hash: Id,
+    pub port: u16,
+    pub implied_port: Option<bool>,
+    pub token: Vec<u8>,
+}
+
 impl Message {
     fn into_serde_message(self) -> internal::DHTMessage {
         internal::DHTMessage {
@@ -109,13 +121,13 @@ impl Message {
             variant: match self.message_type {
                 MessageType::Request(req) => internal::DHTMessageVariant::Request(match req {
                     RequestSpecific::Ping(ping_args) => internal::DHTRequestSpecific::Ping {
-                        arguments: internal::DHTPingArguments {
+                        arguments: internal::DHTPingRequestArguments {
                             id: ping_args.requester_id.to_vec(),
                         },
                     },
                     RequestSpecific::FindNode(find_node_args) => {
                         internal::DHTRequestSpecific::FindNode {
-                            arguments: internal::DHTFindNodeArguments {
+                            arguments: internal::DHTFindNodeRequestArguments {
                                 id: find_node_args.requester_id.to_vec(),
                                 target: find_node_args.target.to_vec(),
                             },
@@ -123,9 +135,24 @@ impl Message {
                     }
                     RequestSpecific::GetPeers(get_peers_args) => {
                         internal::DHTRequestSpecific::GetPeers {
-                            arguments: internal::DHTGetPeersArguments {
+                            arguments: internal::DHTGetPeersRequestArguments {
                                 id: get_peers_args.requester_id.to_vec(),
                                 info_hash: get_peers_args.info_hash.to_vec(),
+                            },
+                        }
+                    }
+                    RequestSpecific::AnnouncePeer(announce_peer_args) => {
+                        internal::DHTRequestSpecific::AnnouncePeer {
+                            arguments: internal::DHTAnnouncePeerRequestArguments {
+                                id: announce_peer_args.requester_id.to_vec(),
+                                info_hash: announce_peer_args.info_hash.to_vec(),
+                                port: announce_peer_args.port,
+                                implied_port: if let Some(_) = announce_peer_args.implied_port {
+                                    Some(1)
+                                } else {
+                                    Some(0)
+                                },
+                                token: announce_peer_args.token,
                             },
                         }
                     }
@@ -203,6 +230,21 @@ impl Message {
                             RequestSpecific::GetPeers(GetPeersRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
                                 info_hash: Id::from_bytes(&arguments.info_hash)?,
+                            })
+                        }
+                        internal::DHTRequestSpecific::AnnouncePeer { arguments } => {
+                            RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+                                requester_id: Id::from_bytes(arguments.id)?,
+                                implied_port: if arguments.implied_port.is_none() {
+                                    None
+                                } else if arguments.implied_port.unwrap() != 0 {
+                                    Some(true)
+                                } else {
+                                    Some(false)
+                                },
+                                info_hash: Id::from_bytes(&arguments.info_hash)?,
+                                port: arguments.port,
+                                token: arguments.token,
                             })
                         }
                     })
@@ -294,6 +336,7 @@ impl Message {
                 RequestSpecific::Ping(arguments) => arguments.requester_id,
                 RequestSpecific::FindNode(arguments) => arguments.requester_id,
                 RequestSpecific::GetPeers(arguments) => arguments.requester_id,
+                RequestSpecific::AnnouncePeer(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(arguments) => arguments.responder_id,

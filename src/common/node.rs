@@ -16,6 +16,7 @@ const STALE_TIME: Duration = Duration::from_secs(5 * 60);
 pub struct Node {
     pub id: Id,
     pub address: SocketAddr,
+    pub token: Option<Vec<u8>>,
     last_seen: Instant,
 }
 
@@ -37,6 +38,7 @@ impl Node {
         Node {
             id,
             address,
+            token: None,
             last_seen: Instant::now(),
         }
     }
@@ -46,6 +48,7 @@ impl Node {
         Node {
             id: Id::random(),
             address: SocketAddr::from(([0, 0, 0, 0], 0)),
+            token: None,
             last_seen: Instant::now(),
         }
     }
@@ -57,6 +60,11 @@ impl Node {
 
     pub fn with_address(mut self, address: SocketAddr) -> Self {
         self.address = address;
+        self
+    }
+
+    pub fn with_token(mut self, token: Vec<u8>) -> Self {
+        self.token = Some(token);
         self
     }
 
