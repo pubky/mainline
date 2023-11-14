@@ -332,13 +332,11 @@ impl Rpc {
             }
             None
         }) {
-            match message.message_type {
-                MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                    responder_id,
-                })) => {
-                    query.success(responder_id);
-                }
-                _ => {}
+            if let MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                responder_id,
+            })) = message.message_type
+            {
+                query.success(responder_id);
             }
 
             return;

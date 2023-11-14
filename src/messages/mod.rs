@@ -147,7 +147,7 @@ impl Message {
                                 id: announce_peer_args.requester_id.to_vec(),
                                 info_hash: announce_peer_args.info_hash.to_vec(),
                                 port: announce_peer_args.port,
-                                implied_port: if let Some(_) = announce_peer_args.implied_port {
+                                implied_port: if announce_peer_args.implied_port.is_some() {
                                     Some(1)
                                 } else {
                                     Some(0)
