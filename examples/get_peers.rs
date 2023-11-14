@@ -37,7 +37,7 @@ fn main() {
 
             println!("\nLooking up infohash: {}...\n", cli.infohash);
 
-            for peer_response in dht.get_peers(infohash) {
+            for response in dht.get_peers(infohash) {
                 if !first {
                     first = true;
                     println!("Got first result in {:?}\n", start.elapsed().as_secs_f32());
@@ -45,10 +45,7 @@ fn main() {
                     println!("Streaming peers:\n");
                 }
 
-                println!(
-                    "Got peer {:?} | from node: {:?}",
-                    peer_response.peer, peer_response.from
-                );
+                println!("Got peer {:?} | {:?}", response.peer, response.from);
             }
 
             println!("\nQuery exhausted in {:?}", start.elapsed().as_secs_f32());

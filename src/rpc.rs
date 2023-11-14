@@ -4,8 +4,7 @@ use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 
-use crate::common::{Id, Node};
-use crate::dht::{GetPeerResponse, ResponseItem, ResponseSender};
+use crate::common::{GetPeerResponse, Id, Node, ResponseFrom, ResponseItem, ResponseSender};
 use crate::messages::{
     FindNodeRequestArguments, FindNodeResponseArguments, GetPeersRequestArguments,
     GetPeersResponseArguments, Message, MessageType, PingResponseArguments, RequestSpecific,
@@ -302,14 +301,18 @@ impl Rpc {
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     responder_id,
-                    // TODO: save tokens for Storing items.
                     token,
                     values: Some(peers),
                     ..
                 })) => {
                     for peer in peers.clone() {
                         query.response(ResponseItem::Peer(GetPeerResponse {
-                            from: Node::new(*responder_id, from),
+                            from: ResponseFrom {
+                                id: *responder_id,
+                                address: from,
+                                token: token.clone(),
+                                version: message.version.clone(),
+                            },
                             peer,
                         }));
                     }

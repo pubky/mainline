@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    common::{Id, Node},
+    common::{GetPeerResponse, Id, Node, Response, ResponseSender},
     rpc::Rpc,
     Result,
 };
@@ -56,7 +56,7 @@ impl Dht {
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
-        Response { receiver }
+        Response::new(receiver)
     }
 
     // === Private Methods ===
@@ -93,37 +93,6 @@ impl Dht {
 enum ActorMessage {
     Shutdown,
     GetPeers(Id, Sender<Option<GetPeerResponse>>),
-}
-
-pub struct Response<ResponseItem> {
-    receiver: Receiver<Option<ResponseItem>>,
-}
-
-#[derive(Debug)]
-pub enum ResponseSender {
-    Peer(Sender<Option<GetPeerResponse>>),
-}
-
-#[derive(Clone, Debug)]
-pub enum ResponseItem {
-    Peer(GetPeerResponse),
-}
-
-#[derive(Clone, Debug)]
-pub struct GetPeerResponse {
-    pub from: Node,
-    pub peer: SocketAddr,
-}
-
-impl<T> Iterator for Response<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.receiver.recv() {
-            Ok(Some(item)) => Some(item),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]

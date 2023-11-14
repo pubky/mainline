@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-use crate::common::{Id, Node};
-use crate::dht::{GetPeerResponse, ResponseItem, ResponseSender};
+use crate::common::{Id, Node, ResponseItem, ResponseSender};
 use crate::messages::RequestSpecific;
 use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
