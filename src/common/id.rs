@@ -79,6 +79,12 @@ impl Display for Id {
     }
 }
 
+impl From<[u8; ID_SIZE]> for Id {
+    fn from(bytes: [u8; ID_SIZE]) -> Id {
+        Id { bytes }
+    }
+}
+
 impl FromStr for Id {
     type Err = Error;
 
@@ -155,5 +161,14 @@ mod test {
         let distance = id.distance(&target);
 
         assert_eq!(distance, MAX_DISTANCE)
+    }
+
+    #[test]
+    fn from_u8_20() {
+        let bytes = [0_08; 20];
+
+        let id: Id = bytes.into();
+
+        assert_eq!(id.bytes, bytes);
     }
 }
