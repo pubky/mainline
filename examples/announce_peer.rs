@@ -1,4 +1,4 @@
-use std::{convert::TryInto, time::Instant};
+use std::{str::FromStr, time::Instant};
 
 use mainline::{Dht, Id};
 
@@ -14,9 +14,7 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    let infohash_parse_result: Result<Id, _> = cli.infohash.as_str().try_into();
-
-    match infohash_parse_result {
+    match Id::from_str(cli.infohash.as_str()) {
         Ok(infohash) => {
             let dht = Dht::new().unwrap();
 
@@ -30,15 +28,11 @@ fn main() {
                         "Announced peer in {:?} seconds",
                         start.elapsed().as_secs_f32()
                     );
-                    println!("Announced to: {:?} nodes", result.success.len());
-                    println!(
-                        "Stored at: {:?}",
-                        result
-                            .closest_nodes
-                            .iter()
-                            .filter(|node| result.success.contains(&node.id))
-                            .collect::<Vec<_>>()
-                    );
+                    let stored_at = result.stored_at();
+                    println!("Stored at: {:?} nodes", stored_at.len());
+                    for node in stored_at {
+                        println!("   {:?}", node);
+                    }
                 }
                 Err(err) => {
                     println!("Error: {:?}", err)

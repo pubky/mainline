@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
 use crate::common::{
-    AnnouncePeerResponse, Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue,
+    Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreItem,
+    StoreResponse,
 };
 use crate::messages::RequestSpecific;
 use crate::routing_table::{RoutingTable, MAX_BUCKET_SIZE_K};
@@ -186,9 +187,9 @@ impl Query {
 #[derive(Debug)]
 pub struct StoreQuery {
     /// Nodes queried
-    queried: Vec<Node>,
+    closest_nodes: Vec<Node>,
     /// Nodes that confirmed success
-    success: Vec<Id>,
+    stored_at: Vec<Id>,
     inflight_requests: Vec<u16>,
     sender: ResponseSender,
 }
@@ -196,8 +197,8 @@ pub struct StoreQuery {
 impl StoreQuery {
     pub fn new(sender: ResponseSender) -> Self {
         Self {
-            queried: Vec::new(),
-            success: Vec::new(),
+            closest_nodes: Vec::new(),
+            stored_at: Vec::new(),
             inflight_requests: Vec::new(),
             sender,
         }
@@ -206,7 +207,7 @@ impl StoreQuery {
     pub fn request(&mut self, node: Node, request: RequestSpecific, socket: &mut KrpcSocket) {
         let tid = socket.request(node.address, request);
 
-        self.queried.push(node);
+        self.closest_nodes.push(node);
         self.inflight_requests.push(tid);
     }
 
@@ -224,7 +225,7 @@ impl StoreQuery {
     }
 
     pub fn success(&mut self, id: Id) {
-        self.success.push(id);
+        self.stored_at.push(id);
     }
 
     /// remove timed out requests
@@ -234,11 +235,11 @@ impl StoreQuery {
 
         if self.is_done() {
             match &self.sender {
-                ResponseSender::AnnouncePeer(sender) => {
-                    let _ = sender.send(AnnouncePeerResponse {
-                        closest_nodes: self.queried.clone(),
-                        success: self.success.clone(),
-                    });
+                ResponseSender::StoreItem(sender) => {
+                    let _ = sender.send(StoreResponse::new(
+                        self.closest_nodes.clone(),
+                        self.stored_at.clone(),
+                    ));
                 }
                 _ => {}
             }

@@ -1,5 +1,5 @@
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::mpsc::{Receiver, Sender},
 };
 
@@ -25,7 +25,7 @@ impl<T> Response<T> {
 #[derive(Debug)]
 pub enum ResponseSender {
     GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
-    AnnouncePeer(Sender<AnnouncePeerResponse>),
+    StoreItem(Sender<StoreResponse>),
 }
 
 #[derive(Clone, Debug)]
@@ -40,11 +40,31 @@ pub struct GetPeerResponse {
 }
 
 #[derive(Clone, Debug)]
-pub struct AnnouncePeerResponse {
-    /// Nodes that responded with success.
-    pub success: Vec<Id>,
-    /// Ids of the nodes that successfully stored the peer.
-    pub closest_nodes: Vec<Node>,
+pub struct StoreResponse {
+    stored_at: Vec<Id>,
+    closest_nodes: Vec<Node>,
+}
+
+impl StoreResponse {
+    pub fn new(closest_nodes: Vec<Node>, stored_at: Vec<Id>) -> Self {
+        Self {
+            closest_nodes,
+            stored_at,
+        }
+    }
+
+    /// Return the set of nodes that confirmed storing the value.
+    pub fn stored_at(&self) -> Vec<&Node> {
+        self.closest_nodes
+            .iter()
+            .filter(|node| self.stored_at.contains(&node.id))
+            .collect()
+    }
+
+    /// Return closest nodes. Useful to repeat the store operation without repeating the lookup.
+    pub fn closest_nodes(&self) -> Vec<Node> {
+        self.closest_nodes.clone()
+    }
 }
 
 pub enum ResponseMessage<T> {
