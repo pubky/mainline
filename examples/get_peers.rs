@@ -18,7 +18,7 @@ fn main() {
 
     match infohash_parse_result {
         Ok(infohash) => {
-            let dht = Dht::new().unwrap();
+            let dht = Dht::default();
 
             let start = Instant::now();
             let mut first = false;
@@ -27,9 +27,9 @@ fn main() {
 
             let mut count = 0;
 
-            let response = &mut dht.get_peers(infohash);
+            let mut response = &mut dht.get_peers(infohash);
 
-            for value in response {
+            for value in &mut response {
                 if !first {
                     first = true;
                     println!("Got first result in {:?}\n", start.elapsed().as_secs_f32());
@@ -40,6 +40,12 @@ fn main() {
                 count += 1;
                 println!("Got peer {:?} | from: {:?}", value.peer, value.from);
             }
+
+            println!(
+                "Visited {:?} nodes, found {:?} closest nodes",
+                response.visited,
+                &response.closest_nodes.len()
+            );
 
             println!(
                 "\nQuery exhausted in {:?} seconds, got {:?} peers.",

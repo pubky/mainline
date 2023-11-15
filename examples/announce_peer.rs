@@ -16,7 +16,7 @@ fn main() {
 
     match Id::from_str(cli.infohash.as_str()) {
         Ok(infohash) => {
-            let dht = Dht::new().unwrap();
+            let dht = Dht::default();
 
             let start = Instant::now();
 

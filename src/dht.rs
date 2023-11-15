@@ -30,8 +30,52 @@ impl Clone for Dht {
     }
 }
 
+pub struct Builder {
+    options: DhtSettings,
+}
+
+impl Builder {
+    pub fn build(&self) -> Dht {
+        Dht::new(self.options.clone())
+    }
+
+    /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
+    pub fn as_server(mut self) -> Self {
+        self.options.read_only = false;
+        self
+    }
+
+    pub fn with_bootstrap(mut self, bootstrap: &Vec<String>) -> Self {
+        self.options.bootstrap = Some(bootstrap.clone());
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DhtSettings {
+    pub bootstrap: Option<Vec<String>>,
+    pub read_only: bool,
+}
+
+impl Default for DhtSettings {
+    fn default() -> Self {
+        DhtSettings {
+            bootstrap: None,
+            read_only: true,
+        }
+    }
+}
+
 impl Dht {
-    pub fn new() -> Result<Self> {
+    pub fn client() {}
+
+    pub fn builder() -> Builder {
+        Builder {
+            options: DhtSettings::default(),
+        }
+    }
+
+    pub fn new(options: DhtSettings) -> Self {
         let (sender, receiver) = mpsc::channel();
 
         let mut dht = Dht {
@@ -41,11 +85,21 @@ impl Dht {
 
         let mut clone = dht.clone();
 
-        let handle = thread::spawn(move || dht.run(receiver));
+        let handle = thread::spawn(move || dht.run(options, receiver));
 
         clone.handle = Some(handle);
 
-        Ok(clone)
+        clone
+    }
+
+    // === Getters ===
+
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        let (sender, receiver) = mpsc::channel::<SocketAddr>();
+
+        let _ = self.sender.send(ActorMessage::LocalAddress(sender));
+
+        receiver.recv().map_err(|e| e.into())
     }
 
     // === Public Methods ===
@@ -107,15 +161,21 @@ impl Dht {
         }
     }
 
-    fn run(&mut self, receiver: Receiver<ActorMessage>) -> Result<()> {
-        // TODO: pass config
-        let mut rpc = Rpc::new()?.with_read_only(true);
+    fn run(&mut self, settings: DhtSettings, receiver: Receiver<ActorMessage>) -> Result<()> {
+        let mut rpc = Rpc::new()?.with_read_only(settings.read_only);
+
+        if let Some(bootstrap) = settings.bootstrap {
+            rpc = rpc.with_bootstrap(bootstrap);
+        }
 
         loop {
             if let Ok(actor_message) = receiver.try_recv() {
                 match actor_message {
                     ActorMessage::Shutdown => {
                         break;
+                    }
+                    ActorMessage::LocalAddress(sender) => {
+                        sender.send(rpc.local_addr());
                     }
                     ActorMessage::GetPeers(info_hash, sender) => {
                         rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
@@ -133,10 +193,51 @@ impl Dht {
     }
 }
 
+impl Default for Dht {
+    /// Create a new DHT client with default bootstrap nodes.
+    fn default() -> Self {
+        Dht::builder().build()
+    }
+}
+
 enum ActorMessage {
     Shutdown,
+    LocalAddress(Sender<SocketAddr>),
+
     GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
     AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
+}
+
+/// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
+#[derive(Debug)]
+pub struct Testnet {
+    pub bootstrap: Vec<String>,
+    pub nodes: Vec<Dht>,
+}
+
+impl Testnet {
+    fn new(count: usize) -> Self {
+        let mut nodes: Vec<Dht> = vec![];
+        let mut bootstrap = vec![];
+
+        for i in 0..count {
+            if i == 0 {
+                let node = Dht::builder().as_server().with_bootstrap(&vec![]).build();
+
+                let addr = node.local_addr().unwrap();
+                bootstrap.push(format!("127.0.0.1:{}", addr.port()));
+
+                nodes.push(node)
+            } else {
+                let node = Dht::builder()
+                    .as_server()
+                    .with_bootstrap(&bootstrap)
+                    .build();
+            }
+        }
+
+        Self { bootstrap, nodes }
+    }
 }
 
 #[cfg(test)]
@@ -148,7 +249,7 @@ mod test {
 
     #[test]
     fn shutdown() {
-        let dht = Dht::new().unwrap();
+        let dht = Dht::default();
 
         let clone = dht.clone();
         thread::spawn(move || {
@@ -158,5 +259,31 @@ mod test {
         });
 
         dht.block_until_shutdown();
+    }
+
+    #[test]
+    fn announce_get_peer() {
+        let testnet = Testnet::new(10);
+
+        let a = Dht::builder().with_bootstrap(&testnet.bootstrap).build();
+        let b = Dht::builder().with_bootstrap(&testnet.bootstrap).build();
+
+        let info_hash = Id::random();
+
+        match a.announce_peer(info_hash, Some(45555)) {
+            Ok(_) => {
+                let responses: Vec<_> = b.get_peers(info_hash).collect();
+
+                match responses.first() {
+                    Some(r) => {
+                        assert_eq!(r.peer.port(), 45555);
+                    }
+                    None => {
+                        panic!("No respnoses")
+                    }
+                }
+            }
+            Err(_) => {}
+        };
     }
 }

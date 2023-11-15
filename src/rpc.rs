@@ -310,12 +310,34 @@ impl Rpc {
                     );
                 }
             }
+            RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+                requester_id,
+                info_hash,
+                port,
+                implied_port,
+                token,
+            }) => {
+                if self.tokens.validate(from, token) {
+                    let peer = match implied_port {
+                        Some(true) => from,
+                        _ => SocketAddr::new(from.ip(), *port),
+                    };
+
+                    self.peers.add_peer(*info_hash, peer);
+
+                    self.socket.response(
+                        from,
+                        transaction_id,
+                        ResponseSpecific::Ping(PingResponseArguments {
+                            responder_id: self.id,
+                        }),
+                    );
+                } else {
+                    // TODO: Send an error message.
+                }
+            }
             _ => {
-                // TODO: Handle queries (stuff with closer nodes in the response).
-                // TODO: Send error message?
                 // TODO: How to deal with unknown requests?
-                // TODO: should we rsepond with FindNodeResponse anyways?
-                todo!()
             }
         }
     }

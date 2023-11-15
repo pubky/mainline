@@ -27,6 +27,7 @@ For the foreseeable future, this library is limited to the scope of [read-only](
   - [x] Inform other nodes that this node is read-only
   - [x] Does not add read-only nodes to local routing tables
 - [ ] Features for long living clients
+  - [ ] API for storing and load routing table between sessions.
   - [ ] Refresh nodes in the local rounting table frequently enough
   - [ ] Refresh cached queries to keep closest nodes fresh, skipping get before put
   - [ ] Backoff while republishing.
