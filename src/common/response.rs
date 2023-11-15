@@ -25,7 +25,7 @@ impl<T> Response<T> {
 #[derive(Debug)]
 pub enum ResponseSender {
     GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
-    StoreItem(Sender<StoreResponse>),
+    StoreItem(Sender<StoreQueryMetdata>),
 }
 
 #[derive(Clone, Debug)]
@@ -40,12 +40,12 @@ pub struct GetPeerResponse {
 }
 
 #[derive(Clone, Debug)]
-pub struct StoreResponse {
+pub struct StoreQueryMetdata {
     stored_at: Vec<Id>,
     closest_nodes: Vec<Node>,
 }
 
-impl StoreResponse {
+impl StoreQueryMetdata {
     pub fn new(closest_nodes: Vec<Node>, stored_at: Vec<Id>) -> Self {
         Self {
             closest_nodes,

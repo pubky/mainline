@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
 use crate::common::{
-    Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreItem,
-    StoreResponse,
+    Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
 };
 use crate::messages::RequestSpecific;
 use crate::routing_table::{RoutingTable, MAX_BUCKET_SIZE_K};
@@ -236,7 +235,7 @@ impl StoreQuery {
         if self.is_done() {
             match &self.sender {
                 ResponseSender::StoreItem(sender) => {
-                    let _ = sender.send(StoreResponse::new(
+                    let _ = sender.send(StoreQueryMetdata::new(
                         self.closest_nodes.clone(),
                         self.stored_at.clone(),
                     ));

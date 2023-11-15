@@ -9,7 +9,7 @@ use std::{
 use crate::{
     common::{
         GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage, ResponseSender,
-        ResponseValue, StoreResponse,
+        ResponseValue, StoreQueryMetdata,
     },
     rpc::Rpc,
     Error, Result,
@@ -70,7 +70,7 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreResponse> {
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreQueryMetdata> {
         let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
@@ -88,8 +88,8 @@ impl Dht {
         info_hash: Id,
         nodes: Vec<Node>,
         port: Option<u16>,
-    ) -> Result<StoreResponse> {
-        let (sender, receiver) = mpsc::channel::<StoreResponse>();
+    ) -> Result<StoreQueryMetdata> {
+        let (sender, receiver) = mpsc::channel::<StoreQueryMetdata>();
 
         let _ = self
             .sender
@@ -136,7 +136,7 @@ impl Dht {
 enum ActorMessage {
     Shutdown,
     GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
-    AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreResponse>),
+    AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
 }
 
 #[cfg(test)]
