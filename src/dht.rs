@@ -31,22 +31,29 @@ impl Clone for Dht {
 }
 
 pub struct Builder {
-    options: DhtSettings,
+    settings: DhtSettings,
 }
 
 impl Builder {
     pub fn build(&self) -> Dht {
-        Dht::new(self.options.clone())
+        Dht::new(self.settings.clone())
     }
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn as_server(mut self) -> Self {
-        self.options.read_only = false;
+        self.settings.read_only = false;
         self
     }
 
-    pub fn with_bootstrap(mut self, bootstrap: &Vec<String>) -> Self {
-        self.options.bootstrap = Some(bootstrap.clone());
+    /// Set bootstrapping nodes
+    pub fn bootstrap(mut self, bootstrap: &Vec<String>) -> Self {
+        self.settings.bootstrap = Some(bootstrap.clone());
+        self
+    }
+
+    /// Set the port to listen on.
+    pub fn port(mut self, port: u16) -> Self {
+        self.settings.port = Some(port);
         self
     }
 }
@@ -55,6 +62,7 @@ impl Builder {
 pub struct DhtSettings {
     pub bootstrap: Option<Vec<String>>,
     pub read_only: bool,
+    pub port: Option<u16>,
 }
 
 impl Default for DhtSettings {
@@ -62,6 +70,7 @@ impl Default for DhtSettings {
         DhtSettings {
             bootstrap: None,
             read_only: true,
+            port: None,
         }
     }
 }
@@ -71,11 +80,11 @@ impl Dht {
 
     pub fn builder() -> Builder {
         Builder {
-            options: DhtSettings::default(),
+            settings: DhtSettings::default(),
         }
     }
 
-    pub fn new(options: DhtSettings) -> Self {
+    pub fn new(settings: DhtSettings) -> Self {
         let (sender, receiver) = mpsc::channel();
 
         let mut dht = Dht {
@@ -85,7 +94,7 @@ impl Dht {
 
         let mut clone = dht.clone();
 
-        let handle = thread::spawn(move || dht.run(options, receiver));
+        let handle = thread::spawn(move || dht.run(settings, receiver));
 
         clone.handle = Some(handle);
 
@@ -222,17 +231,14 @@ impl Testnet {
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().as_server().with_bootstrap(&vec![]).build();
+                let node = Dht::builder().as_server().bootstrap(&vec![]).build();
 
                 let addr = node.local_addr().unwrap();
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
                 nodes.push(node)
             } else {
-                let node = Dht::builder()
-                    .as_server()
-                    .with_bootstrap(&bootstrap)
-                    .build();
+                let node = Dht::builder().as_server().bootstrap(&bootstrap).build();
             }
         }
 
@@ -265,8 +271,8 @@ mod test {
     fn announce_get_peer() {
         let testnet = Testnet::new(10);
 
-        let a = Dht::builder().with_bootstrap(&testnet.bootstrap).build();
-        let b = Dht::builder().with_bootstrap(&testnet.bootstrap).build();
+        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
 
         let info_hash = Id::random();
 
