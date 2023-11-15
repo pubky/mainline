@@ -11,7 +11,7 @@ use crate::common::Id;
 /// on inserting a new node.
 const STALE_TIME: Duration = Duration::from_secs(5 * 60);
 
-#[derive(Clone, PartialOrd, Eq, Ord)]
+#[derive(Clone, PartialEq)]
 /// Node entry in Kademlia routing table
 pub struct Node {
     pub id: Id,
@@ -21,14 +21,11 @@ pub struct Node {
 }
 
 impl Debug for Node {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Node {:?} {:?}", self.id, self.address)
-    }
-}
-
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.address == other.address
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("Node")
+            .field("id", &self.id)
+            .field("address", &self.address)
+            .finish_non_exhaustive()
     }
 }
 
@@ -72,5 +69,10 @@ impl Node {
     /// Node is last seen more than a threshold ago.
     pub fn is_stale(&self) -> bool {
         self.last_seen.elapsed() > STALE_TIME
+    }
+
+    /// Returns true if both nodes have the same id and address
+    pub fn same_as(&self, other: &Self) -> bool {
+        self.id == other.id && self.address == other.address
     }
 }

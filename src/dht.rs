@@ -114,7 +114,7 @@ impl Dht {
     // === Public Methods ===
 
     pub fn shutdown(&self) {
-        let _ = self.sender.send(ActorMessage::Shutdown);
+        let _ = self.sender.send(ActorMessage::Shutdown).ok();
     }
 
     /// Get peers for a given infohash.

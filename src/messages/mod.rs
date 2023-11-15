@@ -579,7 +579,17 @@ mod tests {
         let bytes = serde_msg.to_bytes().unwrap();
         let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
-        assert_eq!(parsed_msg, original_msg);
+        assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
+        assert_eq!(
+            match parsed_msg.get_closer_nodes() {
+                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
+                None => None,
+            },
+            match original_msg.get_closer_nodes() {
+                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
+                None => None,
+            },
+        );
     }
 
     #[test]
@@ -628,7 +638,21 @@ mod tests {
         let bytes = serde_msg.to_bytes().unwrap();
         let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
-        assert_eq!(parsed_msg, original_msg);
+
+        assert_eq!(parsed_msg.transaction_id, original_msg.transaction_id);
+        assert_eq!(parsed_msg.version, original_msg.version);
+        assert_eq!(parsed_msg.requester_ip, original_msg.requester_ip);
+        assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
+        assert_eq!(
+            match parsed_msg.get_closer_nodes() {
+                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
+                None => None,
+            },
+            match original_msg.get_closer_nodes() {
+                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
+                None => None,
+            },
+        );
     }
 
     #[test]

@@ -139,7 +139,7 @@ impl KBucket {
         if let Some(index) = self.iter().position(|n| n.id == incoming.id) {
             // If it is the same socket address too, update last_seen, and move to the end of the
             // bucket
-            if self.nodes[index] == incoming {
+            if self.nodes[index].same_as(&incoming) {
                 // Same node, update last_seen
                 self.nodes.remove(index);
                 self.nodes.push(incoming);
@@ -224,7 +224,10 @@ mod test {
             table.add(node.clone());
         }
 
-        assert_eq!(table.to_vec().sort(), expected_nodes.sort());
+        assert_eq!(
+            table.to_vec().sort_by(|a, b| a.id.cmp(&b.id)),
+            expected_nodes.to_vec().sort_by(|a, b| a.id.cmp(&b.id)),
+        );
     }
 
     #[test]
