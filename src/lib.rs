@@ -18,7 +18,7 @@ mod socket;
 mod tokens;
 
 pub use crate::common::Id;
-pub use dht::Dht;
+pub use dht::{Dht, Testnet};
 
 // Re-exports
 pub use crate::error::Error;

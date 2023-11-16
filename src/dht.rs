@@ -22,6 +22,29 @@ pub struct Dht {
 }
 
 impl Clone for Dht {
+    /// Cloning a Dht node returns an actor that can be used to send
+    /// commands to the main Dht actor that contains the active thread.
+    ///
+    /// This is useful for moving an actor to another thread.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mainline::{Dht, Id, Testnet};
+    /// use std::thread;
+    ///
+    /// // Create a testnet for this example to avoid spamming the mainnet.
+    /// let testnet = Testnet::new(10);
+    ///
+    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
+    ///
+    /// let actor = dht.clone();
+    /// thread::spawn(move || {
+    ///     let info_hash: Id = [0;20].into();
+    ///
+    ///     actor.announce_peer(info_hash, Some(9090));
+    /// });
+    /// ```
     fn clone(&self) -> Self {
         Dht {
             handle: None,
@@ -76,12 +99,24 @@ impl Default for DhtSettings {
 }
 
 impl Dht {
-    pub fn client() {}
-
     pub fn builder() -> Builder {
         Builder {
             settings: DhtSettings::default(),
         }
+    }
+
+    /// Create a new DHT client with default bootstrap nodes.
+    pub fn client() -> Self {
+        Dht::default()
+    }
+
+    /// Create a new DHT server that serves as a routing node and accepts storage requests
+    /// for peers and other arbitrary data.
+    ///
+    /// Note: this is only useful if the node has a public IP address and is able to receive
+    /// incoming udp packets.
+    pub fn server() -> Self {
+        Dht::builder().as_server().build()
     }
 
     pub fn new(settings: DhtSettings) -> Self {
@@ -120,6 +155,32 @@ impl Dht {
     /// Get peers for a given infohash.
     ///
     /// Returns an blocking iterator over responses as they are received.
+    ///
+    /// Note: each node of the network will only return a _random_ subset (usually 20)
+    /// of the total peers it has for a given infohash, so if you are getting responses
+    /// from 20 nodes, you can expect up to 400 peers in total, but if there are more
+    /// announced peers on that infohash, you are likely to miss some, the logic here
+    /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
+    /// so if you are implementing something different from Bittorrent, you might want
+    /// to implement your own logic for gossipping more peers after you discover the first ones.
+    ///
+    /// # Eaxmples
+    ///
+    /// ```
+    /// use mainline::{Dht, Id, Testnet};
+    ///
+    /// // Create a testnet for this example to avoid spamming the mainnet.
+    /// let testnet = Testnet::new(10);
+    ///
+    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
+    ///
+    /// let info_hash: Id = [0; 20].into();
+    ///
+    /// let mut response = dht.get_peers(info_hash);
+    /// for value in &mut response {
+    ///     println!("Got peer: {:?} | from: {:?}", value.peer, value.from)
+    /// }
+    /// ```
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
         let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
 
@@ -225,7 +286,7 @@ pub struct Testnet {
 }
 
 impl Testnet {
-    fn new(count: usize) -> Self {
+    pub fn new(count: usize) -> Self {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
 
