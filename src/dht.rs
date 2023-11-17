@@ -11,6 +11,7 @@ use crate::{
         GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage, ResponseSender,
         ResponseValue, StoreQueryMetdata,
     },
+    routing_table::RoutingTable,
     rpc::Rpc,
     Error, Result,
 };
@@ -69,8 +70,8 @@ impl Builder {
     }
 
     /// Set bootstrapping nodes
-    pub fn bootstrap(mut self, bootstrap: &Vec<String>) -> Self {
-        self.settings.bootstrap = Some(bootstrap.clone());
+    pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
+        self.settings.bootstrap = Some(bootstrap.to_owned());
         self
     }
 
@@ -138,10 +139,20 @@ impl Dht {
 
     // === Getters ===
 
+    /// Returns the local address of the udp socket this node is listening on.
     pub fn local_addr(&self) -> Result<SocketAddr> {
         let (sender, receiver) = mpsc::channel::<SocketAddr>();
 
         let _ = self.sender.send(ActorMessage::LocalAddress(sender));
+
+        receiver.recv().map_err(|e| e.into())
+    }
+
+    /// Returns a clone of the routing table of this node.
+    pub fn routing_table(&self) -> Result<RoutingTable> {
+        let (sender, receiver) = mpsc::channel::<RoutingTable>();
+
+        let _ = self.sender.send(ActorMessage::RoutingTable(sender));
 
         receiver.recv().map_err(|e| e.into())
     }
@@ -238,6 +249,10 @@ impl Dht {
             rpc = rpc.with_bootstrap(bootstrap);
         }
 
+        if let Some(port) = settings.port {
+            rpc = rpc.with_port(port).unwrap();
+        }
+
         loop {
             if let Ok(actor_message) = receiver.try_recv() {
                 match actor_message {
@@ -246,6 +261,9 @@ impl Dht {
                     }
                     ActorMessage::LocalAddress(sender) => {
                         sender.send(rpc.local_addr());
+                    }
+                    ActorMessage::RoutingTable(sender) => {
+                        sender.send(rpc.routing_table());
                     }
                     ActorMessage::GetPeers(info_hash, sender) => {
                         rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
@@ -273,6 +291,7 @@ impl Default for Dht {
 enum ActorMessage {
     Shutdown,
     LocalAddress(Sender<SocketAddr>),
+    RoutingTable(Sender<RoutingTable>),
 
     GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
     AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
@@ -292,7 +311,7 @@ impl Testnet {
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().as_server().bootstrap(&vec![]).build();
+                let node = Dht::builder().as_server().bootstrap(&[]).build();
 
                 let addr = node.local_addr().unwrap();
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
@@ -310,6 +329,7 @@ impl Testnet {
 #[cfg(test)]
 mod test {
     use std::convert::TryInto;
+    use std::net::Ipv4Addr;
     use std::time::{Duration, Instant};
 
     use super::*;
@@ -352,5 +372,18 @@ mod test {
             }
             Err(_) => {}
         };
+    }
+
+    #[test]
+    fn bind_twice() {
+        let a = Dht::default();
+        let b = Dht::builder()
+            .port(a.local_addr().unwrap().port())
+            .as_server()
+            .build();
+
+        let result = b.handle.unwrap().join();
+        dbg!(&result);
+        assert!(result.is_err());
     }
 }
