@@ -44,6 +44,19 @@ impl KrpcSocket {
         })
     }
 
+    pub fn bind(port: u16) -> Result<Self> {
+        let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?;
+        socket.set_nonblocking(true)?;
+
+        Ok(Self {
+            socket,
+            next_tid: 0,
+            read_only: false,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            inflight_requests: HashMap::new(),
+        })
+    }
+
     // === Options ===
 
     /// Set read-only mode
