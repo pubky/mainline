@@ -1,10 +1,13 @@
+use rand::{seq::SliceRandom, Rng};
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::common::{GetPeerResponse, Id, Node, ResponseSender, ResponseValue};
+use crate::common::{
+    GetPeerResponse, Id, Node, ResponseSender, ResponseValue, MAX_DISTANCE, STALE_TIME,
+};
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
     GetPeersRequestArguments, GetPeersResponseArguments, Message, MessageType,
@@ -20,14 +23,10 @@ use crate::Result;
 
 const TICK_INTERVAL: Duration = Duration::from_millis(15);
 const QUERIES_CACHE_SIZE: usize = 1000;
-const DEFAULT_BOOTSTRAP_NODES: [&str; 8] = [
-    "dht.transmissionbt.com:6881",
-    "dht.libtorrent.org:25401", // @arvidn's
+const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
-    "router.bittorrent.cloud:42069", // Seems to be read-only.
-    "router.utorrent.com:6881",
-    "dht.aelitis.com:6881",   // Vuze doesn't respond in home network.
-    "router.silotis.us:6881", // IPv6
+    "dht.transmissionbt.com:6881",
+    "dht.libtorrent.org:25401",
     "dht.anacrolix.link:42069",
 ];
 
@@ -87,6 +86,11 @@ impl Rpc {
         self
     }
 
+    pub fn with_port(mut self, port: u16) -> Result<Self> {
+        self.socket = KrpcSocket::bind(port)?;
+        Ok(self)
+    }
+
     pub fn with_interval(mut self, interval: u64) -> Self {
         self.interval = Duration::from_millis(interval);
         self
@@ -98,10 +102,17 @@ impl Rpc {
         self
     }
 
+    // === Getters ===
+
     /// Returns the address the server is listening to.
     #[inline]
     pub fn local_addr(&self) -> SocketAddr {
         self.socket.local_addr()
+    }
+
+    /// Returns a clone of the routing_table.
+    pub fn routing_table(&self) -> RoutingTable {
+        self.routing_table.clone()
     }
 
     // === Public Methods ===
@@ -228,10 +239,10 @@ impl Rpc {
             for node in closest {
                 query.add_candidate(node)
             }
-        }
 
-        // After adding the nodes, we need to start the query.
-        query.start(&mut self.socket);
+            // After adding the nodes, we need to start the query.
+            query.start(&mut self.socket);
+        }
 
         self.queries.insert(target, query);
     }
@@ -286,29 +297,16 @@ impl Rpc {
                 );
             }
             RequestSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
-                if let Some(values) = self.peers.get_random_peers(info_hash) {
-                    self.socket.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                            responder_id: self.id,
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: None,
-                            values: Some(values),
-                        }),
-                    );
-                } else {
-                    self.socket.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                            responder_id: self.id,
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(self.routing_table.closest(info_hash)),
-                            values: None,
-                        }),
-                    );
-                }
+                self.socket.response(
+                    from,
+                    transaction_id,
+                    ResponseSpecific::GetPeers(GetPeersResponseArguments {
+                        responder_id: self.id,
+                        token: self.tokens.generate_token(from).into(),
+                        nodes: Some(self.routing_table.closest(info_hash)),
+                        values: self.peers.get_random_peers(info_hash),
+                    }),
+                );
             }
             RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
                 requester_id,
@@ -401,7 +399,7 @@ impl Rpc {
                     }
                 }
                 // Ping response is already handled in add_node()
-                // FindNode response is alreadh handled in query.add_candidates()
+                // FindNode response is already handled in query.add_candidates()
                 _ => {}
             }
         }

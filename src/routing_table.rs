@@ -1,15 +1,17 @@
 //! Simplified Kademlia routing table
 
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 use std::fmt::{self, Debug, Formatter};
+use std::net::SocketAddr;
 use std::slice::Iter;
+use std::time::Instant;
 
 use crate::common::{Id, Node, MAX_DISTANCE};
 
 /// K = the default maximum size of a k-bucket.
 pub const MAX_BUCKET_SIZE_K: usize = 20;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RoutingTable {
     id: Id,
     buckets: BTreeMap<u8, KBucket>,
@@ -111,6 +113,20 @@ impl RoutingTable {
 
         nodes
     }
+
+    /// Converts the routing_table to a vector of addresses in string format.
+    /// Most useful for exporting the routing table as bootstrapping_nodes for subsequent sessions.
+    pub fn to_bootstrapping_nodes(&self) -> Vec<String> {
+        let mut addresses: Vec<String> = vec![];
+
+        for bucket in self.buckets.values() {
+            for node in &bucket.nodes {
+                addresses.push(format!("{}:{}", &node.address.ip(), &node.address.port()));
+            }
+        }
+
+        addresses
+    }
 }
 
 impl Default for RoutingTable {
@@ -121,6 +137,7 @@ impl Default for RoutingTable {
 
 /// Kbuckets are similar to LRU caches that checks and evicts unresponsive nodes,
 /// without dropping any responsive nodes in the process.
+#[derive(Debug, Clone)]
 pub struct KBucket {
     /// Nodes in the k-bucket, sorted by the least recently seen.
     nodes: Vec<Node>,
@@ -139,7 +156,7 @@ impl KBucket {
         if let Some(index) = self.iter().position(|n| n.id == incoming.id) {
             // If it is the same socket address too, update last_seen, and move to the end of the
             // bucket
-            if self.nodes[index].same_as(&incoming) {
+            if self.nodes[index].same_adress(&incoming) {
                 // Same node, update last_seen
                 self.nodes.remove(index);
                 self.nodes.push(incoming);
@@ -179,14 +196,9 @@ impl KBucket {
     }
 }
 
-impl Debug for KBucket {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Bucket {{ nodes {} }}", self.nodes.len())
-        // writeln!(f, "Bucket{{");
-        // for node in &self.nodes {
-        //     writeln!(f, "  {:?}", node);
-        // }
-        // write!(f, "}}")
+impl Default for KBucket {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

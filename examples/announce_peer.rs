@@ -40,6 +40,8 @@ fn main() {
                     // This time we choose to not sepcify the port, effectively
                     // making the port implicit to be detected by the storing node
                     // from the source address of the announce_peer request
+                    //
+                    // Uncomment the following lines to try it out:
 
                     // println!(
                     //     "Announcing again to {:?} closest_nodes ...",

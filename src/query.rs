@@ -5,7 +5,7 @@ use crate::common::{
     Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
 };
 use crate::messages::RequestSpecific;
-use crate::routing_table::{RoutingTable, MAX_BUCKET_SIZE_K};
+use crate::routing_table::RoutingTable;
 use crate::socket::KrpcSocket;
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to

@@ -9,7 +9,7 @@ use crate::common::Id;
 
 /// The age of a node's last_seen time before it is considered stale and removed from a full bucket
 /// on inserting a new node.
-const STALE_TIME: Duration = Duration::from_secs(5 * 60);
+pub const STALE_TIME: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone, PartialEq)]
 /// Node entry in Kademlia routing table
@@ -25,7 +25,8 @@ impl Debug for Node {
         fmt.debug_struct("Node")
             .field("id", &self.id)
             .field("address", &self.address)
-            .finish_non_exhaustive()
+            .field("last_seen", &self.last_seen.elapsed().as_secs())
+            .finish()
     }
 }
 
@@ -72,7 +73,7 @@ impl Node {
     }
 
     /// Returns true if both nodes have the same id and address
-    pub fn same_as(&self, other: &Self) -> bool {
-        self.id == other.id && self.address == other.address
+    pub fn same_adress(&self, other: &Self) -> bool {
+        self.address == other.address
     }
 }
