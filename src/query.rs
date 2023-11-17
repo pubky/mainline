@@ -95,6 +95,7 @@ impl Query {
         false
     }
 
+    /// Add a node that responded with a token as a probable storage node.
     pub fn add_responding_node(&mut self, node: Node) {
         self.with_token.add(node.clone());
     }
@@ -145,12 +146,8 @@ impl Query {
             closest_nodes: self.with_token.closest(&self.target),
         };
 
-        match sender {
-            ResponseSender::GetPeer(sender) => {
-                ///
-                sender.send(ResponseMessage::ResponseDone(done));
-            }
-            _ => {}
+        if let ResponseSender::GetPeer(sender) = sender {
+            sender.send(ResponseMessage::ResponseDone(done));
         };
     }
 
@@ -233,14 +230,11 @@ impl StoreQuery {
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.is_done() {
-            match &self.sender {
-                ResponseSender::StoreItem(sender) => {
-                    let _ = sender.send(StoreQueryMetdata::new(
-                        self.closest_nodes.clone(),
-                        self.stored_at.clone(),
-                    ));
-                }
-                _ => {}
+            if let ResponseSender::StoreItem(sender) = &self.sender {
+                let _ = sender.send(StoreQueryMetdata::new(
+                    self.closest_nodes.clone(),
+                    self.stored_at.clone(),
+                ));
             }
         }
     }
