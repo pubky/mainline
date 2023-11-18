@@ -4,7 +4,7 @@ WIP mainline rust implementation.
 
 For the foreseeable future, this library is limited to the scope of [read-only](https://www.bittorrent.org/beps/bep_0043.html) DHT clients.
 
-- [ ] BEP0005 basic
+- [x] BEP0005 basic
   - [x] Ping
     - [x] Request
     - [x] Response
@@ -29,10 +29,10 @@ For the foreseeable future, this library is limited to the scope of [read-only](
 - [ ] Features for long living clients
   - [ ] API for storing and load routing table between sessions.
   - [ ] Refresh nodes in the local rounting table frequently enough
+  - [ ] Control number of concurrent udp requests
   - [ ] Refresh cached queries to keep closest nodes fresh, skipping get before put
   - [ ] Backoff while republishing.
 - [ ] BEP0042 security extension
-- [ ] BEP0032 ipv6
 - [ ] Features for server side nodes
   - [ ] Respond with relevant errors.
   - [ ] Egress rate limits

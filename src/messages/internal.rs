@@ -74,11 +74,22 @@ pub enum DHTRequestSpecific {
         #[serde(rename = "a")]
         arguments: DHTAnnouncePeerRequestArguments,
     },
+
+    #[serde(rename = "get_value")]
+    GetValue {
+        #[serde(rename = "a")]
+        arguments: DHTGetValueArguments,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)] // This means order matters! Order these from most to least detailed
 pub enum DHTResponseSpecific {
+    GetValue {
+        #[serde(rename = "r")]
+        arguments: DHTGetValueResponseArguments,
+    },
+
     GetPeers {
         #[serde(rename = "r")]
         arguments: DHTGetPeersResponseArguments,
@@ -186,4 +197,42 @@ pub struct DHTAnnouncePeerRequestArguments {
 
     #[serde(default)]
     pub implied_port: Option<u8>,
+}
+
+// === Get Value ===
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTGetValueArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub target: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTGetValueResponseArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub token: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub nodes: Option<Vec<u8>>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub v: Vec<u8>,
+
+    #[serde(default)]
+    pub k: Option<Vec<u8>>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub sig: Option<Vec<u8>>,
+
+    #[serde(default)]
+    pub seq: Option<i64>,
 }

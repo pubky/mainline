@@ -49,6 +49,7 @@ pub enum RequestSpecific {
     FindNode(FindNodeRequestArguments),
     GetPeers(GetPeersRequestArguments),
     AnnouncePeer(AnnouncePeerRequestArguments),
+    GetValue(GetValueRequestArguments),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -56,6 +57,7 @@ pub enum ResponseSpecific {
     Ping(PingResponseArguments),
     FindNode(FindNodeResponseArguments),
     GetPeers(GetPeersResponseArguments),
+    GetValue(GetValueResponseArguments),
 }
 
 // === PING ===
@@ -109,6 +111,25 @@ pub struct AnnouncePeerRequestArguments {
     pub token: Vec<u8>,
 }
 
+// === Get Value ===
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct GetValueRequestArguments {
+    pub requester_id: Id,
+    pub target: Id,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct GetValueResponseArguments {
+    pub responder_id: Id,
+    pub token: Vec<u8>,
+    pub nodes: Option<Vec<Node>>,
+    pub v: Vec<u8>,
+    pub k: Option<Vec<u8>>,
+    pub seq: Option<i64>,
+    pub sig: Option<Vec<u8>>,
+}
+
 impl Message {
     fn into_serde_message(self) -> internal::DHTMessage {
         internal::DHTMessage {
@@ -156,6 +177,14 @@ impl Message {
                             },
                         }
                     }
+                    RequestSpecific::GetValue(get_value_arguments) => {
+                        internal::DHTRequestSpecific::GetValue {
+                            arguments: internal::DHTGetValueArguments {
+                                id: get_value_arguments.requester_id.to_vec(),
+                                target: get_value_arguments.target.to_vec(),
+                            },
+                        }
+                    }
                 }),
 
                 MessageType::Response(res) => internal::DHTMessageVariant::Response(match res {
@@ -182,6 +211,22 @@ impl Message {
                                     .as_ref()
                                     .map(|nodes| nodes4_to_bytes(nodes)),
                                 values: get_peers_args.values.as_ref().map(peers_to_bytes),
+                            },
+                        }
+                    }
+                    ResponseSpecific::GetValue(get_value_args) => {
+                        internal::DHTResponseSpecific::GetValue {
+                            arguments: internal::DHTGetValueResponseArguments {
+                                id: get_value_args.responder_id.to_vec(),
+                                token: get_value_args.token.clone(),
+                                nodes: get_value_args
+                                    .nodes
+                                    .as_ref()
+                                    .map(|nodes| nodes4_to_bytes(nodes)),
+                                v: get_value_args.v,
+                                k: get_value_args.k,
+                                sig: get_value_args.sig,
+                                seq: get_value_args.seq,
                             },
                         }
                     }
@@ -223,13 +268,13 @@ impl Message {
                         internal::DHTRequestSpecific::FindNode { arguments } => {
                             RequestSpecific::FindNode(FindNodeRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
-                                target: Id::from_bytes(&arguments.target)?,
+                                target: Id::from_bytes(arguments.target)?,
                             })
                         }
                         internal::DHTRequestSpecific::GetPeers { arguments } => {
                             RequestSpecific::GetPeers(GetPeersRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
-                                info_hash: Id::from_bytes(&arguments.info_hash)?,
+                                info_hash: Id::from_bytes(arguments.info_hash)?,
                             })
                         }
                         internal::DHTRequestSpecific::AnnouncePeer { arguments } => {
@@ -245,6 +290,12 @@ impl Message {
                                 info_hash: Id::from_bytes(&arguments.info_hash)?,
                                 port: arguments.port,
                                 token: arguments.token,
+                            })
+                        }
+                        internal::DHTRequestSpecific::GetValue { arguments } => {
+                            RequestSpecific::GetValue(GetValueRequestArguments {
+                                requester_id: Id::from_bytes(arguments.id)?,
+                                target: Id::from_bytes(arguments.target)?,
                             })
                         }
                     })
@@ -275,6 +326,20 @@ impl Message {
                                     Some(values) => Some(bytes_to_peers(values)?),
                                     None => None,
                                 },
+                            })
+                        }
+                        internal::DHTResponseSpecific::GetValue { arguments } => {
+                            ResponseSpecific::GetValue(GetValueResponseArguments {
+                                responder_id: Id::from_bytes(arguments.id)?,
+                                token: arguments.token,
+                                nodes: match arguments.nodes {
+                                    Some(nodes) => Some(bytes_to_nodes4(nodes)?),
+                                    None => None,
+                                },
+                                v: arguments.v,
+                                k: arguments.k,
+                                seq: arguments.seq,
+                                sig: arguments.sig,
                             })
                         }
                     })
@@ -337,11 +402,13 @@ impl Message {
                 RequestSpecific::FindNode(arguments) => arguments.requester_id,
                 RequestSpecific::GetPeers(arguments) => arguments.requester_id,
                 RequestSpecific::AnnouncePeer(arguments) => arguments.requester_id,
+                RequestSpecific::GetValue(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(arguments) => arguments.responder_id,
                 ResponseSpecific::FindNode(arguments) => arguments.responder_id,
                 ResponseSpecific::GetPeers(arguments) => arguments.responder_id,
+                ResponseSpecific::GetValue(arguments) => arguments.responder_id,
             },
             MessageType::Error(_) => {
                 return None;
