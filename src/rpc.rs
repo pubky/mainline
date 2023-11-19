@@ -1,19 +1,16 @@
-use rand::{seq::SliceRandom, Rng};
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::num::NonZeroUsize;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::common::{
-    GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender, ResponseValue, MAX_DISTANCE,
-    STALE_TIME,
+    GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender, ResponseValue,
 };
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
     GetImmutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
     GetValueRequestArguments, Message, MessageType, NoValuesResponseArguments,
-    PingRequestArguments, PingResponseArguments, RequestSpecific, ResponseSpecific,
+    PingResponseArguments, RequestSpecific, ResponseSpecific,
 };
 
 use crate::peers::PeersStore;
@@ -24,7 +21,6 @@ use crate::tokens::Tokens;
 use crate::Result;
 
 const TICK_INTERVAL: Duration = Duration::from_millis(1);
-const QUERIES_CACHE_SIZE: usize = 1000;
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
@@ -93,13 +89,8 @@ impl Rpc {
         Ok(self)
     }
 
-    pub fn with_interval(mut self, interval: u64) -> Self {
-        self.interval = Duration::from_millis(interval);
-        self
-    }
-
     /// Sets requests timeout in milliseconds
-    pub fn with_request_timout(mut self, timeout: u64) -> Self {
+    pub fn with_request_timeout(mut self, timeout: u64) -> Self {
         self.socket.request_timeout = Duration::from_millis(timeout);
         self
     }
@@ -121,7 +112,7 @@ impl Rpc {
 
     pub fn tick(&mut self) {
         // === Bootstrapping ===
-        // self.populate();
+        self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
             // Add a node to our routing table on any incoming request or response.
@@ -134,7 +125,7 @@ impl Rpc {
                 MessageType::Response(_) => {
                     self.handle_response(from, &message);
                 }
-                MessageType::Error(err) => {
+                MessageType::Error(_err) => {
                     // TODO: Handle error messages!
                 }
             }
@@ -278,15 +269,6 @@ impl Rpc {
         );
     }
 
-    /// Return a boolean indicating whether the bootstrapping query is done.
-    fn is_ready(&mut self) -> bool {
-        return if let Some(query) = self.queries.get(&self.id) {
-            query.is_done()
-        } else {
-            false
-        };
-    }
-
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
         match request {
             // TODO: Handle bad requests (send an error message).
@@ -329,11 +311,11 @@ impl Rpc {
                 );
             }
             RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
-                requester_id,
                 info_hash,
                 port,
                 implied_port,
                 token,
+                ..
             }) => {
                 if self.tokens.validate(from, token) {
                     let peer = match implied_port {
@@ -403,7 +385,6 @@ impl Rpc {
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     responder_id,
-                    token,
                     values,
                     ..
                 })) => {
@@ -416,10 +397,7 @@ impl Rpc {
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
                     GetImmutableResponseArguments {
-                        responder_id,
-                        token,
-                        v,
-                        ..
+                        responder_id, v, ..
                     },
                 )) => {
                     // TODO: validate hash of v!

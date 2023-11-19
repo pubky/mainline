@@ -1,10 +1,8 @@
 //! Simplified Kademlia routing table
 
-use std::collections::{btree_map, BTreeMap};
-use std::fmt::{self, Debug, Formatter};
-use std::net::SocketAddr;
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::slice::Iter;
-use std::time::Instant;
 
 use crate::common::{Id, Node, MAX_DISTANCE};
 

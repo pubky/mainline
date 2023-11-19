@@ -1,8 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    net::SocketAddr,
-    num::NonZeroUsize,
-};
+use std::{collections::HashMap, net::SocketAddr};
 
 use rand::{rngs::ThreadRng, seq::SliceRandom, thread_rng};
 
@@ -62,7 +58,7 @@ impl PeersStore {
 
     pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddr>> {
         if let Some(peers) = self.peers.get(info_hash) {
-            let mut peers = peers.clone();
+            let peers = peers.clone();
 
             let random_20: Vec<SocketAddr> = peers
                 .choose_multiple(&mut self.rng, MAX_BUCKET_SIZE_K)

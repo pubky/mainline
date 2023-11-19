@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use crate::common::{
@@ -153,7 +153,7 @@ impl Query {
         };
 
         if let ResponseSender::GetPeer(sender) = sender {
-            sender.send(ResponseMessage::ResponseDone(done));
+            let _ = sender.send(ResponseMessage::ResponseDone(done));
         };
     }
 

@@ -2,7 +2,7 @@ use crc::{Crc, CRC_32_ISCSI};
 use rand::{rngs::ThreadRng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
-    net::{IpAddr, SocketAddr},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
@@ -89,7 +89,6 @@ impl Tokens {
 
 #[cfg(test)]
 mod test {
-    use std::net::Ipv4Addr;
 
     use super::*;
 

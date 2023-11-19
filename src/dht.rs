@@ -8,12 +8,12 @@ use std::{
 
 use crate::{
     common::{
-        GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage,
-        ResponseSender, ResponseValue, StoreQueryMetdata,
+        GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseMessage, ResponseSender,
+        StoreQueryMetdata,
     },
     routing_table::RoutingTable,
     rpc::Rpc,
-    Error, Result,
+    Result,
 };
 
 #[derive(Debug)]
@@ -213,7 +213,7 @@ impl Dht {
         let mut response = Response::new(receiver);
 
         // Block until we got a Done response!
-        for value in &mut response {}
+        for _ in &mut response {}
 
         self.announce_peer_to(info_hash, response.closest_nodes, port)
     }
@@ -275,10 +275,10 @@ impl Dht {
                         break;
                     }
                     ActorMessage::LocalAddress(sender) => {
-                        sender.send(rpc.local_addr());
+                        let _ = sender.send(rpc.local_addr());
                     }
                     ActorMessage::RoutingTable(sender) => {
-                        sender.send(rpc.routing_table());
+                        let _ = sender.send(rpc.routing_table());
                     }
                     ActorMessage::GetPeers(info_hash, sender) => {
                         rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
@@ -337,6 +337,7 @@ impl Testnet {
                 nodes.push(node)
             } else {
                 let node = Dht::builder().as_server().bootstrap(&bootstrap).build();
+                nodes.push(node)
             }
         }
 
@@ -346,9 +347,7 @@ impl Testnet {
 
 #[cfg(test)]
 mod test {
-    use std::convert::TryInto;
-    use std::net::Ipv4Addr;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use super::*;
 
@@ -376,7 +375,7 @@ mod test {
         let info_hash = Id::random();
 
         match a.announce_peer(info_hash, Some(45555)) {
-            Ok(x) => {
+            Ok(_) => {
                 let responses: Vec<_> = b.get_peers(info_hash).collect();
 
                 match responses.first() {

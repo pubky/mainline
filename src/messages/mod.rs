@@ -488,7 +488,7 @@ impl Message {
     pub fn get_closer_nodes(&self) -> Option<Vec<Node>> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
-                ResponseSpecific::Ping(arguments) => None,
+                ResponseSpecific::Ping(_) => None,
                 ResponseSpecific::FindNode(arguments) => Some(arguments.nodes.clone()),
                 ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_ref().cloned(),
                 ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_ref().cloned(),
@@ -502,8 +502,8 @@ impl Message {
     pub fn get_token(&self) -> Option<(Id, Vec<u8>)> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
-                ResponseSpecific::Ping(arguments) => None,
-                ResponseSpecific::FindNode(arguments) => None,
+                ResponseSpecific::Ping(_) => None,
+                ResponseSpecific::FindNode(_) => None,
                 ResponseSpecific::GetPeers(arguments) => {
                     Some((arguments.responder_id, arguments.token.clone()))
                 }

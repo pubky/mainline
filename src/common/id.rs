@@ -1,9 +1,7 @@
 //! Kademlia node Id or a lookup target
 use rand::Rng;
 use std::{
-    convert::TryInto,
     fmt::{self, Debug, Display, Formatter},
-    net::ToSocketAddrs,
     str::FromStr,
 };
 
@@ -73,9 +71,7 @@ impl Display for Id {
             .map(|byte| format!("{:02x}", byte))
             .collect();
 
-        write!(f, "{}", hex_chars);
-
-        Ok(())
+        write!(f, "{}", hex_chars)
     }
 }
 

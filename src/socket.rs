@@ -60,6 +60,7 @@ impl KrpcSocket {
     // === Options ===
 
     /// Set read-only mode
+    #[cfg(test)]
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
@@ -154,7 +155,7 @@ impl KrpcSocket {
                         }
                     }
                 }
-                Err(err) => {
+                Err(_err) => {
                     // TODO: handle/log parsing errors.
                 }
             };
