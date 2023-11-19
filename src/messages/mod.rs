@@ -770,4 +770,53 @@ mod tests {
             MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments { .. }))
         ));
     }
+
+    #[test]
+    fn test_get_value_request() {
+        let original_msg = Message {
+            transaction_id: 258,
+            version: Some(vec![72, 73]),
+            requester_ip: None,
+            read_only: false,
+            message_type: MessageType::Request(RequestSpecific::GetValue(
+                GetValueRequestArguments {
+                    requester_id: Id::random(),
+                    target: Id::random(),
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_get_value_response() {
+        let original_msg = Message {
+            transaction_id: 3,
+            version: Some(vec![1]),
+            requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
+            read_only: false,
+            message_type: MessageType::Response(ResponseSpecific::GetValue(
+                GetValueResponseArguments {
+                    responder_id: Id::random(),
+                    token: vec![99, 100, 101, 102],
+                    nodes: None,
+                    v: vec![99, 100, 101, 102],
+                    k: Some(vec![99, 100, 101, 102]),
+                    seq: Some(10101010),
+                    sig: Some(vec![99, 100, 101, 102]),
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
 }

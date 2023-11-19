@@ -223,7 +223,6 @@ pub struct DHTGetValueResponseArguments {
     pub nodes: Option<Vec<u8>>,
 
     #[serde(with = "serde_bytes")]
-    #[serde(default)]
     pub v: Vec<u8>,
 
     #[serde(default)]
