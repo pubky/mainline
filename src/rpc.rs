@@ -21,7 +21,7 @@ use crate::socket::KrpcSocket;
 use crate::tokens::Tokens;
 use crate::Result;
 
-const TICK_INTERVAL: Duration = Duration::from_millis(15);
+const TICK_INTERVAL: Duration = Duration::from_millis(1);
 const QUERIES_CACHE_SIZE: usize = 1000;
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
