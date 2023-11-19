@@ -18,7 +18,7 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Dht {
-    handle: Option<JoinHandle<Result<()>>>,
+    handle: Option<JoinHandle<()>>,
     sender: Sender<ActorMessage>,
 }
 
@@ -242,8 +242,8 @@ impl Dht {
         }
     }
 
-    fn run(&mut self, settings: DhtSettings, receiver: Receiver<ActorMessage>) -> Result<()> {
-        let mut rpc = Rpc::new()?.with_read_only(settings.read_only);
+    fn run(&mut self, settings: DhtSettings, receiver: Receiver<ActorMessage>) {
+        let mut rpc = Rpc::new().unwrap().with_read_only(settings.read_only);
 
         if let Some(bootstrap) = settings.bootstrap {
             rpc = rpc.with_bootstrap(bootstrap);
@@ -276,8 +276,6 @@ impl Dht {
 
             rpc.tick();
         }
-
-        Ok(())
     }
 }
 
