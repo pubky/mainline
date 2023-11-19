@@ -57,7 +57,9 @@ pub enum ResponseSpecific {
     Ping(PingResponseArguments),
     FindNode(FindNodeResponseArguments),
     GetPeers(GetPeersResponseArguments),
-    GetValue(GetValueResponseArguments),
+    GetImmutable(GetImmutableResponseArguments),
+    GetMutable(GetMutableResponseArguments),
+    NoValues(NoValuesResponseArguments),
 }
 
 // === PING ===
@@ -84,6 +86,21 @@ pub struct FindNodeResponseArguments {
     pub nodes: Vec<Node>,
 }
 
+// Get anything
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct GetValueRequestArguments {
+    pub requester_id: Id,
+    pub target: Id,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct NoValuesResponseArguments {
+    pub responder_id: Id,
+    pub token: Vec<u8>,
+    pub nodes: Option<Vec<Node>>,
+}
+
 // === Get Peers ===
 
 #[derive(Debug, PartialEq, Clone)]
@@ -96,8 +113,8 @@ pub struct GetPeersRequestArguments {
 pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
+    pub values: Vec<SocketAddr>,
     pub nodes: Option<Vec<Node>>,
-    pub values: Option<Vec<SocketAddr>>,
 }
 
 // === Announce Peer ===
@@ -111,23 +128,27 @@ pub struct AnnouncePeerRequestArguments {
     pub token: Vec<u8>,
 }
 
-// === Get Value ===
+// === Get Immutable ===
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct GetValueRequestArguments {
-    pub requester_id: Id,
-    pub target: Id,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct GetValueResponseArguments {
+pub struct GetImmutableResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
     pub nodes: Option<Vec<Node>>,
     pub v: Vec<u8>,
-    pub k: Option<Vec<u8>>,
-    pub seq: Option<i64>,
-    pub sig: Option<Vec<u8>>,
+}
+
+// === Get Mutable ===
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct GetMutableResponseArguments {
+    pub responder_id: Id,
+    pub token: Vec<u8>,
+    pub nodes: Option<Vec<Node>>,
+    pub v: Vec<u8>,
+    pub k: Vec<u8>,
+    pub seq: i64,
+    pub sig: Vec<u8>,
 }
 
 impl Message {
@@ -210,23 +231,48 @@ impl Message {
                                     .nodes
                                     .as_ref()
                                     .map(|nodes| nodes4_to_bytes(nodes)),
-                                values: get_peers_args.values.as_ref().map(peers_to_bytes),
+                                values: peers_to_bytes(get_peers_args.values),
                             },
                         }
                     }
-                    ResponseSpecific::GetValue(get_value_args) => {
-                        internal::DHTResponseSpecific::GetValue {
-                            arguments: internal::DHTGetValueResponseArguments {
-                                id: get_value_args.responder_id.to_vec(),
-                                token: get_value_args.token.clone(),
-                                nodes: get_value_args
+                    ResponseSpecific::NoValues(no_values_arguments) => {
+                        internal::DHTResponseSpecific::NoValues {
+                            arguments: internal::DHTNoValuesResponseArguments {
+                                id: no_values_arguments.responder_id.to_vec(),
+                                token: no_values_arguments.token.clone(),
+                                nodes: no_values_arguments
                                     .nodes
                                     .as_ref()
                                     .map(|nodes| nodes4_to_bytes(nodes)),
-                                v: get_value_args.v,
-                                k: get_value_args.k,
-                                sig: get_value_args.sig,
-                                seq: get_value_args.seq,
+                            },
+                        }
+                    }
+                    ResponseSpecific::GetImmutable(get_immutable_args) => {
+                        internal::DHTResponseSpecific::GetImmutable {
+                            arguments: internal::DHTGetImmutableResponseArguments {
+                                id: get_immutable_args.responder_id.to_vec(),
+                                token: get_immutable_args.token.clone(),
+                                nodes: get_immutable_args
+                                    .nodes
+                                    .as_ref()
+                                    .map(|nodes| nodes4_to_bytes(nodes)),
+                                v: get_immutable_args.v,
+                            },
+                        }
+                    }
+                    ResponseSpecific::GetMutable(get_mutable_args) => {
+                        internal::DHTResponseSpecific::GetMutable {
+                            arguments: internal::DHTGetMutableResponseArguments {
+                                id: get_mutable_args.responder_id.to_vec(),
+                                token: get_mutable_args.token.clone(),
+                                nodes: get_mutable_args
+                                    .nodes
+                                    .as_ref()
+                                    .map(|nodes| nodes4_to_bytes(nodes)),
+                                v: get_mutable_args.v,
+                                k: get_mutable_args.k,
+                                seq: get_mutable_args.seq,
+                                sig: get_mutable_args.sig,
                             },
                         }
                     }
@@ -322,14 +368,32 @@ impl Message {
                                     Some(nodes) => Some(bytes_to_nodes4(nodes)?),
                                     None => None,
                                 },
-                                values: match arguments.values {
-                                    Some(values) => Some(bytes_to_peers(values)?),
+                                values: bytes_to_peers(arguments.values)?,
+                            })
+                        }
+                        internal::DHTResponseSpecific::NoValues { arguments } => {
+                            ResponseSpecific::NoValues(NoValuesResponseArguments {
+                                responder_id: Id::from_bytes(arguments.id)?,
+                                token: arguments.token,
+                                nodes: match arguments.nodes {
+                                    Some(nodes) => Some(bytes_to_nodes4(nodes)?),
                                     None => None,
                                 },
                             })
                         }
-                        internal::DHTResponseSpecific::GetValue { arguments } => {
-                            ResponseSpecific::GetValue(GetValueResponseArguments {
+                        internal::DHTResponseSpecific::GetImmutable { arguments } => {
+                            ResponseSpecific::GetImmutable(GetImmutableResponseArguments {
+                                responder_id: Id::from_bytes(arguments.id)?,
+                                token: arguments.token,
+                                nodes: match arguments.nodes {
+                                    Some(nodes) => Some(bytes_to_nodes4(nodes)?),
+                                    None => None,
+                                },
+                                v: arguments.v,
+                            })
+                        }
+                        internal::DHTResponseSpecific::GetMutable { arguments } => {
+                            ResponseSpecific::GetMutable(GetMutableResponseArguments {
                                 responder_id: Id::from_bytes(arguments.id)?,
                                 token: arguments.token,
                                 nodes: match arguments.nodes {
@@ -408,7 +472,9 @@ impl Message {
                 ResponseSpecific::Ping(arguments) => arguments.responder_id,
                 ResponseSpecific::FindNode(arguments) => arguments.responder_id,
                 ResponseSpecific::GetPeers(arguments) => arguments.responder_id,
-                ResponseSpecific::GetValue(arguments) => arguments.responder_id,
+                ResponseSpecific::GetImmutable(arguments) => arguments.responder_id,
+                ResponseSpecific::GetMutable(arguments) => arguments.responder_id,
+                ResponseSpecific::NoValues(arguments) => arguments.responder_id,
             },
             MessageType::Error(_) => {
                 return None;
@@ -422,9 +488,34 @@ impl Message {
     pub fn get_closer_nodes(&self) -> Option<Vec<Node>> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
+                ResponseSpecific::Ping(arguments) => None,
                 ResponseSpecific::FindNode(arguments) => Some(arguments.nodes.clone()),
                 ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_ref().cloned(),
-                _ => None,
+                ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_ref().cloned(),
+                ResponseSpecific::GetImmutable(arguments) => arguments.nodes.as_ref().cloned(),
+                ResponseSpecific::NoValues(arguments) => arguments.nodes.as_ref().cloned(),
+            },
+            _ => None,
+        }
+    }
+
+    pub fn get_token(&self) -> Option<(Id, Vec<u8>)> {
+        match &self.message_type {
+            MessageType::Response(response_variant) => match response_variant {
+                ResponseSpecific::Ping(arguments) => None,
+                ResponseSpecific::FindNode(arguments) => None,
+                ResponseSpecific::GetPeers(arguments) => {
+                    Some((arguments.responder_id, arguments.token.clone()))
+                }
+                ResponseSpecific::GetImmutable(arguments) => {
+                    Some((arguments.responder_id, arguments.token.clone()))
+                }
+                ResponseSpecific::GetMutable(arguments) => {
+                    Some((arguments.responder_id, arguments.token.clone()))
+                }
+                ResponseSpecific::NoValues(arguments) => {
+                    Some((arguments.responder_id, arguments.token.clone()))
+                }
             },
             _ => None,
         }
@@ -521,8 +612,7 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>> {
     Ok(to_ret)
 }
 
-fn peers_to_bytes<T: AsRef<[SocketAddr]>>(peers: T) -> Vec<serde_bytes::ByteBuf> {
-    let peers = peers.as_ref();
+fn peers_to_bytes(peers: Vec<SocketAddr>) -> Vec<serde_bytes::ByteBuf> {
     peers
         .iter()
         .map(|p| serde_bytes::ByteBuf::from(sockaddr_to_bytes(p)))
@@ -688,15 +778,14 @@ mod tests {
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: true,
-            message_type: MessageType::Response(ResponseSpecific::GetPeers(
-                GetPeersResponseArguments {
+            message_type: MessageType::Response(ResponseSpecific::NoValues(
+                NoValuesResponseArguments {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
                     nodes: Some(vec![Node::new(
                         Id::random(),
                         "49.50.52.52:5354".parse().unwrap(),
                     )]),
-                    values: None,
                 },
             )),
         };
@@ -734,7 +823,7 @@ mod tests {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
                     nodes: None,
-                    values: Some(vec!["123.123.123.123:123".parse().unwrap()]),
+                    values: vec!["123.123.123.123:123".parse().unwrap()],
                 },
             )),
         };
@@ -754,12 +843,11 @@ mod tests {
             transaction_id: vec![1, 2],
             version: None,
             variant: internal::DHTMessageVariant::Response(
-                internal::DHTResponseSpecific::GetPeers {
-                    arguments: internal::DHTGetPeersResponseArguments {
+                internal::DHTResponseSpecific::NoValues {
+                    arguments: internal::DHTNoValuesResponseArguments {
                         id: Id::random().to_vec(),
                         token: vec![0, 1],
                         nodes: None,
-                        values: None,
                     },
                 },
             ),
@@ -767,12 +855,12 @@ mod tests {
         let parsed_msg = Message::from_serde_message(serde_message).unwrap();
         assert!(matches!(
             parsed_msg.message_type,
-            MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments { .. }))
+            MessageType::Response(ResponseSpecific::NoValues(NoValuesResponseArguments { .. }))
         ));
     }
 
     #[test]
-    fn test_get_value_request() {
+    fn test_get_immutable_request() {
         let original_msg = Message {
             transaction_id: 258,
             version: Some(vec![72, 73]),
@@ -794,21 +882,18 @@ mod tests {
     }
 
     #[test]
-    fn test_get_value_response() {
+    fn test_get_immutable_response() {
         let original_msg = Message {
             transaction_id: 3,
             version: Some(vec![1]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
-            message_type: MessageType::Response(ResponseSpecific::GetValue(
-                GetValueResponseArguments {
+            message_type: MessageType::Response(ResponseSpecific::GetImmutable(
+                GetImmutableResponseArguments {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102],
                     nodes: None,
                     v: vec![99, 100, 101, 102],
-                    k: Some(vec![99, 100, 101, 102]),
-                    seq: Some(10101010),
-                    sig: Some(vec![99, 100, 101, 102]),
                 },
             )),
         };

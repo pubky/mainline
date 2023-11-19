@@ -6,11 +6,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::common::{
-    GetPeerResponse, Id, Node, ResponseSender, ResponseValue, MAX_DISTANCE, STALE_TIME,
+    GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender, ResponseValue, MAX_DISTANCE,
+    STALE_TIME,
 };
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
-    GetPeersRequestArguments, GetPeersResponseArguments, Message, MessageType,
+    GetImmutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
+    GetValueRequestArguments, Message, MessageType, NoValuesResponseArguments,
     PingRequestArguments, PingResponseArguments, RequestSpecific, ResponseSpecific,
 };
 
@@ -119,7 +121,7 @@ impl Rpc {
 
     pub fn tick(&mut self) {
         // === Bootstrapping ===
-        self.populate();
+        // self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
             // Add a node to our routing table on any incoming request or response.
@@ -132,7 +134,7 @@ impl Rpc {
                 MessageType::Response(_) => {
                     self.handle_response(from, &message);
                 }
-                MessageType::Error(_) => {
+                MessageType::Error(err) => {
                     // TODO: Handle error messages!
                 }
             }
@@ -197,6 +199,17 @@ impl Rpc {
         }
 
         self.store_queries.insert(info_hash, query);
+    }
+
+    pub fn get_immutable(&mut self, target: Id, sender: ResponseSender) {
+        self.query(
+            target,
+            RequestSpecific::GetValue(GetValueRequestArguments {
+                requester_id: self.id,
+                target,
+            }),
+            Some(sender),
+        )
     }
 
     // === Private Methods ===
@@ -300,12 +313,19 @@ impl Rpc {
                 self.socket.response(
                     from,
                     transaction_id,
-                    ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                        responder_id: self.id,
-                        token: self.tokens.generate_token(from).into(),
-                        nodes: Some(self.routing_table.closest(info_hash)),
-                        values: self.peers.get_random_peers(info_hash),
-                    }),
+                    match self.peers.get_random_peers(info_hash) {
+                        Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
+                            responder_id: self.id,
+                            token: self.tokens.generate_token(from).into(),
+                            nodes: Some(self.routing_table.closest(info_hash)),
+                            values: peers,
+                        }),
+                        None => ResponseSpecific::NoValues(NoValuesResponseArguments {
+                            responder_id: self.id,
+                            token: self.tokens.generate_token(from).into(),
+                            nodes: Some(self.routing_table.closest(info_hash)),
+                        }),
+                    },
                 );
             }
             RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
@@ -336,6 +356,7 @@ impl Rpc {
             }
             _ => {
                 // TODO: How to deal with unknown requests?
+                // Maybe just return CloserNodesAndToken to the sender?
             }
         }
     }
@@ -375,6 +396,10 @@ impl Rpc {
                 }
             }
 
+            if let Some((responder_id, token)) = message.get_token() {
+                query.add_responding_node(Node::new(responder_id, from).with_token(token.clone()));
+            }
+
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     responder_id,
@@ -382,24 +407,30 @@ impl Rpc {
                     values,
                     ..
                 })) => {
-                    query.add_responding_node(
-                        Node::new(*responder_id, from).with_token(token.clone()),
-                    );
-
-                    match values {
-                        Some(peers) => {
-                            for peer in peers.clone() {
-                                query.response(ResponseValue::GetPeer(GetPeerResponse {
-                                    from: Node::new(*responder_id, from),
-                                    peer,
-                                }));
-                            }
-                        }
-                        None => {}
+                    for peer in values.clone() {
+                        query.response(ResponseValue::GetPeer(GetPeerResponse {
+                            from: Node::new(*responder_id, from),
+                            peer,
+                        }));
                     }
                 }
+                MessageType::Response(ResponseSpecific::GetImmutable(
+                    GetImmutableResponseArguments {
+                        responder_id,
+                        token,
+                        v,
+                        ..
+                    },
+                )) => {
+                    // TODO: validate hash of v!
+
+                    query.response(ResponseValue::GetImmutable(GetImmutableResponse {
+                        from: Node::new(*responder_id, from),
+                        value: v.clone(),
+                    }));
+                }
                 // Ping response is already handled in add_node()
-                // FindNode response is already handled in query.add_candidates()
+                // FindNode response is already handled in query.add_candidate()
                 _ => {}
             }
         }

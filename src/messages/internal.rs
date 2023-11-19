@@ -75,7 +75,7 @@ pub enum DHTRequestSpecific {
         arguments: DHTAnnouncePeerRequestArguments,
     },
 
-    #[serde(rename = "get_value")]
+    #[serde(rename = "get")]
     GetValue {
         #[serde(rename = "a")]
         arguments: DHTGetValueArguments,
@@ -85,14 +85,24 @@ pub enum DHTRequestSpecific {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)] // This means order matters! Order these from most to least detailed
 pub enum DHTResponseSpecific {
-    GetValue {
+    GetMutable {
         #[serde(rename = "r")]
-        arguments: DHTGetValueResponseArguments,
+        arguments: DHTGetMutableResponseArguments,
+    },
+
+    GetImmutable {
+        #[serde(rename = "r")]
+        arguments: DHTGetImmutableResponseArguments,
     },
 
     GetPeers {
         #[serde(rename = "r")]
         arguments: DHTGetPeersResponseArguments,
+    },
+
+    NoValues {
+        #[serde(rename = "r")]
+        arguments: DHTNoValuesResponseArguments,
     },
 
     FindNode {
@@ -153,6 +163,19 @@ pub struct DHTFindNodeResponseArguments {
     pub nodes: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTNoValuesResponseArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub token: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub nodes: Option<Vec<u8>>,
+}
+
 // === Get Peers ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -176,8 +199,9 @@ pub struct DHTGetPeersResponseArguments {
     #[serde(default)]
     pub nodes: Option<Vec<u8>>,
 
-    #[serde(default)]
-    pub values: Option<Vec<serde_bytes::ByteBuf>>,
+    // values are not optional, because if they are missing this missing
+    // we can just treat this as DHTNoValuesResponseArguments
+    pub values: Vec<serde_bytes::ByteBuf>,
 }
 
 // === Announce Peer ===
@@ -211,7 +235,23 @@ pub struct DHTGetValueArguments {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct DHTGetValueResponseArguments {
+pub struct DHTGetImmutableResponseArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub token: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub nodes: Option<Vec<u8>>,
+
+    #[serde(with = "serde_bytes")]
+    pub v: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTGetMutableResponseArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
 
@@ -225,13 +265,11 @@ pub struct DHTGetValueResponseArguments {
     #[serde(with = "serde_bytes")]
     pub v: Vec<u8>,
 
-    #[serde(default)]
-    pub k: Option<Vec<u8>>,
+    #[serde(with = "serde_bytes")]
+    pub k: Vec<u8>,
 
     #[serde(with = "serde_bytes")]
-    #[serde(default)]
-    pub sig: Option<Vec<u8>>,
+    pub sig: Vec<u8>,
 
-    #[serde(default)]
-    pub seq: Option<i64>,
+    pub seq: i64,
 }

@@ -8,8 +8,8 @@ use std::{
 
 use crate::{
     common::{
-        GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage, ResponseSender,
-        ResponseValue, StoreQueryMetdata,
+        GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseDone, ResponseMessage,
+        ResponseSender, ResponseValue, StoreQueryMetdata,
     },
     routing_table::RoutingTable,
     rpc::Rpc,
@@ -218,6 +218,11 @@ impl Dht {
         self.announce_peer_to(info_hash, response.closest_nodes, port)
     }
 
+    /// Announce a peer for a given infhoash to a specific set of nodes.
+    ///
+    /// Useful if you already have the list of closest_nodes from previous queries.
+    /// Note that tokens are only valid within a window of 5-10 minutes, so if your
+    /// list of nodes are older than 5 minutes, you should use [announce_peer](Dht::announce_peer) instead.
     pub fn announce_peer_to(
         &self,
         info_hash: Id,
@@ -231,6 +236,16 @@ impl Dht {
             .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
 
         receiver.recv().map_err(|e| e.into())
+    }
+
+    pub fn get_immutable(&self, info_hash: Id) -> Response<GetImmutableResponse> {
+        let (sender, receiver) = mpsc::channel::<ResponseMessage<GetImmutableResponse>>();
+
+        let _ = self
+            .sender
+            .send(ActorMessage::GetImmutable(info_hash, sender));
+
+        Response::new(receiver)
     }
 
     // === Private Methods ===
@@ -271,6 +286,9 @@ impl Dht {
                     ActorMessage::AnnouncePeer(info_hash, nodes, port, sender) => {
                         rpc.announce_peer(info_hash, nodes, port, ResponseSender::StoreItem(sender))
                     }
+                    ActorMessage::GetImmutable(target, sender) => {
+                        rpc.get_immutable(target, ResponseSender::GetImmutable(sender))
+                    }
                 }
             }
 
@@ -293,6 +311,8 @@ enum ActorMessage {
 
     GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
     AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
+
+    GetImmutable(Id, Sender<ResponseMessage<GetImmutableResponse>>),
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
@@ -356,7 +376,7 @@ mod test {
         let info_hash = Id::random();
 
         match a.announce_peer(info_hash, Some(45555)) {
-            Ok(_) => {
+            Ok(x) => {
                 let responses: Vec<_> = b.get_peers(info_hash).collect();
 
                 match responses.first() {
@@ -381,7 +401,6 @@ mod test {
             .build();
 
         let result = b.handle.unwrap().join();
-        dbg!(&result);
         assert!(result.is_err());
     }
 }

@@ -21,39 +21,35 @@ fn main() {
             let dht = Dht::default();
 
             let start = Instant::now();
-            let mut first = false;
 
             println!("\nLooking up infohash: {} ...\n", cli.infohash);
 
-            let mut count = 0;
+            let mut response = &mut dht.get_immutable(infohash);
 
-            let mut response = &mut dht.get_peers(infohash);
+            if let Some(item) = response.next() {
+                println!(
+                    "Got result in {:?} seconds\n",
+                    start.elapsed().as_secs_f32()
+                );
 
-            for item in &mut response {
-                if !first {
-                    first = true;
-                    println!(
-                        "Got first result in {:?} seconds\n",
-                        start.elapsed().as_secs_f32()
-                    );
+                // No need to stream responses, just print the first result, since
+                // all immutable data items are guaranteedt to be the same.
 
-                    println!("Streaming peers:\n");
-                }
-
-                count += 1;
-                println!("Got peer {:?} | from: {:?}", item.peer, item.from);
+                println!(
+                    "Got immutable data {:?} | from: {:?}",
+                    item.value, item.from
+                );
             }
 
             println!(
-                "Visited {:?} nodes, found {:?} closest nodes",
+                "\nVisited {:?} nodes, found {:?} closest nodes",
                 response.visited,
                 &response.closest_nodes.len()
             );
 
             println!(
-                "\nQuery exhausted in {:?} seconds, got {:?} peers.",
+                "\nQuery exhausted in {:?} seconds",
                 start.elapsed().as_secs_f32(),
-                count
             );
         }
         Err(err) => {

@@ -22,21 +22,72 @@ impl<T> Response<T> {
     }
 }
 
+impl<T> Iterator for &mut Response<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.receiver.recv() {
+            Ok(item) => match item {
+                ResponseMessage::ResponseValue(value) => Some(value),
+                ResponseMessage::ResponseDone(ResponseDone {
+                    visited,
+                    closest_nodes,
+                }) => {
+                    self.visited = visited;
+                    self.closest_nodes = closest_nodes;
+
+                    None
+                }
+            },
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ResponseSender {
     GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
+    GetImmutable(Sender<ResponseMessage<GetImmutableResponse>>),
+
     StoreItem(Sender<StoreQueryMetdata>),
+}
+
+pub enum ResponseMessage<T> {
+    ResponseValue(T),
+    ResponseDone(ResponseDone),
 }
 
 #[derive(Clone, Debug)]
 pub enum ResponseValue {
     GetPeer(GetPeerResponse),
+    GetImmutable(GetImmutableResponse),
 }
 
 #[derive(Clone, Debug)]
 pub struct GetPeerResponse {
     pub from: Node,
     pub peer: SocketAddr,
+}
+
+#[derive(Clone, Debug)]
+pub struct GetImmutableResponse {
+    pub from: Node,
+    pub value: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct GetMutableResponse {
+    pub from: Node,
+    // TODO: detail this
+    pub value: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResponseDone {
+    /// Number of nodes visited.
+    pub visited: usize,
+    /// Closest nodes in the routing tablue.
+    pub closest_nodes: Vec<Node>,
 }
 
 #[derive(Clone, Debug)]
@@ -64,40 +115,5 @@ impl StoreQueryMetdata {
     /// Return closest nodes. Useful to repeat the store operation without repeating the lookup.
     pub fn closest_nodes(&self) -> Vec<Node> {
         self.closest_nodes.clone()
-    }
-}
-
-pub enum ResponseMessage<T> {
-    ResponseValue(T),
-    ResponseDone(ResponseDone),
-}
-
-#[derive(Clone, Debug)]
-pub struct ResponseDone {
-    /// Number of nodes visited.
-    pub visited: usize,
-    /// Closest nodes in the routing tablue.
-    pub closest_nodes: Vec<Node>,
-}
-
-impl<T> Iterator for &mut Response<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.receiver.recv() {
-            Ok(item) => match item {
-                ResponseMessage::ResponseValue(value) => Some(value),
-                ResponseMessage::ResponseDone(ResponseDone {
-                    visited,
-                    closest_nodes,
-                }) => {
-                    self.visited = visited;
-                    self.closest_nodes = closest_nodes;
-
-                    None
-                }
-            },
-            _ => None,
-        }
     }
 }

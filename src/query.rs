@@ -132,8 +132,14 @@ impl Query {
     fn send_value(&self, sender: &ResponseSender, value: ResponseValue) {
         match sender {
             ResponseSender::GetPeer(sender) => {
-                let ResponseValue::GetPeer(peer) = value.clone();
-                let _ = sender.send(ResponseMessage::ResponseValue(peer));
+                if let ResponseValue::GetPeer(peer) = value {
+                    let _ = sender.send(ResponseMessage::ResponseValue(peer));
+                }
+            }
+            ResponseSender::GetImmutable(sender) => {
+                if let ResponseValue::GetImmutable(immutable_item) = value {
+                    let _ = sender.send(ResponseMessage::ResponseValue(immutable_item));
+                }
             }
             _ => {}
         };
