@@ -32,7 +32,10 @@ fn main() {
             for value in &mut response {
                 if !first {
                     first = true;
-                    println!("Got first result in {:?}\n", start.elapsed().as_secs_f32());
+                    println!(
+                        "Got first result in {:?} seconds\n",
+                        start.elapsed().as_secs_f32()
+                    );
 
                     println!("Streaming peers:\n");
                 }
