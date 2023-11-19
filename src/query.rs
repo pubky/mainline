@@ -47,6 +47,10 @@ impl Query {
         self.inflight_requests.is_empty() && self.visited.is_empty()
     }
 
+    pub fn target(&self) -> Id {
+        self.target
+    }
+
     // === Public Methods ===
 
     /// Add a sender to the query and send all replies we found so far to it.

@@ -3,6 +3,8 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::thread;
 use std::time::Duration;
 
+use sha1_smol::Sha1;
+
 use crate::common::{
     GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender, ResponseValue,
 };
@@ -400,7 +402,10 @@ impl Rpc {
                         responder_id, v, ..
                     },
                 )) => {
-                    // TODO: validate hash of v!
+                    if !validate_immutable(v, query.target()) {
+                        // TODO: log error
+                        return;
+                    }
 
                     query.response(ResponseValue::GetImmutable(GetImmutableResponse {
                         from: Node::new(*responder_id, from),
@@ -422,5 +427,39 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
+    }
+}
+
+fn validate_immutable(v: &[u8], target: Id) -> bool {
+    let mut encoded = Vec::with_capacity(v.len() + 3);
+    encoded.extend_from_slice(b"20:");
+    encoded.extend_from_slice(v);
+
+    let mut hasher = Sha1::new();
+    hasher.update(&encoded);
+    let hash = hasher.digest().bytes();
+
+    hash == target.bytes
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn test_validate_immutable() {
+        let v = vec![
+            171, 118, 111, 111, 174, 109, 195, 32, 138, 140, 113, 176, 76, 135, 116, 132, 156, 126,
+            75, 173,
+        ];
+
+        let target = Id::from_bytes(&[
+            2, 23, 113, 43, 67, 11, 185, 26, 26, 30, 204, 238, 204, 1, 13, 84, 52, 40, 86, 231,
+        ])
+        .unwrap();
+
+        assert!(validate_immutable(&v, target));
+        assert!(!validate_immutable(&v[1..], target));
     }
 }

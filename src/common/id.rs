@@ -14,7 +14,7 @@ pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
 #[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash)]
 /// Kademlia node Id or a lookup target
 pub struct Id {
-    bytes: [u8; ID_SIZE],
+    pub bytes: [u8; ID_SIZE],
 }
 
 impl Id {
