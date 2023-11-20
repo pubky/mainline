@@ -1,7 +1,5 @@
-use std::{
-    net::SocketAddr,
-    sync::mpsc::{Receiver, Sender},
-};
+use flume::{Receiver, Sender};
+use std::net::SocketAddr;
 
 use super::{Id, Node};
 
@@ -18,6 +16,31 @@ impl<T> Response<T> {
             receiver,
             visited: 0,
             closest_nodes: Vec::new(),
+        }
+    }
+}
+
+impl<T> Response<T> {
+    /// Next item, async.
+    ///
+    /// We do not implement futures::stream::Stream to avoid the dependency,
+    /// and to avoid having to deal with lifetime and pinning issues.
+    #[cfg(feature = "async")]
+    pub async fn next_async(&mut self) -> Option<T> {
+        match self.receiver.recv_async().await {
+            Ok(item) => match item {
+                ResponseMessage::ResponseValue(value) => Some(value),
+                ResponseMessage::ResponseDone(ResponseDone {
+                    visited,
+                    closest_nodes,
+                }) => {
+                    self.visited = visited;
+                    self.closest_nodes = closest_nodes;
+
+                    None
+                }
+            },
+            _ => None,
         }
     }
 }

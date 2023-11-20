@@ -18,6 +18,12 @@ serde_bytes = "0.11.5"
 thiserror = "1.0.49"
 crc = "3.0.1"
 sha1_smol = "1.0.0"
+flume = { version = "0.11.0", features = ["select", "eventual-fairness"], default-features = false }
 
 [dev-dependencies]
 clap = { version = "4.4.8", features = ["derive"] }
+futures = "0.3.29"
+
+[features]
+async = ["flume/async"]
+default = ["async"]

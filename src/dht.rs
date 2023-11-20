@@ -2,9 +2,10 @@
 
 use std::{
     net::SocketAddr,
-    sync::mpsc::{self, Receiver, Sender},
     thread::{self, JoinHandle},
 };
+
+use flume::{Receiver, Sender};
 
 use crate::{
     common::{
@@ -121,7 +122,7 @@ impl Dht {
     }
 
     pub fn new(settings: DhtSettings) -> Self {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = flume::bounded(32);
 
         let mut dht = Dht {
             sender,
@@ -141,20 +142,38 @@ impl Dht {
 
     /// Returns the local address of the udp socket this node is listening on.
     pub fn local_addr(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = mpsc::channel::<SocketAddr>();
+        let (sender, receiver) = flume::bounded::<SocketAddr>(1);
 
         let _ = self.sender.send(ActorMessage::LocalAddress(sender));
 
         receiver.recv().map_err(|e| e.into())
     }
 
+    #[cfg(feature = "async")]
+    pub async fn local_addr_async(&self) -> Result<SocketAddr> {
+        let (sender, receiver) = flume::bounded::<SocketAddr>(1);
+
+        let _ = self.sender.send(ActorMessage::LocalAddress(sender));
+
+        receiver.recv_async().await.map_err(|e| e.into())
+    }
+
     /// Returns a clone of the routing table of this node.
     pub fn routing_table(&self) -> Result<RoutingTable> {
-        let (sender, receiver) = mpsc::channel::<RoutingTable>();
+        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
 
         let _ = self.sender.send(ActorMessage::RoutingTable(sender));
 
         receiver.recv().map_err(|e| e.into())
+    }
+
+    #[cfg(feature = "async")]
+    pub async fn routing_table_async(&self) -> Result<RoutingTable> {
+        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+
+        let _ = self.sender.send(ActorMessage::RoutingTable(sender));
+
+        receiver.recv_async().await.map_err(|e| e.into())
     }
 
     // === Public Methods ===
@@ -193,7 +212,7 @@ impl Dht {
     /// }
     /// ```
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
-        let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
@@ -206,7 +225,7 @@ impl Dht {
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
     pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = mpsc::channel::<ResponseMessage<GetPeerResponse>>();
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
@@ -216,6 +235,26 @@ impl Dht {
         for _ in &mut response {}
 
         self.announce_peer_to(info_hash, response.closest_nodes, port)
+    }
+
+    /// Async version of [announce_peer](Dht::announce_peer).
+    #[cfg(feature = "async")]
+    pub async fn announce_peer_async(
+        &self,
+        info_hash: Id,
+        port: Option<u16>,
+    ) -> Result<StoreQueryMetdata> {
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
+
+        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+
+        let mut response = Response::new(receiver);
+
+        // Block until we got a Done response!
+        while let Some(_) = response.next_async().await {}
+
+        self.announce_peer_to_async(info_hash, response.closest_nodes, port)
+            .await
     }
 
     /// Announce a peer for a given infhoash to a specific set of nodes.
@@ -229,7 +268,7 @@ impl Dht {
         nodes: Vec<Node>,
         port: Option<u16>,
     ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = mpsc::channel::<StoreQueryMetdata>();
+        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
 
         let _ = self
             .sender
@@ -238,8 +277,25 @@ impl Dht {
         receiver.recv().map_err(|e| e.into())
     }
 
+    /// Async version of [announce_peer_to](Dht::announce_peer_to).
+    #[cfg(feature = "async")]
+    pub async fn announce_peer_to_async(
+        &self,
+        info_hash: Id,
+        nodes: Vec<Node>,
+        port: Option<u16>,
+    ) -> Result<StoreQueryMetdata> {
+        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+
+        let _ = self
+            .sender
+            .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
+
+        receiver.recv_async().await.map_err(|e| e.into())
+    }
+
     pub fn get_immutable(&self, info_hash: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = mpsc::channel::<ResponseMessage<GetImmutableResponse>>();
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
 
         let _ = self
             .sender
@@ -389,6 +445,31 @@ mod test {
             }
             Err(_) => {}
         };
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn announce_get_peer_async() {
+        async fn test() {
+            let testnet = Testnet::new(10);
+
+            let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
+            let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+
+            let info_hash = Id::random();
+
+            match a.announce_peer_async(info_hash, Some(45555)).await {
+                Ok(_) => {
+                    if let Some(r) = b.get_peers(info_hash).next_async().await {
+                        assert_eq!(r.peer.port(), 45555);
+                    } else {
+                        panic!("No respnoses")
+                    }
+                }
+                Err(_) => {}
+            };
+        }
+        futures::executor::block_on(test());
     }
 
     #[test]
