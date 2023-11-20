@@ -251,7 +251,7 @@ impl Dht {
         let mut response = Response::new(receiver);
 
         // Block until we got a Done response!
-        while let Some(_) = response.next_async().await {}
+        while (response.next_async().await).is_some() {}
 
         self.announce_peer_to_async(info_hash, response.closest_nodes, port)
             .await
