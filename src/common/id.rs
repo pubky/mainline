@@ -65,6 +65,7 @@ impl Id {
 
 impl Display for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        #[allow(clippy::format_collect)]
         let hex_chars: String = self
             .bytes
             .iter()
