@@ -1,7 +1,5 @@
-use std::{
-    net::SocketAddr,
-    sync::mpsc::{Receiver, Sender},
-};
+use flume::{Receiver, Sender};
+use std::net::SocketAddr;
 
 use super::{Id, Node};
 

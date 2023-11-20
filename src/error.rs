@@ -34,5 +34,5 @@ pub enum Error {
 
     #[error(transparent)]
     /// Transparent [std::io::Error]
-    Receive(#[from] std::sync::mpsc::RecvError),
+    Receive(#[from] flume::RecvError),
 }
