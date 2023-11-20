@@ -1,3 +1,4 @@
+//! A struct to iterate on incoming responses for a query.
 use flume::{Receiver, Sender};
 use std::net::SocketAddr;
 

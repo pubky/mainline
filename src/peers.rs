@@ -1,3 +1,5 @@
+//! Manage announced peers for info_hashes
+
 use std::{collections::HashMap, net::SocketAddr};
 
 use rand::{rngs::ThreadRng, seq::SliceRandom, thread_rng};

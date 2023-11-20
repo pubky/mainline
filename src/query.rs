@@ -1,3 +1,5 @@
+//! Manage iterative queries and their corresponding request/response.
+
 use std::collections::HashSet;
 use std::net::SocketAddr;
 

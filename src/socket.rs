@@ -1,3 +1,5 @@
+//! Udp socket layer managine incoming/outgoing requests and responses.
+
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
