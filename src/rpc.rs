@@ -22,7 +22,6 @@ use crate::socket::KrpcSocket;
 use crate::tokens::Tokens;
 use crate::Result;
 
-const TICK_INTERVAL: Duration = Duration::from_millis(1);
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
@@ -41,7 +40,6 @@ pub struct Rpc {
 
     // Options
     id: Id,
-    interval: Duration,
     bootstrap: Vec<String>,
 }
 
@@ -58,7 +56,6 @@ impl Rpc {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
-            interval: TICK_INTERVAL,
 
             socket,
             routing_table: RoutingTable::new().with_id(id),
@@ -144,8 +141,6 @@ impl Rpc {
         // === Remove done queries ===
         self.queries.retain(|_, query| !query.is_done());
         self.store_queries.retain(|_, query| !query.is_done());
-
-        thread::sleep(self.interval);
     }
 
     /// Start or restart a get_peers query.

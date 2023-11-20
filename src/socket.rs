@@ -12,6 +12,7 @@ const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
+const READ_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -35,7 +36,7 @@ impl KrpcSocket {
             Ok(socket) => Ok(socket),
             Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
         }?;
-        socket.set_nonblocking(true)?;
+        socket.set_read_timeout(Some(READ_TIMEOUT))?;
 
         Ok(Self {
             socket,
@@ -48,7 +49,7 @@ impl KrpcSocket {
 
     pub fn bind(port: u16) -> Result<Self> {
         let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?;
-        socket.set_nonblocking(true)?;
+        socket.set_read_timeout(Some(READ_TIMEOUT))?;
 
         Ok(Self {
             socket,
