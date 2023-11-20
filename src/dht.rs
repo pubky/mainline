@@ -447,6 +447,31 @@ mod test {
         };
     }
 
+    #[cfg(feature = "async")]
+    #[test]
+    fn announce_get_peer_async() {
+        async fn test() {
+            let testnet = Testnet::new(10);
+
+            let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
+            let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+
+            let info_hash = Id::random();
+
+            match a.announce_peer_async(info_hash, Some(45555)).await {
+                Ok(_) => {
+                    if let Some(r) = b.get_peers(info_hash).next_async().await {
+                        assert_eq!(r.peer.port(), 45555);
+                    } else {
+                        panic!("No respnoses")
+                    }
+                }
+                Err(_) => {}
+            };
+        }
+        futures::executor::block_on(test());
+    }
+
     #[test]
     fn bind_twice() {
         let a = Dht::default();

@@ -22,6 +22,7 @@ flume = { version = "0.11.0", features = ["select", "eventual-fairness"], defaul
 
 [dev-dependencies]
 clap = { version = "4.4.8", features = ["derive"] }
+futures = "0.3.29"
 
 [features]
 async = ["flume/async"]
