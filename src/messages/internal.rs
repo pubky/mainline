@@ -80,6 +80,12 @@ pub enum DHTRequestSpecific {
         #[serde(rename = "a")]
         arguments: DHTGetValueArguments,
     },
+
+    #[serde(rename = "put")]
+    PutValue {
+        #[serde(rename = "a")]
+        arguments: DHTPutValueArguments,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -272,4 +278,21 @@ pub struct DHTGetMutableResponseArguments {
     pub sig: Vec<u8>,
 
     pub seq: i64,
+}
+
+// === Put Value ===
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTPutValueArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub target: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub token: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub v: Vec<u8>,
 }

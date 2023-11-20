@@ -194,6 +194,7 @@ impl Query {
 
 #[derive(Debug)]
 pub struct StoreQuery {
+    target: Id,
     /// Nodes queried
     closest_nodes: Vec<Node>,
     /// Nodes that confirmed success
@@ -203,8 +204,9 @@ pub struct StoreQuery {
 }
 
 impl StoreQuery {
-    pub fn new(sender: ResponseSender) -> Self {
+    pub fn new(target: Id, sender: ResponseSender) -> Self {
         Self {
+            target,
             closest_nodes: Vec::new(),
             stored_at: Vec::new(),
             inflight_requests: Vec::new(),
@@ -244,6 +246,7 @@ impl StoreQuery {
         if self.is_done() {
             if let ResponseSender::StoreItem(sender) = &self.sender {
                 let _ = sender.send(StoreQueryMetdata::new(
+                    self.target,
                     self.closest_nodes.clone(),
                     self.stored_at.clone(),
                 ));

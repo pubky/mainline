@@ -9,8 +9,8 @@ use flume::{Receiver, Sender};
 
 use crate::{
     common::{
-        GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseMessage, ResponseSender,
-        StoreQueryMetdata,
+        hash_immutable, GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseMessage,
+        ResponseSender, StoreQueryMetdata,
     },
     routing_table::RoutingTable,
     rpc::Rpc,
@@ -182,9 +182,11 @@ impl Dht {
         let _ = self.sender.send(ActorMessage::Shutdown).ok();
     }
 
+    // === Peers ===
+
     /// Get peers for a given infohash.
     ///
-    /// Returns an blocking iterator over responses as they are received.
+    /// Returns a blocking iterator over responses as they are received.
     ///
     /// Note: each node of the network will only return a _random_ subset (usually 20)
     /// of the total peers it has for a given infohash, so if you are getting responses
@@ -294,14 +296,69 @@ impl Dht {
         receiver.recv_async().await.map_err(|e| e.into())
     }
 
-    pub fn get_immutable(&self, info_hash: Id) -> Response<GetImmutableResponse> {
+    // === Immutable data ===
+
+    /// Get an Immutable data by its sh1 hash.
+    ///
+    /// # Eaxmples
+    ///
+    /// ```
+    /// use mainline::{Dht, Id, Testnet};
+    ///
+    /// // Create a testnet for this example to avoid spamming the mainnet.
+    /// let testnet = Testnet::new(10);
+    ///
+    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
+    ///
+    /// // You should use a valid hash here, this is just an example.
+    /// let target: Id = [0; 20].into();
+    ///
+    /// let mut response = dht.get_immutable(info_hash);
+    ///
+    /// // Because it is immutable data, you can return the first result
+    /// // and ignore the rest, because they will be the same.
+    /// let item = response.next().unwrap();
+    ///
+    /// println!("Got immutable data: {:?} | from: {:?}", item.value, item.from);
+    /// ```
+    pub fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
         let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
+
+        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
+
+        Response::new(receiver)
+    }
+
+    /// Put an immutable data to the DHT.
+    pub fn put_immutable(&self, value: Vec<u8>) -> Result<StoreQueryMetdata> {
+        let target = Id::from_bytes(hash_immutable(&value)).unwrap();
+
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
+
+        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
+
+        let mut response = Response::new(receiver);
+
+        // Block until we got a Done response!
+        for _ in &mut response {}
+
+        self.put_immutable_to(target, value, response.closest_nodes)
+    }
+
+    /// Put an immutable data to specific nodes.
+    pub fn put_immutable_to(
+        &self,
+        target: Id,
+        value: Vec<u8>,
+        nodes: Vec<Node>,
+    ) -> Result<StoreQueryMetdata> {
+        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
 
         let _ = self
             .sender
-            .send(ActorMessage::GetImmutable(info_hash, sender));
+            .send(ActorMessage::PutImmutable(target, value, nodes, sender));
 
-        Response::new(receiver)
+        receiver.recv().map_err(|e| e.into())
     }
 
     // === Private Methods ===
@@ -345,6 +402,9 @@ impl Dht {
                     ActorMessage::GetImmutable(target, sender) => {
                         rpc.get_immutable(target, ResponseSender::GetImmutable(sender))
                     }
+                    ActorMessage::PutImmutable(target, value, nodes, sender) => {
+                        rpc.put_immutable(target, value, nodes, ResponseSender::StoreItem(sender))
+                    }
                 }
             }
 
@@ -369,6 +429,7 @@ enum ActorMessage {
     AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
 
     GetImmutable(Id, Sender<ResponseMessage<GetImmutableResponse>>),
+    PutImmutable(Id, Vec<u8>, Vec<Node>, Sender<StoreQueryMetdata>),
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.

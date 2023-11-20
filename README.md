@@ -19,9 +19,9 @@ For the foreseeable future, this library is limited to the scope of [read-only](
   - [ ] Mutable data
     - [ ] Get
     - [ ] Put
-  - [ ] Immutable data
-    - [ ] Get
-    - [ ] Put
+  - [x] Immutable data
+    - [x] Get
+    - [x] Put
 - [x] BEP0043 read-only
   - [x] Does not handle incoming requests if read-only
   - [x] Inform other nodes that this node is read-only

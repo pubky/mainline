@@ -116,16 +116,23 @@ pub struct ResponseDone {
 
 #[derive(Clone, Debug)]
 pub struct StoreQueryMetdata {
+    target: Id,
     stored_at: Vec<Id>,
     closest_nodes: Vec<Node>,
 }
 
 impl StoreQueryMetdata {
-    pub fn new(closest_nodes: Vec<Node>, stored_at: Vec<Id>) -> Self {
+    pub fn new(target: Id, closest_nodes: Vec<Node>, stored_at: Vec<Id>) -> Self {
         Self {
+            target,
             closest_nodes,
             stored_at,
         }
+    }
+
+    /// Return the target (or info_hash) for this query.
+    pub fn target(&self) -> Id {
+        self.target
     }
 
     /// Return the set of nodes that confirmed storing the value.

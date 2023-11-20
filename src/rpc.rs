@@ -3,16 +3,15 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::thread;
 use std::time::Duration;
 
-use sha1_smol::Sha1;
-
 use crate::common::{
-    GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender, ResponseValue,
+    validate_immutable, GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender,
+    ResponseValue,
 };
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
     GetImmutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
     GetValueRequestArguments, Message, MessageType, NoValuesResponseArguments,
-    PingResponseArguments, RequestSpecific, ResponseSpecific,
+    PingResponseArguments, PutImmutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
 use crate::peers::PeersStore;
@@ -168,7 +167,7 @@ impl Rpc {
             None => (0, Some(true)),
         };
 
-        let mut query = StoreQuery::new(sender);
+        let mut query = StoreQuery::new(info_hash, sender);
 
         for node in nodes {
             if let Some(token) = node.token.clone() {
@@ -198,6 +197,33 @@ impl Rpc {
             }),
             Some(sender),
         )
+    }
+
+    pub fn put_immutable(
+        &mut self,
+        target: Id,
+        value: Vec<u8>,
+        nodes: Vec<Node>,
+        sender: ResponseSender,
+    ) {
+        let mut query = StoreQuery::new(target, sender);
+
+        for node in nodes {
+            if let Some(token) = node.token.clone() {
+                query.request(
+                    node,
+                    RequestSpecific::PutImmutable(PutImmutableRequestArguments {
+                        requester_id: self.id,
+                        target,
+                        token,
+                        v: value.clone(),
+                    }),
+                    &mut self.socket,
+                );
+            }
+        }
+
+        self.store_queries.insert(target, query);
     }
 
     // === Private Methods ===
@@ -333,6 +359,12 @@ impl Rpc {
                     // TODO: Send an error message.
                 }
             }
+            RequestSpecific::PutImmutable(PutImmutableRequestArguments { v, target, .. }) => {
+                if v.len() > 1000 || !validate_immutable(v, *target) {
+                    // TODO: return and log error.
+                }
+                // TODO: store immutable items.
+            }
             _ => {
                 // TODO: How to deal with unknown requests?
                 // Maybe just return CloserNodesAndToken to the sender?
@@ -422,39 +454,5 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
-    }
-}
-
-fn validate_immutable(v: &[u8], target: Id) -> bool {
-    let mut encoded = Vec::with_capacity(v.len() + 3);
-    encoded.extend_from_slice(b"20:");
-    encoded.extend_from_slice(v);
-
-    let mut hasher = Sha1::new();
-    hasher.update(&encoded);
-    let hash = hasher.digest().bytes();
-
-    hash == target.bytes
-}
-
-#[cfg(test)]
-mod test {
-
-    use super::*;
-
-    #[test]
-    fn test_validate_immutable() {
-        let v = vec![
-            171, 118, 111, 111, 174, 109, 195, 32, 138, 140, 113, 176, 76, 135, 116, 132, 156, 126,
-            75, 173,
-        ];
-
-        let target = Id::from_bytes(&[
-            2, 23, 113, 43, 67, 11, 185, 26, 26, 30, 204, 238, 204, 1, 13, 84, 52, 40, 86, 231,
-        ])
-        .unwrap();
-
-        assert!(validate_immutable(&v, target));
-        assert!(!validate_immutable(&v[1..], target));
     }
 }
