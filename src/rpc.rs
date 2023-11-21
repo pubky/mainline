@@ -4,14 +4,15 @@ use std::thread;
 use std::time::Duration;
 
 use crate::common::{
-    validate_immutable, GetImmutableResponse, GetPeerResponse, Id, Node, ResponseSender,
-    ResponseValue,
+    validate_immutable, verify_mutable_raw, GetImmutableResponse, GetMutableResponse,
+    GetPeerResponse, Id, MutableItem, Node, ResponseSender, ResponseValue,
 };
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
-    GetImmutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
-    GetValueRequestArguments, Message, MessageType, NoValuesResponseArguments,
-    PingResponseArguments, PutImmutableRequestArguments, RequestSpecific, ResponseSpecific,
+    GetImmutableResponseArguments, GetMutableRequestArguments, GetMutableResponseArguments,
+    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
+    MessageType, NoValuesResponseArguments, PingResponseArguments, PutImmutableRequestArguments,
+    RequestSpecific, ResponseSpecific,
 };
 
 use crate::peers::PeersStore;
@@ -226,6 +227,18 @@ impl Rpc {
         self.store_queries.insert(target, query);
     }
 
+    pub fn get_mutable(&mut self, target: Id, salt: Option<Vec<u8>>, sender: ResponseSender) {
+        self.query(
+            target,
+            RequestSpecific::GetMutable(GetMutableRequestArguments {
+                requester_id: self.id,
+                target,
+                salt,
+            }),
+            Some(sender),
+        )
+    }
+
     // === Private Methods ===
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
@@ -418,7 +431,7 @@ impl Rpc {
                     ..
                 })) => {
                     for peer in values.clone() {
-                        query.response(ResponseValue::GetPeer(GetPeerResponse {
+                        query.response(ResponseValue::Peer(GetPeerResponse {
                             from: Node::new(*responder_id, from),
                             peer,
                         }));
@@ -434,9 +447,44 @@ impl Rpc {
                         return;
                     }
 
-                    query.response(ResponseValue::GetImmutable(GetImmutableResponse {
+                    query.response(ResponseValue::Immutable(GetImmutableResponse {
                         from: Node::new(*responder_id, from),
                         value: v.clone(),
+                    }));
+                }
+                MessageType::Response(ResponseSpecific::GetMutable(
+                    GetMutableResponseArguments {
+                        responder_id,
+                        v,
+                        seq,
+                        sig,
+                        k,
+                        ..
+                    },
+                )) => {
+                    let salt = match query.request() {
+                        RequestSpecific::GetMutable(GetMutableRequestArguments {
+                            salt, ..
+                        }) => salt,
+                        _ => None,
+                    };
+
+                    let item = MutableItem {
+                        value: v.clone(),
+                        key: k.clone(),
+                        seq: *seq,
+                        signature: sig.clone(),
+                        salt,
+                    };
+
+                    if verify_mutable_raw(&item).is_err() {
+                        // TODO: log error
+                        return;
+                    }
+
+                    query.response(ResponseValue::Mutable(GetMutableResponse {
+                        from: Node::new(*responder_id, from),
+                        item,
                     }));
                 }
                 // Ping response is already handled in add_node()

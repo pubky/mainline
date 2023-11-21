@@ -53,6 +53,7 @@ pub enum RequestSpecific {
     AnnouncePeer(AnnouncePeerRequestArguments),
     GetValue(GetValueRequestArguments),
     PutImmutable(PutImmutableRequestArguments),
+    GetMutable(GetMutableRequestArguments),
     // PutMutable(PutMutableRequestArguments),
 }
 
@@ -145,6 +146,16 @@ pub struct GetImmutableResponseArguments {
 // === Get Mutable ===
 
 #[derive(Debug, PartialEq, Clone)]
+pub struct GetMutableRequestArguments {
+    pub requester_id: Id,
+    pub target: Id,
+    // A bit of a hack, using this to carry an optional
+    // salt in the query.request field of [crate::query]
+    // not really encoded, decoded or sent over the wire.
+    pub salt: Option<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
@@ -227,6 +238,14 @@ impl Message {
                                 target: put_immutable_arguments.target.to_vec(),
                                 token: put_immutable_arguments.token,
                                 v: put_immutable_arguments.v,
+                            },
+                        }
+                    }
+                    RequestSpecific::GetMutable(get_mutable_args) => {
+                        internal::DHTRequestSpecific::GetValue {
+                            arguments: internal::DHTGetValueArguments {
+                                id: get_mutable_args.requester_id.to_vec(),
+                                target: get_mutable_args.target.to_vec(),
                             },
                         }
                     }
@@ -502,6 +521,7 @@ impl Message {
                 RequestSpecific::AnnouncePeer(arguments) => arguments.requester_id,
                 RequestSpecific::GetValue(arguments) => arguments.requester_id,
                 RequestSpecific::PutImmutable(arguments) => arguments.requester_id,
+                RequestSpecific::GetMutable(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(arguments) => arguments.responder_id,

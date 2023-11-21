@@ -2,7 +2,7 @@
 use flume::{Receiver, Sender};
 use std::net::SocketAddr;
 
-use super::{Id, Node};
+use super::{Id, MutableItem, Node};
 
 #[derive(Debug)]
 pub struct Response<T> {
@@ -72,6 +72,7 @@ impl<T> Iterator for &mut Response<T> {
 pub enum ResponseSender {
     GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
     GetImmutable(Sender<ResponseMessage<GetImmutableResponse>>),
+    GetMutable(Sender<ResponseMessage<GetMutableResponse>>),
 
     StoreItem(Sender<StoreQueryMetdata>),
 }
@@ -83,8 +84,9 @@ pub enum ResponseMessage<T> {
 
 #[derive(Clone, Debug)]
 pub enum ResponseValue {
-    GetPeer(GetPeerResponse),
-    GetImmutable(GetImmutableResponse),
+    Peer(GetPeerResponse),
+    Immutable(GetImmutableResponse),
+    Mutable(GetMutableResponse),
 }
 
 #[derive(Clone, Debug)]
@@ -103,7 +105,7 @@ pub struct GetImmutableResponse {
 pub struct GetMutableResponse {
     pub from: Node,
     // TODO: detail this
-    pub value: Vec<u8>,
+    pub item: MutableItem,
 }
 
 #[derive(Clone, Debug)]

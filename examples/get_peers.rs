@@ -29,7 +29,7 @@ fn main() {
 
             let mut response = &mut dht.get_peers(infohash);
 
-            for item in &mut response {
+            for res in &mut response {
                 if !first {
                     first = true;
                     println!(
@@ -41,7 +41,7 @@ fn main() {
                 }
 
                 count += 1;
-                println!("Got peer {:?} | from: {:?}", item.peer, item.from);
+                println!("Got peer {:?} | from: {:?}", res.peer, res.from);
             }
 
             println!(

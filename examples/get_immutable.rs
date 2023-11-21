@@ -26,24 +26,21 @@ fn main() {
 
             let mut response = &mut dht.get_immutable(infohash);
 
-            if let Some(item) = response.next() {
+            if let Some(res) = response.next() {
                 println!(
                     "Got result in {:?} seconds\n",
                     start.elapsed().as_secs_f32()
                 );
 
                 // No need to stream responses, just print the first result, since
-                // all immutable data items are guaranteedt to be the same.
+                // all immutable data items are guaranteed to be the same.
 
-                match String::from_utf8(item.value.clone()) {
+                match String::from_utf8(res.value.clone()) {
                     Ok(string) => {
-                        println!("Got immutable data: {:?} | from: {:?}", string, item.from);
+                        println!("Got immutable data: {:?} | from: {:?}", string, res.from);
                     }
                     Err(_) => {
-                        println!(
-                            "Got immutable data: {:?} | from: {:?}",
-                            item.value, item.from
-                        );
+                        println!("Got immutable data: {:?} | from: {:?}", res.value, res.from);
                     }
                 };
             }

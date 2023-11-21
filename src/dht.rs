@@ -9,8 +9,8 @@ use flume::{Receiver, Sender};
 
 use crate::{
     common::{
-        hash_immutable, GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseMessage,
-        ResponseSender, StoreQueryMetdata,
+        hash_immutable, target_from_key, GetImmutableResponse, GetMutableResponse, GetPeerResponse,
+        Id, Node, Response, ResponseMessage, ResponseSender, StoreQueryMetdata,
     },
     routing_table::RoutingTable,
     rpc::Rpc,
@@ -209,9 +209,15 @@ impl Dht {
     /// let info_hash: Id = [0; 20].into();
     ///
     /// let mut response = dht.get_peers(info_hash);
-    /// for value in &mut response {
-    ///     println!("Got peer: {:?} | from: {:?}", value.peer, value.from)
+    /// for res in &mut response {
+    ///     println!("Got peer: {:?} | from: {:?}", res.peer, res.from)
     /// }
+    ///
+    /// println!(
+    ///     "Visited {:?} nodes, found {:?} closest nodes",
+    ///     response.visited,
+    ///     &response.closest_nodes.len()
+    /// );
     /// ```
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
         let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
@@ -298,7 +304,7 @@ impl Dht {
 
     // === Immutable data ===
 
-    /// Get an Immutable data by its sh1 hash.
+    /// Get an Immutable data by its sha1 hash.
     pub fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
         let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
 
@@ -379,6 +385,25 @@ impl Dht {
         receiver.recv_async().await.map_err(|e| e.into())
     }
 
+    // === Mutable data ===
+
+    /// Get a mutable data by its public_key and optional salt.
+    pub fn get_mutable(
+        &self,
+        public_key: [u8; 32],
+        salt: Option<Vec<u8>>,
+    ) -> Response<GetMutableResponse> {
+        let target = target_from_key(&public_key, &salt);
+
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetMutableResponse>>(1);
+
+        let _ = self
+            .sender
+            .send(ActorMessage::GetMutable(target, salt, sender));
+
+        Response::new(receiver)
+    }
+
     // === Private Methods ===
 
     #[cfg(test)]
@@ -423,6 +448,9 @@ impl Dht {
                     ActorMessage::PutImmutable(target, value, nodes, sender) => {
                         rpc.put_immutable(target, value, nodes, ResponseSender::StoreItem(sender))
                     }
+                    ActorMessage::GetMutable(target, salt, sender) => {
+                        rpc.get_mutable(target, salt, ResponseSender::GetMutable(sender))
+                    }
                 }
             }
 
@@ -448,6 +476,12 @@ enum ActorMessage {
 
     GetImmutable(Id, Sender<ResponseMessage<GetImmutableResponse>>),
     PutImmutable(Id, Vec<u8>, Vec<Node>, Sender<StoreQueryMetdata>),
+
+    GetMutable(
+        Id,
+        Option<Vec<u8>>,
+        Sender<ResponseMessage<GetMutableResponse>>,
+    ),
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.

@@ -35,4 +35,10 @@ pub enum Error {
     #[error(transparent)]
     /// Transparent [std::io::Error]
     Receive(#[from] flume::RecvError),
+
+    #[error("Invalid mutable item signature")]
+    InvalidMutableSignature,
+
+    #[error("Invalid mutable item public key")]
+    InvalidMutablePublicKey,
 }

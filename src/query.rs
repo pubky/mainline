@@ -53,6 +53,10 @@ impl Query {
         self.target
     }
 
+    pub fn request(&self) -> RequestSpecific {
+        self.request.clone()
+    }
+
     // === Public Methods ===
 
     /// Add a sender to the query and send all replies we found so far to it.
@@ -138,13 +142,18 @@ impl Query {
     fn send_value(&self, sender: &ResponseSender, value: ResponseValue) {
         match sender {
             ResponseSender::GetPeer(sender) => {
-                if let ResponseValue::GetPeer(peer) = value {
+                if let ResponseValue::Peer(peer) = value {
                     let _ = sender.send(ResponseMessage::ResponseValue(peer));
                 }
             }
             ResponseSender::GetImmutable(sender) => {
-                if let ResponseValue::GetImmutable(immutable_item) = value {
+                if let ResponseValue::Immutable(immutable_item) = value {
                     let _ = sender.send(ResponseMessage::ResponseValue(immutable_item));
+                }
+            }
+            ResponseSender::GetMutable(sender) => {
+                if let ResponseValue::Mutable(mutable_item) = value {
+                    let _ = sender.send(ResponseMessage::ResponseValue(mutable_item));
                 }
             }
             _ => {}

@@ -1,4 +1,4 @@
-//! Serealize and decerealize Krpc messages.
+//! Helper functions for immutable items.
 
 use sha1_smol::Sha1;
 use std::str::FromStr;
@@ -17,10 +17,8 @@ pub fn hash_immutable(v: &[u8]) -> [u8; ID_SIZE] {
 
     let mut hasher = Sha1::new();
     hasher.update(&encoded);
-    let hash = hasher.digest().bytes();
-    hasher.reset();
 
-    hash
+    hasher.digest().bytes()
 }
 
 #[cfg(test)]
