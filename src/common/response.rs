@@ -12,7 +12,7 @@ pub struct Response<T> {
 }
 
 impl<T> Response<T> {
-    pub fn new(receiver: Receiver<ResponseMessage<T>>) -> Self {
+    pub(crate) fn new(receiver: Receiver<ResponseMessage<T>>) -> Self {
         Self {
             receiver,
             visited: 0,
