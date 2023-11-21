@@ -3,6 +3,7 @@
 //! Rust implementation of read-only BitTorrent Mainline DHT client.
 
 // Public modules
+pub mod async_dht;
 /// Miscellaneous common structs used throughout the library.
 mod common;
 pub mod dht;

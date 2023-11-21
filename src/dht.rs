@@ -20,7 +20,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Dht {
     handle: Option<JoinHandle<()>>,
-    sender: Sender<ActorMessage>,
+    pub(crate) sender: Sender<ActorMessage>,
 }
 
 impl Clone for Dht {
@@ -149,15 +149,6 @@ impl Dht {
         receiver.recv().map_err(|e| e.into())
     }
 
-    #[cfg(feature = "async")]
-    pub async fn local_addr_async(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = flume::bounded::<SocketAddr>(1);
-
-        let _ = self.sender.send(ActorMessage::LocalAddress(sender));
-
-        receiver.recv_async().await.map_err(|e| e.into())
-    }
-
     /// Returns a clone of the routing table of this node.
     pub fn routing_table(&self) -> Result<RoutingTable> {
         let (sender, receiver) = flume::bounded::<RoutingTable>(1);
@@ -165,15 +156,6 @@ impl Dht {
         let _ = self.sender.send(ActorMessage::RoutingTable(sender));
 
         receiver.recv().map_err(|e| e.into())
-    }
-
-    #[cfg(feature = "async")]
-    pub async fn routing_table_async(&self) -> Result<RoutingTable> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
-
-        let _ = self.sender.send(ActorMessage::RoutingTable(sender));
-
-        receiver.recv_async().await.map_err(|e| e.into())
     }
 
     // === Public Methods ===
@@ -245,26 +227,6 @@ impl Dht {
         self.announce_peer_to(info_hash, response.closest_nodes, port)
     }
 
-    /// Async version of [announce_peer](Dht::announce_peer).
-    #[cfg(feature = "async")]
-    pub async fn announce_peer_async(
-        &self,
-        info_hash: Id,
-        port: Option<u16>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
-
-        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
-
-        let mut response = Response::new(receiver);
-
-        // Block until we got a Done response!
-        while (response.next_async().await).is_some() {}
-
-        self.announce_peer_to_async(info_hash, response.closest_nodes, port)
-            .await
-    }
-
     /// Announce a peer for a given infhoash to a specific set of nodes.
     ///
     /// Useful if you already have the list of closest_nodes from previous queries.
@@ -283,23 +245,6 @@ impl Dht {
             .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
 
         receiver.recv().map_err(|e| e.into())
-    }
-
-    /// Async version of [announce_peer_to](Dht::announce_peer_to).
-    #[cfg(feature = "async")]
-    pub async fn announce_peer_to_async(
-        &self,
-        info_hash: Id,
-        nodes: Vec<Node>,
-        port: Option<u16>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
-
-        let _ = self
-            .sender
-            .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
-
-        receiver.recv_async().await.map_err(|e| e.into())
     }
 
     // === Immutable data ===
@@ -343,46 +288,6 @@ impl Dht {
             .send(ActorMessage::PutImmutable(target, value, nodes, sender));
 
         receiver.recv().map_err(|e| e.into())
-    }
-
-    /// Async version of [get_immutable](Dht::get_immutable).
-    pub async fn get_immutable_async(&self, target: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
-
-        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
-
-        Response::new(receiver)
-    }
-
-    /// Async version of [put_immutable](Dht::put_immutable).
-    pub async fn put_immutable_sync(&self, value: Vec<u8>) -> Result<StoreQueryMetdata> {
-        let target = Id::from_bytes(hash_immutable(&value)).unwrap();
-
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
-
-        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
-
-        let mut response = Response::new(receiver);
-
-        while (response.next_async().await).is_some() {}
-
-        self.put_immutable_to(target, value, response.closest_nodes)
-    }
-
-    /// Async version of [put_immutable_to](Dht::put_immutable_to).
-    pub async fn put_immutable_to_async(
-        &self,
-        target: Id,
-        value: Vec<u8>,
-        nodes: Vec<Node>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
-
-        let _ = self
-            .sender
-            .send(ActorMessage::PutImmutable(target, value, nodes, sender));
-
-        receiver.recv_async().await.map_err(|e| e.into())
     }
 
     // === Mutable data ===
@@ -466,7 +371,7 @@ impl Default for Dht {
     }
 }
 
-enum ActorMessage {
+pub(crate) enum ActorMessage {
     Shutdown,
     LocalAddress(Sender<SocketAddr>),
     RoutingTable(Sender<RoutingTable>),
@@ -566,12 +471,18 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10);
 
-            let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
-            let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .as_async();
+            let b = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .as_async();
 
             let info_hash = Id::random();
 
-            match a.announce_peer_async(info_hash, Some(45555)).await {
+            match a.announce_peer(info_hash, Some(45555)).await {
                 Ok(_) => {
                     if let Some(r) = b.get_peers(info_hash).next_async().await {
                         assert_eq!(r.peer.port(), 45555);
