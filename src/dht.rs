@@ -317,8 +317,6 @@ impl Dht {
 
     /// Put an immutable data to the DHT.
     pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
-        let target = item.target();
-
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetMutable(

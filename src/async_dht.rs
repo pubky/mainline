@@ -3,8 +3,8 @@
 use ed25519_dalek::VerifyingKey;
 
 use crate::common::{
-    hash_immutable, target_from_key, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id,
-    MutableItem, Node, Response, ResponseDone, ResponseMessage, StoreQueryMetdata,
+    hash_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
+    Node, Response, ResponseDone, ResponseMessage, StoreQueryMetdata,
 };
 use crate::dht::ActorMessage;
 use crate::routing_table::RoutingTable;
@@ -16,8 +16,6 @@ pub struct AsyncDht(Dht);
 
 impl AsyncDht {
     pub async fn local_addr(&self) -> Result<SocketAddr> {
-        use std::net::SocketAddr;
-
         let (sender, receiver) = flume::bounded::<SocketAddr>(1);
 
         let _ = self.0.sender.send(ActorMessage::LocalAddress(sender));
@@ -26,8 +24,6 @@ impl AsyncDht {
     }
 
     pub async fn routing_table(&self) -> Result<RoutingTable> {
-        use crate::routing_table::RoutingTable;
-
         let (sender, receiver) = flume::bounded::<RoutingTable>(1);
 
         let _ = self.0.sender.send(ActorMessage::RoutingTable(sender));
@@ -143,8 +139,6 @@ impl AsyncDht {
 
     /// Async version of [get_mutable](Dht::put_mutable)
     pub async fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
-        let target = item.target();
-
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
         let _ = self.0.sender.send(ActorMessage::GetMutable(

@@ -1,6 +1,6 @@
 //! Helper functions and structs for mutable items.
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha1_smol::Sha1;
 use std::convert::TryFrom;
 

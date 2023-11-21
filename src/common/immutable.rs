@@ -1,7 +1,6 @@
 //! Helper functions for immutable items.
 
 use sha1_smol::Sha1;
-use std::str::FromStr;
 
 use super::ID_SIZE;
 use crate::Id;

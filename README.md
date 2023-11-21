@@ -1,40 +1,29 @@
 # Mainline
 
-WIP mainline rust implementation.
+Simple, robust, BitTorrent's [Mainline](https://en.wikipedia.org/wiki/Mainline_DHT) DHT implementation.
 
-For the foreseeable future, this library is limited to the scope of [read-only](https://www.bittorrent.org/beps/bep_0043.html) DHT clients.
+This library is focused on being the best and simplest Rust client for Mainline, especially focused on reliable and fast time-to-first-response.
 
-- [x] BEP0005 basic
-  - [x] Ping
-    - [x] Request
-    - [x] Response
-  - [x] Find node
-    - [x] Request
-    - [x] Response
-  - [x] query (incrementally get closer nodes)
-  - [x] Announce/Get peers
-    - [x] Get
-    - [x] Put
-- [x] BEP0044 arbitrary storage
-  - [x] Mutable data
-    - [x] Get
-    - [x] Put
-  - [x] Immutable data
-    - [x] Get
-    - [x] Put
-- [x] BEP0043 read-only
-  - [x] Does not handle incoming requests if read-only
-  - [x] Inform other nodes that this node is read-only
-  - [x] Does not add read-only nodes to local routing tables
-- [ ] Features for long living clients
-  - [ ] API for storing and load routing table between sessions.
-  - [ ] Refresh nodes in the local rounting table frequently enough
-  - [ ] Control number of concurrent udp requests
-  - [ ] Refresh cached queries to keep closest nodes fresh, skipping get before put
-  - [ ] Backoff while republishing.
-- [ ] BEP0042 security extension
-- [ ] Features for server side nodes
-  - [ ] Respond with relevant errors.
-  - [ ] Egress rate limits
-  - [ ] Ip rate limits
-  - [ ] Error responses
+It should work as a routing / storing node as well, but if you want to run a reliable node to support the network, you might be better off running [libtorrent](https://libtorrent.org/) for now.
+
+## Get started
+
+Check the [Examples](./examples).
+
+## Features
+
+### Client
+
+Supported BEPs:
+- [x] [BEP0005 DHT Protocol](https://www.bittorrent.org/beps/bep_0005.html)
+- [ ] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
+- [x] [BEP0043 Read-only DHT Nodes](https://www.bittorrent.org/beps/bep_0043.html)
+- [x] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
+
+### Server
+
+Supported BEPs:
+- [x] [BEP0005 DHT Protocol](https://www.bittorrent.org/beps/bep_0005.html)
+- [ ] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
+- [x] [BEP0043 Read-only DHT Nodes](https://www.bittorrent.org/beps/bep_0043.html)
+- [ ] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
