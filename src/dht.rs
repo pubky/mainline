@@ -5,12 +5,13 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use ed25519_dalek::VerifyingKey;
 use flume::{Receiver, Sender};
 
 use crate::{
     common::{
         hash_immutable, target_from_key, GetImmutableResponse, GetMutableResponse, GetPeerResponse,
-        Id, Node, Response, ResponseMessage, ResponseSender, StoreQueryMetdata,
+        Id, MutableItem, Node, Response, ResponseMessage, ResponseSender, StoreQueryMetdata,
     },
     routing_table::RoutingTable,
     rpc::Rpc,
@@ -295,7 +296,7 @@ impl Dht {
     /// Get a mutable data by its public_key and optional salt.
     pub fn get_mutable(
         &self,
-        public_key: [u8; 32],
+        public_key: VerifyingKey,
         salt: Option<Vec<u8>>,
     ) -> Response<GetMutableResponse> {
         let target = target_from_key(&public_key, &salt);
@@ -307,6 +308,37 @@ impl Dht {
             .send(ActorMessage::GetMutable(target, salt, sender));
 
         Response::new(receiver)
+    }
+
+    /// Put an immutable data to the DHT.
+    pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
+        let target = item.target();
+
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetMutableResponse>>(1);
+
+        let _ = self.sender.send(ActorMessage::GetMutable(
+            *item.target(),
+            item.salt().clone(),
+            sender,
+        ));
+
+        let mut response = Response::new(receiver);
+
+        // Block until we got a Done response!
+        for _ in &mut response {}
+
+        self.put_mutable_to(item, response.closest_nodes)
+    }
+
+    /// Put an immutable data to specific nodes.
+    pub fn put_mutable_to(&self, item: MutableItem, nodes: Vec<Node>) -> Result<StoreQueryMetdata> {
+        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+
+        let _ = self
+            .sender
+            .send(ActorMessage::PutMutable(item, nodes, sender));
+
+        receiver.recv().map_err(|e| e.into())
     }
 
     // === Private Methods ===
@@ -356,6 +388,9 @@ impl Dht {
                     ActorMessage::GetMutable(target, salt, sender) => {
                         rpc.get_mutable(target, salt, ResponseSender::GetMutable(sender))
                     }
+                    ActorMessage::PutMutable(item, nodes, sender) => {
+                        rpc.put_mutable(item, nodes, ResponseSender::StoreItem(sender))
+                    }
                 }
             }
 
@@ -387,6 +422,7 @@ pub(crate) enum ActorMessage {
         Option<Vec<u8>>,
         Sender<ResponseMessage<GetMutableResponse>>,
     ),
+    PutMutable(MutableItem, Vec<Node>, Sender<StoreQueryMetdata>),
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.

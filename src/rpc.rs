@@ -4,15 +4,15 @@ use std::thread;
 use std::time::Duration;
 
 use crate::common::{
-    validate_immutable, verify_mutable_raw, GetImmutableResponse, GetMutableResponse,
-    GetPeerResponse, Id, MutableItem, Node, ResponseSender, ResponseValue,
+    validate_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
+    Node, ResponseSender, ResponseValue,
 };
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
     GetImmutableResponseArguments, GetMutableRequestArguments, GetMutableResponseArguments,
     GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
     MessageType, NoValuesResponseArguments, PingResponseArguments, PutImmutableRequestArguments,
-    RequestSpecific, ResponseSpecific,
+    PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
 use crate::peers::PeersStore;
@@ -111,7 +111,7 @@ impl Rpc {
 
     pub fn tick(&mut self) {
         // === Bootstrapping ===
-        self.populate();
+        // self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
             // Add a node to our routing table on any incoming request or response.
@@ -237,6 +237,30 @@ impl Rpc {
             }),
             Some(sender),
         )
+    }
+
+    pub fn put_mutable(&mut self, item: MutableItem, nodes: Vec<Node>, sender: ResponseSender) {
+        let mut query = StoreQuery::new(*item.target(), sender);
+
+        for node in nodes {
+            if let Some(token) = node.token.clone() {
+                query.request(
+                    node,
+                    RequestSpecific::PutMutable(PutMutableRequestArguments {
+                        requester_id: self.id,
+                        target: *item.target(),
+                        token,
+                        v: item.value().clone(),
+                        k: item.key().to_bytes().to_vec(),
+                        seq: *item.seq(),
+                        sig: item.signature().to_vec(),
+                    }),
+                    &mut self.socket,
+                );
+            }
+        }
+
+        self.store_queries.insert(*item.target(), query);
     }
 
     // === Private Methods ===
@@ -373,7 +397,7 @@ impl Rpc {
                 }
             }
             RequestSpecific::PutImmutable(PutImmutableRequestArguments { v, target, .. }) => {
-                if v.len() > 1000 || !validate_immutable(v, *target) {
+                if v.len() > 1000 || !validate_immutable(v, target) {
                     // TODO: return and log error.
                 }
                 // TODO: store immutable items.
@@ -466,26 +490,19 @@ impl Rpc {
                         RequestSpecific::GetMutable(GetMutableRequestArguments {
                             salt, ..
                         }) => salt,
-                        _ => None,
+                        _ => &None,
                     };
 
-                    let item = MutableItem {
-                        value: v.clone(),
-                        key: k.clone(),
-                        seq: *seq,
-                        signature: sig.clone(),
-                        salt,
-                    };
-
-                    if verify_mutable_raw(&item).is_err() {
+                    if let Ok(item) =
+                        MutableItem::from_dht_message(query.target(), k, v, seq, sig, salt)
+                    {
+                        query.response(ResponseValue::Mutable(GetMutableResponse {
+                            from: Node::new(*responder_id, from),
+                            item,
+                        }));
+                    } else {
                         // TODO: log error
-                        return;
                     }
-
-                    query.response(ResponseValue::Mutable(GetMutableResponse {
-                        from: Node::new(*responder_id, from),
-                        item,
-                    }));
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()

@@ -6,7 +6,7 @@ use std::str::FromStr;
 use super::ID_SIZE;
 use crate::Id;
 
-pub fn validate_immutable(v: &[u8], target: Id) -> bool {
+pub fn validate_immutable(v: &[u8], target: &Id) -> bool {
     hash_immutable(v) == target.bytes
 }
 
@@ -37,8 +37,8 @@ mod test {
         ])
         .unwrap();
 
-        assert!(validate_immutable(&v, target));
-        assert!(!validate_immutable(&v[1..], target));
+        assert!(validate_immutable(&v, &target));
+        assert!(!validate_immutable(&v[1..], &target));
     }
 
     #[test]

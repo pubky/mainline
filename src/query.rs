@@ -49,12 +49,12 @@ impl Query {
         self.inflight_requests.is_empty() && self.visited.is_empty()
     }
 
-    pub fn target(&self) -> Id {
-        self.target
+    pub fn target(&self) -> &Id {
+        &self.target
     }
 
-    pub fn request(&self) -> RequestSpecific {
-        self.request.clone()
+    pub fn request(&self) -> &RequestSpecific {
+        &self.request
     }
 
     // === Public Methods ===
@@ -167,8 +167,18 @@ impl Query {
             closest_nodes: self.with_token.closest(&self.target),
         };
 
-        if let ResponseSender::GetPeer(sender) = sender {
-            let _ = sender.send(ResponseMessage::ResponseDone(done));
+        match sender {
+            ResponseSender::GetPeer(sender) => {
+                let _ = sender.send(ResponseMessage::ResponseDone(done));
+            }
+            ResponseSender::GetImmutable(sender) => {
+                let _ = sender.send(ResponseMessage::ResponseDone(done));
+            }
+            ResponseSender::GetMutable(sender) => {
+                let _ = sender.send(ResponseMessage::ResponseDone(done));
+            }
+            // Responder::StoreItem doesn't need a ResponseDone, it works in StoreQuery
+            _ => {}
         };
     }
 

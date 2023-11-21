@@ -5,7 +5,7 @@
 // Public modules
 pub mod async_dht;
 /// Miscellaneous common structs used throughout the library.
-mod common;
+pub mod common;
 pub mod dht;
 
 /// Errors
@@ -23,6 +23,7 @@ pub use dht::{Dht, Testnet};
 
 // Re-exports
 pub use crate::error::Error;
+pub use ed25519_dalek;
 
 // Alias Result to be the crate Result.
 pub type Result<T, E = Error> = core::result::Result<T, E>;

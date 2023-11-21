@@ -295,4 +295,12 @@ pub struct DHTPutValueArguments {
 
     #[serde(with = "serde_bytes")]
     pub v: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub k: Option<Vec<u8>>,
+
+    #[serde(with = "serde_bytes")]
+    pub sig: Option<Vec<u8>>,
+
+    pub seq: Option<i64>,
 }

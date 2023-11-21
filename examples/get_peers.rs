@@ -23,7 +23,7 @@ fn main() {
             let start = Instant::now();
             let mut first = false;
 
-            println!("\nLooking up infohash: {} ...\n", cli.infohash);
+            println!("\nLooking up peers for infohash: {} ...\n", cli.infohash);
 
             let mut count = 0;
 

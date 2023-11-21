@@ -1,6 +1,6 @@
 //! Helper functions and structs for mutable items.
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha1_smol::Sha1;
 use std::convert::TryFrom;
 
@@ -8,22 +8,90 @@ use crate::{Error, Id, Result};
 
 #[derive(Clone, Debug)]
 pub struct MutableItem {
+    /// hash of the key and optional salt
+    target: Id,
     /// ed25519 public key
-    pub key: Vec<u8>,
+    key: VerifyingKey,
     /// sequence number
-    pub seq: i64,
+    seq: i64,
     /// mutable value
-    pub value: Vec<u8>,
+    value: Vec<u8>,
     /// ed25519 signature
-    pub signature: Vec<u8>,
+    signature: Signature,
     /// Optional salt
-    pub salt: Option<Vec<u8>>,
+    salt: Option<Vec<u8>>,
 }
 
-pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Vec<u8>>) -> Id {
+impl MutableItem {
+    pub fn new(signer: SigningKey, value: Vec<u8>, seq: i64, salt: Option<Vec<u8>>) -> Self {
+        let signable = encode_signable(&seq, &value, &salt);
+        let signature = signer.sign(&signable);
+
+        Self {
+            target: target_from_key(&signer.verifying_key(), &salt),
+            key: signer.verifying_key(),
+            value,
+            seq,
+            signature,
+            salt,
+        }
+    }
+
+    pub fn from_dht_message(
+        target: &Id,
+        key: &Vec<u8>,
+        v: &[u8],
+        seq: &i64,
+        signature: &[u8],
+        salt: &Option<Vec<u8>>,
+    ) -> Result<Self> {
+        let key =
+            VerifyingKey::try_from(key.as_slice()).map_err(|_| Error::InvalidMutablePublicKey)?;
+
+        let signature =
+            Signature::from_slice(signature).map_err(|_| Error::InvalidMutableSignature)?;
+
+        Ok(Self {
+            target: *target,
+            key,
+            value: v.to_owned(),
+            seq: *seq,
+            signature,
+            salt: salt.clone(),
+        })
+    }
+
+    /// === Getters ===
+
+    pub fn target(&self) -> &Id {
+        &self.target
+    }
+
+    pub fn key(&self) -> &VerifyingKey {
+        &self.key
+    }
+
+    pub fn value(&self) -> &Vec<u8> {
+        &self.value
+    }
+
+    pub fn seq(&self) -> &i64 {
+        &self.seq
+    }
+
+    pub fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    pub fn salt(&self) -> &Option<Vec<u8>> {
+        &self.salt
+    }
+}
+
+pub fn target_from_key(public_key: &VerifyingKey, salt: &Option<Vec<u8>>) -> Id {
     let mut encoded = vec![];
 
-    encoded.extend(public_key.to_vec());
+    encoded.extend(public_key.to_bytes());
 
     if let Some(salt) = salt {
         encoded.extend(salt);
@@ -36,43 +104,16 @@ pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Vec<u8>>) -> Id {
     Id::from_bytes(hash).unwrap()
 }
 
-pub fn verify_mutable_raw(item: &MutableItem) -> Result<()> {
-    let signable = encode_signable(item);
-
-    let public_key =
-        VerifyingKey::try_from(item.key.as_slice()).map_err(|_| Error::InvalidMutablePublicKey)?;
-    let signature =
-        Signature::from_slice(&item.signature).map_err(|_| Error::InvalidMutableSignature)?;
-
-    let signable = encode_signable(item);
-
-    verify_mutable(&public_key, &signature, &signable)?;
-
-    Ok(())
-}
-
-pub fn verify_mutable(
-    public_key: &VerifyingKey,
-    signature: &Signature,
-    signable: &[u8],
-) -> Result<()> {
-    public_key
-        .verify(signable, signature)
-        .map_err(|_| Error::InvalidMutableSignature)?;
-
-    Ok(())
-}
-
-pub fn encode_signable(item: &MutableItem) -> Vec<u8> {
+pub fn encode_signable(seq: &i64, value: &Vec<u8>, salt: &Option<Vec<u8>>) -> Vec<u8> {
     let mut signable = vec![];
 
-    if let Some(salt) = &item.salt {
+    if let Some(salt) = salt {
         signable.extend(format!("4:salt{}:", salt.len()).into_bytes());
         signable.extend(salt);
     }
 
-    signable.extend(format!("3:seqi{}e1:v{}:", item.seq, item.value.len()).into_bytes());
-    signable.extend(item.value.clone());
+    signable.extend(format!("3:seqi{}e1:v{}:", seq, value.len()).into_bytes());
+    signable.extend(value);
 
     signable
 }
@@ -83,29 +124,13 @@ mod tests {
 
     #[test]
     fn signable_without_salt() {
-        let item = MutableItem {
-            key: vec![0; 32],
-            seq: 4,
-            value: b"Hello world!".to_vec(),
-            signature: vec![0; 64],
-            salt: None,
-        };
-
-        let signable = encode_signable(&item);
+        let signable = encode_signable(&4, &b"Hello world!".to_vec(), &None);
 
         assert_eq!(signable, b"3:seqi4e1:v12:Hello world!");
     }
     #[test]
     fn signable_with_salt() {
-        let item = MutableItem {
-            key: vec![0; 32],
-            seq: 4,
-            value: b"Hello world!".to_vec(),
-            signature: vec![0; 64],
-            salt: Some(b"foobar".to_vec()),
-        };
-
-        let signable = encode_signable(&item);
+        let signable = encode_signable(&4, &b"Hello world!".to_vec(), &Some(b"foobar".to_vec()));
 
         assert_eq!(signable, b"4:salt6:foobar3:seqi4e1:v12:Hello world!");
     }
