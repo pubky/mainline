@@ -23,6 +23,7 @@ pub fn hash_immutable(v: &[u8]) -> [u8; ID_SIZE] {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn test_validate_immutable() {
