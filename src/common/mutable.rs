@@ -11,7 +11,7 @@ pub struct MutableItem {
     /// hash of the key and optional salt
     target: Id,
     /// ed25519 public key
-    key: VerifyingKey,
+    key: Box<VerifyingKey>,
     /// sequence number
     seq: i64,
     /// mutable value
@@ -29,7 +29,7 @@ impl MutableItem {
 
         Self {
             target: target_from_key(&signer.verifying_key(), &salt),
-            key: signer.verifying_key(),
+            key: signer.verifying_key().into(),
             value,
             seq,
             signature,
@@ -53,7 +53,7 @@ impl MutableItem {
 
         Ok(Self {
             target: *target,
-            key,
+            key: key.into(),
             value: v.to_owned(),
             seq: *seq,
             signature,
