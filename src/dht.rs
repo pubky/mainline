@@ -203,7 +203,12 @@ impl Dht {
     /// );
     /// ```
     pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
+        // Get requests use unbounded channels to avoid blocking in the run loop.
+        // Other requests like put_to and getters don't need that and is ok with
+        // bounded channel with 1 capacity since it only ever sends one message back.
+        //
+        // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
@@ -216,7 +221,7 @@ impl Dht {
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
     pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
 
@@ -252,7 +257,7 @@ impl Dht {
 
     /// Get an Immutable data by its sha1 hash.
     pub fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
 
@@ -263,7 +268,7 @@ impl Dht {
     pub fn put_immutable(&self, value: Vec<u8>) -> Result<StoreQueryMetdata> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
 
@@ -301,7 +306,7 @@ impl Dht {
     ) -> Response<GetMutableResponse> {
         let target = target_from_key(&public_key, &salt);
 
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetMutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
         let _ = self
             .sender
@@ -314,7 +319,7 @@ impl Dht {
     pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
         let target = item.target();
 
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetMutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
         let _ = self.sender.send(ActorMessage::GetMutable(
             *item.target(),

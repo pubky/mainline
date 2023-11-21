@@ -47,7 +47,7 @@ impl AsyncDht {
         info_hash: Id,
         port: Option<u16>,
     ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetPeerResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
 
         let _ = self
             .0
@@ -84,7 +84,7 @@ impl AsyncDht {
 
     /// Async version of [get_immutable](Dht::get_immutable).
     pub async fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
 
         let _ = self
             .0
@@ -98,7 +98,7 @@ impl AsyncDht {
     pub async fn put_immutable(&self, value: Vec<u8>) -> Result<StoreQueryMetdata> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetImmutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
 
         let _ = self
             .0
@@ -145,7 +145,7 @@ impl AsyncDht {
     pub async fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
         let target = item.target();
 
-        let (sender, receiver) = flume::bounded::<ResponseMessage<GetMutableResponse>>(1);
+        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
         let _ = self.0.sender.send(ActorMessage::GetMutable(
             *item.target(),
