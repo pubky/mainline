@@ -1,6 +1,10 @@
+//! Dht node with async api.
+
+use ed25519_dalek::VerifyingKey;
+
 use crate::common::{
-    hash_immutable, GetImmutableResponse, GetPeerResponse, Id, Node, Response, ResponseDone,
-    ResponseMessage, StoreQueryMetdata,
+    hash_immutable, target_from_key, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id,
+    MutableItem, Node, Response, ResponseDone, ResponseMessage, StoreQueryMetdata,
 };
 use crate::dht::ActorMessage;
 use crate::routing_table::RoutingTable;
@@ -29,6 +33,12 @@ impl AsyncDht {
         let _ = self.0.sender.send(ActorMessage::RoutingTable(sender));
 
         receiver.recv_async().await.map_err(|e| e.into())
+    }
+
+    // === Peers ===
+
+    pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
+        self.0.get_peers(info_hash)
     }
 
     /// Async version of [announce_peer](Dht::announce_peer).
@@ -69,6 +79,8 @@ impl AsyncDht {
 
         receiver.recv_async().await.map_err(|e| e.into())
     }
+
+    // === Immutable ===
 
     /// Async version of [get_immutable](Dht::get_immutable).
     pub async fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
@@ -118,8 +130,51 @@ impl AsyncDht {
         receiver.recv_async().await.map_err(|e| e.into())
     }
 
-    pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
-        self.0.get_peers(info_hash)
+    // === Mutable data ===
+
+    /// Async version of [get_mutable](Dht::get_mutable)
+    pub async fn get_mutable(
+        &self,
+        public_key: VerifyingKey,
+        salt: Option<Vec<u8>>,
+    ) -> Response<GetMutableResponse> {
+        self.0.get_mutable(public_key, salt)
+    }
+
+    /// Async version of [get_mutable](Dht::put_mutable)
+    pub async fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
+        let target = item.target();
+
+        let (sender, receiver) = flume::bounded::<ResponseMessage<GetMutableResponse>>(1);
+
+        let _ = self.0.sender.send(ActorMessage::GetMutable(
+            *item.target(),
+            item.salt().clone(),
+            sender,
+        ));
+
+        let mut response = Response::new(receiver);
+
+        // Block until we got a Done response!
+        for _ in &mut response {}
+
+        self.0.put_mutable_to(item, response.closest_nodes)
+    }
+
+    /// Async version of [get_mutable](Dht::put_mutable_to)
+    pub async fn put_mutable_to(
+        &self,
+        item: MutableItem,
+        nodes: Vec<Node>,
+    ) -> Result<StoreQueryMetdata> {
+        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+
+        let _ = self
+            .0
+            .sender
+            .send(ActorMessage::PutMutable(item, nodes, sender));
+
+        receiver.recv_async().await.map_err(|e| e.into())
     }
 }
 

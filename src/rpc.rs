@@ -111,7 +111,7 @@ impl Rpc {
 
     pub fn tick(&mut self) {
         // === Bootstrapping ===
-        // self.populate();
+        self.populate();
 
         if let Some((message, from)) = self.socket.recv_from() {
             // Add a node to our routing table on any incoming request or response.
