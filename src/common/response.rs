@@ -6,42 +6,17 @@ use super::{Id, MutableItem, Node};
 
 #[derive(Debug)]
 pub struct Response<T> {
-    receiver: Receiver<ResponseMessage<T>>,
+    pub(crate) receiver: Receiver<ResponseMessage<T>>,
     pub closest_nodes: Vec<Node>,
     pub visited: usize,
 }
 
 impl<T> Response<T> {
-    pub fn new(receiver: Receiver<ResponseMessage<T>>) -> Self {
+    pub(crate) fn new(receiver: Receiver<ResponseMessage<T>>) -> Self {
         Self {
             receiver,
             visited: 0,
             closest_nodes: Vec::new(),
-        }
-    }
-}
-
-impl<T> Response<T> {
-    /// Next item, async.
-    ///
-    /// We do not implement futures::stream::Stream to avoid the dependency,
-    /// and to avoid having to deal with lifetime and pinning issues.
-    #[cfg(feature = "async")]
-    pub async fn next_async(&mut self) -> Option<T> {
-        match self.receiver.recv_async().await {
-            Ok(item) => match item {
-                ResponseMessage::ResponseValue(value) => Some(value),
-                ResponseMessage::ResponseDone(ResponseDone {
-                    visited,
-                    closest_nodes,
-                }) => {
-                    self.visited = visited;
-                    self.closest_nodes = closest_nodes;
-
-                    None
-                }
-            },
-            _ => None,
         }
     }
 }
