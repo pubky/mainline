@@ -34,7 +34,6 @@ impl Query {
             target,
             request,
             candidates,
-            // TODO: cache closest in the RPC?
             with_token,
             inflight_requests: Vec::new(),
             visited: HashSet::new(),
@@ -85,7 +84,6 @@ impl Query {
     /// Visit explicitly given addresses, and add them to the visited set.
     pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddr) {
         if self.visited.contains(&address) || address.is_ipv6() {
-            // TODO: Add support for IPV6.
             return;
         }
 

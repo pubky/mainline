@@ -100,12 +100,12 @@ impl RoutingTable {
     }
 
     /// Returns all nodes in the routing_table.
-    pub fn to_vec(&self) -> Vec<&Node> {
-        let mut nodes: Vec<&Node> = vec![];
+    pub fn to_vec(&self) -> Vec<Node> {
+        let mut nodes: Vec<Node> = vec![];
 
         for bucket in self.buckets.values() {
             for node in &bucket.nodes {
-                nodes.push(node);
+                nodes.push(node.clone());
             }
         }
 
@@ -152,10 +152,10 @@ impl KBucket {
 
     pub fn add(&mut self, incoming: Node) -> bool {
         if let Some(index) = self.iter().position(|n| n.id == incoming.id) {
-            // If it is the same socket address too, update last_seen, and move to the end of the
-            // bucket
+            // If it is the same socket address too, remove the old node,
+            // and add the incoming one, effectively updating the node's
+            // `last_seen` and moving it to the end of the bucket.
             if self.nodes[index].same_adress(&incoming) {
-                // Same node, update last_seen
                 self.nodes.remove(index);
                 self.nodes.push(incoming);
 

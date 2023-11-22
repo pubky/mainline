@@ -10,6 +10,7 @@ use crate::common::Id;
 /// The age of a node's last_seen time before it is considered stale and removed from a full bucket
 /// on inserting a new node.
 pub const STALE_TIME: Duration = Duration::from_secs(15 * 60);
+const MIN_PING_BACKOFF_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, PartialEq)]
 /// Node entry in Kademlia routing table
@@ -70,6 +71,10 @@ impl Node {
     /// Node is last seen more than a threshold ago.
     pub fn is_stale(&self) -> bool {
         self.last_seen.elapsed() > STALE_TIME
+    }
+
+    pub(crate) fn _should_ping(&self) -> bool {
+        self.last_seen.elapsed() > MIN_PING_BACKOFF_INTERVAL
     }
 
     /// Returns true if both nodes have the same id and address

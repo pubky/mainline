@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
@@ -12,8 +12,8 @@ use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
     GetImmutableResponseArguments, GetMutableRequestArguments, GetMutableResponseArguments,
     GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
-    MessageType, NoValuesResponseArguments, PingResponseArguments, PutImmutableRequestArguments,
-    PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
+    MessageType, NoValuesResponseArguments, PingRequestArguments, PingResponseArguments,
+    PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
 use crate::peers::PeersStore;
@@ -30,6 +30,9 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "dht.anacrolix.link:42069",
 ];
 
+const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
 #[derive(Debug)]
 pub struct Rpc {
     socket: KrpcSocket,
@@ -38,6 +41,11 @@ pub struct Rpc {
     store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
     peers: PeersStore,
+
+    /// Last time we refreshed the routing table with a find_node query.
+    last_table_refresh: Instant,
+    /// Last time we pinged nodes in the routing table.
+    last_table_ping: Instant,
 
     // Options
     id: Id,
@@ -57,13 +65,15 @@ impl Rpc {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
-
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
             peers: PeersStore::new(),
+
+            last_table_refresh: Instant::now(),
+            last_table_ping: Instant::now(),
         })
     }
 
@@ -111,8 +121,19 @@ impl Rpc {
     // === Public Methods ===
 
     pub fn tick(&mut self) {
-        // === Bootstrapping ===
-        self.populate();
+        // === Remove done queries ===
+        self.queries.retain(|_, query| !query.is_done());
+        self.store_queries.retain(|_, query| !query.is_done());
+
+        // === Tick queries ===
+        for (_, query) in self.queries.iter_mut() {
+            query.tick(&mut self.socket);
+        }
+        for (_, query) in self.store_queries.iter_mut() {
+            query.tick(&mut self.socket);
+        }
+
+        self.maintain_routing_table();
 
         if let Some((message, from)) = self.socket.recv_from() {
             // Add a node to our routing table on any incoming request or response.
@@ -130,18 +151,6 @@ impl Rpc {
                 }
             }
         };
-
-        // === Tick queries ===
-        for (_, query) in self.queries.iter_mut() {
-            query.tick(&mut self.socket);
-        }
-        for (_, query) in self.store_queries.iter_mut() {
-            query.tick(&mut self.socket);
-        }
-
-        // === Remove done queries ===
-        self.queries.retain(|_, query| !query.is_done());
-        self.store_queries.retain(|_, query| !query.is_done());
     }
 
     /// Start or restart a get_peers query.
@@ -310,24 +319,6 @@ impl Rpc {
         }
 
         self.queries.insert(target, query);
-    }
-
-    /// Ping bootstrap nodes, add them to the routing table with closest query.
-    fn populate(&mut self) {
-        if !self.routing_table.is_empty() {
-            // No need for populating. Already called our bootstrap nodes?
-            return;
-        }
-
-        // Start or restart the query.
-        self.query(
-            self.id,
-            RequestSpecific::FindNode(FindNodeRequestArguments {
-                target: self.id,
-                requester_id: self.id,
-            }),
-            None,
-        );
     }
 
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
@@ -525,5 +516,48 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
+    }
+
+    fn maintain_routing_table(&mut self) {
+        if self.routing_table.is_empty()
+            || self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL
+        {
+            self.last_table_refresh = Instant::now();
+            self.populate();
+        }
+
+        if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
+            self.last_table_ping = Instant::now();
+
+            for node in self.routing_table.to_vec() {
+                if node.is_stale() {
+                    self.routing_table.remove(&node.id);
+                } else if node._should_ping() {
+                    self.ping(node.address);
+                }
+            }
+        }
+    }
+
+    /// Ping bootstrap nodes, add them to the routing table with closest query.
+    fn populate(&mut self) {
+        // Start or restart the query.
+        self.query(
+            self.id,
+            RequestSpecific::FindNode(FindNodeRequestArguments {
+                target: self.id,
+                requester_id: self.id,
+            }),
+            None,
+        );
+    }
+
+    fn ping(&mut self, address: SocketAddr) {
+        self.socket.request(
+            address,
+            RequestSpecific::Ping(PingRequestArguments {
+                requester_id: self.id,
+            }),
+        );
     }
 }

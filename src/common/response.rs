@@ -80,7 +80,6 @@ pub struct GetImmutableResponse {
 #[derive(Clone, Debug)]
 pub struct GetMutableResponse {
     pub from: Node,
-    // TODO: detail this
     pub item: MutableItem,
 }
 
