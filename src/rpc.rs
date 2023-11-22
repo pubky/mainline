@@ -250,7 +250,7 @@ impl Rpc {
                         target: *item.target(),
                         token,
                         v: item.value().clone(),
-                        k: item.key().to_bytes().to_vec(),
+                        k: item.key().to_vec(),
                         seq: *item.seq(),
                         sig: item.signature().to_vec(),
                     }),

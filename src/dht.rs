@@ -304,7 +304,7 @@ impl Dht {
         public_key: VerifyingKey,
         salt: Option<Vec<u8>>,
     ) -> Response<GetMutableResponse> {
-        let target = target_from_key(&public_key, &salt);
+        let target = target_from_key(&public_key.to_bytes(), &salt);
 
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
