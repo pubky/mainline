@@ -1,5 +1,6 @@
 //! Helper functions and structs for mutable items.
 
+use bytes::Bytes;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha1_smol::Sha1;
 use std::convert::TryFrom;
@@ -15,16 +16,16 @@ pub struct MutableItem {
     /// sequence number
     seq: i64,
     /// mutable value
-    value: Vec<u8>,
+    value: Bytes,
     /// ed25519 signature
     signature: [u8; 64],
     /// Optional salt
-    salt: Option<Vec<u8>>,
+    salt: Option<Bytes>,
 }
 
 impl MutableItem {
     /// Create a new mutable item from a signing key, value, sequence number and optional salt.
-    pub fn new(signer: SigningKey, value: Vec<u8>, seq: i64, salt: Option<Vec<u8>>) -> Self {
+    pub fn new(signer: SigningKey, value: Bytes, seq: i64, salt: Option<Bytes>) -> Self {
         let signable = encode_signable(&seq, &value, &salt);
         let signature = signer.sign(&signable);
 
@@ -41,9 +42,9 @@ impl MutableItem {
     pub fn new_signed_unchecked(
         key: [u8; 32],
         signature: [u8; 64],
-        value: Vec<u8>,
+        value: Bytes,
         seq: i64,
-        salt: Option<Vec<u8>>,
+        salt: Option<Bytes>,
     ) -> Self {
         Self {
             target: target_from_key(&key, &salt),
@@ -57,28 +58,27 @@ impl MutableItem {
 
     pub(crate) fn from_dht_message(
         target: &Id,
-        key: &Vec<u8>,
-        v: &[u8],
+        key: &[u8],
+        v: Bytes,
         seq: &i64,
         signature: &[u8],
-        salt: &Option<Vec<u8>>,
+        salt: &Option<Bytes>,
     ) -> Result<Self> {
-        let key =
-            VerifyingKey::try_from(key.as_slice()).map_err(|_| Error::InvalidMutablePublicKey)?;
+        let key = VerifyingKey::try_from(key).map_err(|_| Error::InvalidMutablePublicKey)?;
 
         let signature =
             Signature::from_slice(signature).map_err(|_| Error::InvalidMutableSignature)?;
 
-        key.verify(&encode_signable(seq, v, salt), &signature)
+        key.verify(&encode_signable(seq, &v, salt), &signature)
             .map_err(|_| Error::InvalidMutableSignature)?;
 
         Ok(Self {
             target: *target,
             key: key.to_bytes(),
-            value: v.to_owned(),
+            value: v,
             seq: *seq,
             signature: signature.to_bytes(),
-            salt: salt.clone(),
+            salt: salt.to_owned(),
         })
     }
 
@@ -92,7 +92,7 @@ impl MutableItem {
         &self.key
     }
 
-    pub fn value(&self) -> &Vec<u8> {
+    pub fn value(&self) -> &Bytes {
         &self.value
     }
 
@@ -104,12 +104,12 @@ impl MutableItem {
         &self.signature
     }
 
-    pub fn salt(&self) -> &Option<Vec<u8>> {
+    pub fn salt(&self) -> &Option<Bytes> {
         &self.salt
     }
 }
 
-pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Vec<u8>>) -> Id {
+pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Bytes>) -> Id {
     let mut encoded = vec![];
 
     encoded.extend(public_key);
@@ -125,7 +125,7 @@ pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Vec<u8>>) -> Id {
     Id::from_bytes(hash).unwrap()
 }
 
-pub fn encode_signable(seq: &i64, value: &[u8], salt: &Option<Vec<u8>>) -> Vec<u8> {
+pub fn encode_signable(seq: &i64, value: &Bytes, salt: &Option<Bytes>) -> Bytes {
     let mut signable = vec![];
 
     if let Some(salt) = salt {
@@ -136,7 +136,7 @@ pub fn encode_signable(seq: &i64, value: &[u8], salt: &Option<Vec<u8>>) -> Vec<u
     signable.extend(format!("3:seqi{}e1:v{}:", seq, value.len()).into_bytes());
     signable.extend(value);
 
-    signable
+    signable.into()
 }
 
 #[cfg(test)]
@@ -145,14 +145,18 @@ mod tests {
 
     #[test]
     fn signable_without_salt() {
-        let signable = encode_signable(&4, &b"Hello world!".to_vec(), &None);
+        let signable = encode_signable(&4, &Bytes::from_static(b"Hello world!"), &None);
 
-        assert_eq!(signable, b"3:seqi4e1:v12:Hello world!");
+        assert_eq!(&*signable, b"3:seqi4e1:v12:Hello world!");
     }
     #[test]
     fn signable_with_salt() {
-        let signable = encode_signable(&4, &b"Hello world!".to_vec(), &Some(b"foobar".to_vec()));
+        let signable = encode_signable(
+            &4,
+            &Bytes::from_static(b"Hello world!"),
+            &Some(Bytes::from_static(b"foobar")),
+        );
 
-        assert_eq!(signable, b"4:salt6:foobar3:seqi4e1:v12:Hello world!");
+        assert_eq!(&*signable, b"4:salt6:foobar3:seqi4e1:v12:Hello world!");
     }
 }

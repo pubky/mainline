@@ -35,7 +35,7 @@ fn main() {
                 // No need to stream responses, just print the first result, since
                 // all immutable data items are guaranteed to be the same.
 
-                match String::from_utf8(res.value.clone()) {
+                match String::from_utf8(res.value.to_vec()) {
                     Ok(string) => {
                         println!("Got immutable data: {:?} | from: {:?}", string, res.from);
                     }

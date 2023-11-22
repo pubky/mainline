@@ -1,5 +1,6 @@
 //! Dht node with async api.
 
+use bytes::Bytes;
 use ed25519_dalek::VerifyingKey;
 
 use crate::common::{
@@ -91,7 +92,7 @@ impl AsyncDht {
     }
 
     /// Async version of [put_immutable](Dht::put_immutable).
-    pub async fn put_immutable(&self, value: Vec<u8>) -> Result<StoreQueryMetdata> {
+    pub async fn put_immutable(&self, value: Bytes) -> Result<StoreQueryMetdata> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
@@ -113,7 +114,7 @@ impl AsyncDht {
     pub async fn put_immutable_to(
         &self,
         target: Id,
-        value: Vec<u8>,
+        value: Bytes,
         nodes: Vec<Node>,
     ) -> Result<StoreQueryMetdata> {
         let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
@@ -132,7 +133,7 @@ impl AsyncDht {
     pub async fn get_mutable(
         &self,
         public_key: VerifyingKey,
-        salt: Option<Vec<u8>>,
+        salt: Option<Bytes>,
     ) -> Response<GetMutableResponse> {
         self.0.get_mutable(public_key, salt)
     }

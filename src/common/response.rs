@@ -1,4 +1,5 @@
 //! A struct to iterate on incoming responses for a query.
+use bytes::Bytes;
 use flume::{Receiver, Sender};
 use std::net::SocketAddr;
 
@@ -73,7 +74,7 @@ pub struct GetPeerResponse {
 #[derive(Clone, Debug)]
 pub struct GetImmutableResponse {
     pub from: Node,
-    pub value: Vec<u8>,
+    pub value: Bytes,
 }
 
 #[derive(Clone, Debug)]

@@ -5,6 +5,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use bytes::Bytes;
 use ed25519_dalek::VerifyingKey;
 use flume::{Receiver, Sender};
 
@@ -265,7 +266,7 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Vec<u8>) -> Result<StoreQueryMetdata> {
+    pub fn put_immutable(&self, value: Bytes) -> Result<StoreQueryMetdata> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
@@ -284,7 +285,7 @@ impl Dht {
     pub fn put_immutable_to(
         &self,
         target: Id,
-        value: Vec<u8>,
+        value: Bytes,
         nodes: Vec<Node>,
     ) -> Result<StoreQueryMetdata> {
         let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
@@ -302,7 +303,7 @@ impl Dht {
     pub fn get_mutable(
         &self,
         public_key: VerifyingKey,
-        salt: Option<Vec<u8>>,
+        salt: Option<Bytes>,
     ) -> Response<GetMutableResponse> {
         let target = target_from_key(&public_key.to_bytes(), &salt);
 
@@ -418,11 +419,11 @@ pub(crate) enum ActorMessage {
     AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
 
     GetImmutable(Id, Sender<ResponseMessage<GetImmutableResponse>>),
-    PutImmutable(Id, Vec<u8>, Vec<Node>, Sender<StoreQueryMetdata>),
+    PutImmutable(Id, Bytes, Vec<Node>, Sender<StoreQueryMetdata>),
 
     GetMutable(
         Id,
-        Option<Vec<u8>>,
+        Option<Bytes>,
         Sender<ResponseMessage<GetMutableResponse>>,
     ),
     PutMutable(MutableItem, Vec<Node>, Sender<StoreQueryMetdata>),

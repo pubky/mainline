@@ -42,7 +42,7 @@ fn main() {
 
         count += 1;
 
-        match String::from_utf8(res.item.value().clone()) {
+        match String::from_utf8(res.item.value().to_vec()) {
             Ok(string) => {
                 println!(
                     "Got mutable item: {:?}, seq: {:?} | from: {:?}",

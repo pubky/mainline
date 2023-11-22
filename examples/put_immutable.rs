@@ -21,7 +21,7 @@ fn main() {
     println!("\nStoring immutable data: {} ...\n", cli.value);
 
     let metadata = dht
-        .put_immutable(cli.value.as_bytes().to_vec())
+        .put_immutable(cli.value.into())
         .expect("put immutable failed");
     println!(
         "Stored immutable data as {:?} in {:?} seconds",

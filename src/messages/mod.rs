@@ -7,6 +7,8 @@ mod internal;
 use std::convert::TryInto;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+use bytes::Bytes;
+
 use crate::common::{Id, Node, ID_SIZE};
 use crate::{Error, Result};
 
@@ -150,7 +152,7 @@ pub struct GetMutableRequestArguments {
     // A bit of a hack, using this to carry an optional
     // salt in the query.request field of [crate::query]
     // not really encoded, decoded or sent over the wire.
-    pub salt: Option<Vec<u8>>,
+    pub salt: Option<Bytes>,
 }
 
 #[derive(Debug, PartialEq, Clone)]

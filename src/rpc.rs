@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
+use bytes::Bytes;
+
 use crate::common::{
     validate_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
     Node, ResponseSender, ResponseValue,
@@ -202,7 +204,7 @@ impl Rpc {
     pub fn put_immutable(
         &mut self,
         target: Id,
-        value: Vec<u8>,
+        value: Bytes,
         nodes: Vec<Node>,
         sender: ResponseSender,
     ) {
@@ -216,7 +218,7 @@ impl Rpc {
                         requester_id: self.id,
                         target,
                         token,
-                        v: value.clone(),
+                        v: value.clone().into(),
                     }),
                     &mut self.socket,
                 );
@@ -226,7 +228,7 @@ impl Rpc {
         self.store_queries.insert(target, query);
     }
 
-    pub fn get_mutable(&mut self, target: Id, salt: Option<Vec<u8>>, sender: ResponseSender) {
+    pub fn get_mutable(&mut self, target: Id, salt: Option<Bytes>, sender: ResponseSender) {
         self.query(
             target,
             RequestSpecific::GetMutable(GetMutableRequestArguments {
@@ -249,7 +251,7 @@ impl Rpc {
                         requester_id: self.id,
                         target: *item.target(),
                         token,
-                        v: item.value().clone(),
+                        v: item.value().clone().into(),
                         k: item.key().to_vec(),
                         seq: *item.seq(),
                         sig: item.signature().to_vec(),
@@ -472,7 +474,7 @@ impl Rpc {
 
                     query.response(ResponseValue::Immutable(GetImmutableResponse {
                         from: Node::new(*responder_id, from),
-                        value: v.clone(),
+                        value: v.to_owned().into(),
                     }));
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
@@ -492,9 +494,14 @@ impl Rpc {
                         _ => &None,
                     };
 
-                    if let Ok(item) =
-                        MutableItem::from_dht_message(query.target(), k, v, seq, sig, salt)
-                    {
+                    if let Ok(item) = MutableItem::from_dht_message(
+                        query.target(),
+                        k,
+                        v.to_owned().into(),
+                        seq,
+                        sig,
+                        salt,
+                    ) {
                         query.response(ResponseValue::Mutable(GetMutableResponse {
                             from: Node::new(*responder_id, from),
                             item,
