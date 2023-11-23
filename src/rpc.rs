@@ -121,17 +121,21 @@ impl Rpc {
     // === Public Methods ===
 
     pub fn tick(&mut self) {
-        // === Remove done queries ===
-        self.queries.retain(|_, query| !query.is_done());
-        self.store_queries.retain(|_, query| !query.is_done());
-
-        // === Tick queries ===
+        // === Tick Queries ===
         for (_, query) in self.queries.iter_mut() {
             query.tick(&mut self.socket);
         }
         for (_, query) in self.store_queries.iter_mut() {
             query.tick(&mut self.socket);
         }
+
+        // === Remove done queries ===
+        // Has to happen _after_ ticking queries otherwise we might
+        // disconnect response receivers too soon.
+        //
+        // Has to happen _before_ await to recv_from the socket.
+        self.queries.retain(|_, query| !query.is_done());
+        self.store_queries.retain(|_, query| !query.is_done());
 
         self.maintain_routing_table();
 
