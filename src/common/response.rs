@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 
 use super::{Id, MutableItem, Node};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Response<T> {
     pub(crate) receiver: Receiver<ResponseMessage<T>>,
     pub closest_nodes: Vec<Node>,
@@ -44,7 +44,7 @@ impl<T> Iterator for &mut Response<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ResponseSender {
     GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
     GetImmutable(Sender<ResponseMessage<GetImmutableResponse>>),
@@ -53,6 +53,7 @@ pub enum ResponseSender {
     StoreItem(Sender<StoreQueryMetdata>),
 }
 
+#[derive(Clone, Debug)]
 pub enum ResponseMessage<T> {
     ResponseValue(T),
     ResponseDone(ResponseDone),
