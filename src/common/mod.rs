@@ -1,3 +1,5 @@
+//! Miscellaneous common structs used throughout the library.
+
 mod id;
 mod immutable;
 mod mutable;

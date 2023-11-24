@@ -1,7 +1,6 @@
 //! Dht node with async api.
 
 use bytes::Bytes;
-use ed25519_dalek::VerifyingKey;
 
 use crate::common::{
     hash_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
@@ -132,7 +131,7 @@ impl AsyncDht {
     /// Async version of [get_mutable](Dht::get_mutable)
     pub async fn get_mutable(
         &self,
-        public_key: VerifyingKey,
+        public_key: &[u8; 32],
         salt: Option<Bytes>,
     ) -> Response<GetMutableResponse> {
         self.0.get_mutable(public_key, salt)

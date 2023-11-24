@@ -6,7 +6,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use ed25519_dalek::VerifyingKey;
 use flume::{Receiver, Sender};
 
 use crate::{
@@ -302,10 +301,10 @@ impl Dht {
     /// Get a mutable data by its public_key and optional salt.
     pub fn get_mutable(
         &self,
-        public_key: VerifyingKey,
+        public_key: &[u8; 32],
         salt: Option<Bytes>,
     ) -> Response<GetMutableResponse> {
-        let target = target_from_key(&public_key.to_bytes(), &salt);
+        let target = target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 

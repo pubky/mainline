@@ -27,7 +27,7 @@ fn main() {
 
     let mut count = 0;
 
-    let mut response = &mut dht.get_mutable(public_key, None);
+    let mut response = &mut dht.get_mutable(public_key.as_bytes(), None);
 
     for res in &mut response {
         if !first {
