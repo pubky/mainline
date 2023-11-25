@@ -536,7 +536,7 @@ impl Rpc {
             for node in self.routing_table.to_vec() {
                 if node.is_stale() {
                     self.routing_table.remove(&node.id);
-                } else if node._should_ping() {
+                } else if node.should_ping() {
                     self.ping(node.address);
                 }
             }

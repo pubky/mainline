@@ -16,7 +16,7 @@ Check the [Examples](./examples).
 
 Supported BEPs:
 - [x] [BEP0005 DHT Protocol](https://www.bittorrent.org/beps/bep_0005.html)
-- [ ] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
+- [X] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
 - [x] [BEP0043 Read-only DHT Nodes](https://www.bittorrent.org/beps/bep_0043.html)
 - [x] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
 
@@ -27,3 +27,8 @@ Supported BEPs:
 - [ ] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
 - [x] [BEP0043 Read-only DHT Nodes](https://www.bittorrent.org/beps/bep_0043.html)
 - [ ] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
+
+
+## Acknowledgment
+
+This implementation was possible thanks to [Webtorrent's Bittorrent-dht](https://github.com/webtorrent/bittorrent-dht) as a reference, and [Rustydht-lib](https://github.com/raptorswing/rustydht-lib) that saved me a lot of time, especially at the serialization and deserialization of Bencode messages.
