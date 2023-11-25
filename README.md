@@ -6,6 +6,8 @@ This library is focused on being the best and simplest Rust client for Mainline,
 
 It should work as a routing / storing node as well, but if you want to run a reliable node to support the network, you might be better off running [libtorrent](https://libtorrent.org/) for now.
 
+**[API Docs](https://docs.rs/mainline/latest/mainline/)**
+
 ## Get started
 
 Check the [Examples](./examples).
