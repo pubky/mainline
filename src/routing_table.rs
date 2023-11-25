@@ -57,8 +57,12 @@ impl RoutingTable {
         }
     }
 
+    /// Return the closest nodes to the target while prioritizing secure nodes,
+    /// as defined in [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
     pub fn closest(&self, target: &Id) -> Vec<Node> {
         let mut result = Vec::with_capacity(MAX_BUCKET_SIZE_K);
+        let mut unsecure = Vec::with_capacity(MAX_BUCKET_SIZE_K);
+
         let distance = self.id.distance(target);
 
         for i in
@@ -71,13 +75,27 @@ impl RoutingTable {
                 Some(bucket) => {
                     for node in bucket.iter() {
                         if result.len() < 20 {
-                            result.push(node.clone());
+                            if node.is_secure() {
+                                result.push(node.clone());
+                            } else {
+                                unsecure.push(node.clone())
+                            }
                         } else {
                             return result;
                         }
                     }
                 }
                 None => continue,
+            }
+        }
+
+        if result.len() < 20 {
+            for node in unsecure {
+                if result.len() < 20 {
+                    result.push(node);
+                } else {
+                    break;
+                }
             }
         }
 

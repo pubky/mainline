@@ -73,12 +73,17 @@ impl Node {
         self.last_seen.elapsed() > STALE_TIME
     }
 
-    pub(crate) fn _should_ping(&self) -> bool {
+    pub(crate) fn should_ping(&self) -> bool {
         self.last_seen.elapsed() > MIN_PING_BACKOFF_INTERVAL
     }
 
     /// Returns true if both nodes have the same id and address
     pub fn same_adress(&self, other: &Self) -> bool {
         self.address == other.address
+    }
+
+    /// Check [BEP0042](https://www.bittorrent.org/beps/bep_0042.html).
+    pub(crate) fn is_secure(&self) -> bool {
+        self.id.is_valid_for_ip(&self.address.ip())
     }
 }
