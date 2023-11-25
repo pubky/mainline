@@ -485,29 +485,6 @@ mod test {
 
         {
             let expected_closest_ids: Vec<_> = [
-                // From Nodejs implementation.
-                // "81d394b44403315f9845c3da6f018b8daedd89ef",
-                // "81f038cabb8a845f39da0d40716bf0707da55187",
-                // "833843b1f33e720c17bccfb75647a49040861b4c",
-                // "840d201e3c213c01b4ab85983efaac44f0671552",
-                // "84325dd6fbd9a93f4ab61d091a9562a6c6111df4",
-                // "897457b33c4eb1ffcab08331877108cbf3fac6de",
-                // "8c2754fa9e93cbf1cccfd9241ebe0cc141199cfe",
-                // "8d53d453d7cfbb9bc386e128fa68aca388a5ddc6",
-                // "9230a2f8ac81e73f16c63dd60adb030328fbc983",
-                // "93b0cb01befc90b65a0026acf85bea2fefec7d44",
-                // "9481589ddec9a6d9ad2cee7f73e8319aab3f1e95",
-                // "94d2037bbc534a5f1d672ce3e3350576c2b78ed1",
-                // "98805a55523458c56d59339266bdcecc82370ecd",
-                // "9e4923966754c02b036698e95f95cec8fc40a9d2",
-                // "a7b4becc2304da63792eb6c33f95677b2e7c9f8c",
-                // "a94df01f21d870a006748b6ab3c04d31428c959d",
-                // "aa7ffc7999a1b1bb79ce19b61c37f70331f492d6",
-                // "aeb03edad3edc7c54a3c5f7916ecba981e65ce91",
-                // "b0bce9873042aee29cbc7ec395647f6cc7a482f8",
-                // "b61fbd992a13af05feba939f597b5f6ee61188e3",
-
-                // Simplified implementation
                 "81d394b44403315f9845c3da6f018b8daedd89ef",
                 "81f038cabb8a845f39da0d40716bf0707da55187",
                 "833843b1f33e720c17bccfb75647a49040861b4c",
@@ -544,29 +521,6 @@ mod test {
 
         {
             let expected_closest_ids: Vec<_> = [
-                // From Nodejs implementation.
-                // "03161976385301ac9b965202e8f3922cef840790",
-                // "079d40b746b5721f59972ebde423429739844914",
-                // "094f1d2fb4b95ba2c3250b014a9f06d13cd9eb9a",
-                // "0a1d6cce47c60f2c7357e9fec2910192de6eb336",
-                // "0d01c32b4cf386b0b784b718b999d0e9dac07876",
-                // "0e43d66e9da1bfc7e2581155dfd1b8f4be57d3f1",
-                // "15827c92e6efbc4f56e507e548409c4bc04360bf",
-                // "36eb09b1db4af2b11312742faa2bb42621fce753",
-                // "396aabc66c603617f376409053d1e2cec3813101",
-                // "3a75532b5916c772c1b7a18627bf170cf915aeb3",
-                // "3b6e1c05f199edd7dee87d3cc8422c8f0ed02358",
-                // "3c8ff1e484c21132f8e6b8112a2feab984536f57",
-                // "42e8b38494b0ee11003592da11b5cbe43332190e",
-                // "54ddde105d3f2c6ea7a5e7641ff24522eea2e784",
-                // "58c65677e3833cb0f15733a6363cc4cb1352f90a",
-                // "647679a0d8816d2f62200e7b6ef6171297756dd5",
-                // "6cdc012328cc7a3a9a5b967e93387686e19c9f75",
-                // "701e7b5af5fabcf0bc3de97cb05a7c00da3e53c6",
-                // "74667cb7c629fb7e63749134b16e27446984c517",
-                // "7d598e5726fb58501d8cc65faf6b676bab7cb4bc",
-
-                // Simplified implementation
                 "c03d9008add37f8414cb41549448bb2dcb5c6c9b",
                 "c9a8163fa3e85065d46567bfac39b5452cfb3ae8",
                 "cdc7f4d5825dc316de20d998bc0f1c5e91e36a5e",
