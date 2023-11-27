@@ -187,6 +187,7 @@ pub struct PutMutableRequestArguments {
     pub k: Vec<u8>,
     pub seq: i64,
     pub sig: Vec<u8>,
+    pub salt: Option<Vec<u8>>,
 }
 
 impl Message {
@@ -254,6 +255,7 @@ impl Message {
                                 k: None,
                                 seq: None,
                                 sig: None,
+                                salt: None,
                             },
                         }
                     }
@@ -275,6 +277,7 @@ impl Message {
                                 k: Some(put_mutable_arguments.k),
                                 seq: Some(put_mutable_arguments.seq),
                                 sig: Some(put_mutable_arguments.sig),
+                                salt: put_mutable_arguments.salt,
                             },
                         }
                     }
@@ -427,6 +430,7 @@ impl Message {
                                     // Should panic if missing.
                                     seq: arguments.seq.unwrap(),
                                     sig: arguments.sig.unwrap(),
+                                    salt: arguments.salt,
                                 })
                             } else {
                                 RequestSpecific::PutImmutable(PutImmutableRequestArguments {

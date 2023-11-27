@@ -268,6 +268,7 @@ impl Rpc {
                         k: item.key().to_vec(),
                         seq: *item.seq(),
                         sig: item.signature().to_vec(),
+                        salt: item.salt().clone().map(|s| s.to_vec()),
                     }),
                     &mut self.socket,
                 );
