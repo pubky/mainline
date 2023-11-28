@@ -10,7 +10,7 @@ It should work as a routing / storing node as well, but if you want to run a rel
 
 ## Get started
 
-Check the [Examples](./examples).
+Check the [Examples](https://github.com/Nuhvi/mainline/tree/main/examples).
 
 ## Features
 
