@@ -35,3 +35,9 @@ cargo run --example put_mutable <64 bytes hex secret_key> <string>
 ```sh
 cargo run --example get_mutable <40 bytes hex target from put_mutable>
 `````
+
+## Async Get Mutable
+
+```sh
+cargo run --example async_get_mutable <40 bytes hex target from put_mutable>
+`````

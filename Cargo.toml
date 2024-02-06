@@ -29,3 +29,8 @@ futures = "0.3.29"
 [features]
 async = ["flume/async"]
 default = ["async"]
+
+[[example]]
+name = "async_get_immutable"
+path = "examples/async/get_immutable.rs"
+required-features = ["async"]
