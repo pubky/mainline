@@ -1,5 +1,7 @@
 use ed25519_dalek::VerifyingKey;
 use std::convert::TryFrom;
+use tracing::Level;
+use tracing_subscriber;
 
 use std::time::Instant;
 
@@ -15,6 +17,10 @@ struct Cli {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
+
     let cli = Cli::parse();
 
     let public_key = from_hex(cli.public_key.clone());

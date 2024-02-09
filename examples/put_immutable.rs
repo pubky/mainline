@@ -4,6 +4,9 @@ use mainline::Dht;
 
 use clap::Parser;
 
+use tracing::Level;
+use tracing_subscriber;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -12,6 +15,10 @@ struct Cli {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
+
     let cli = Cli::parse();
 
     let dht = Dht::default();

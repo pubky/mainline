@@ -3,6 +3,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use tracing::debug;
 
 use crate::common::{
     validate_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
@@ -150,8 +151,8 @@ impl Rpc {
                 MessageType::Response(_) => {
                     self.handle_response(from, &message);
                 }
-                MessageType::Error(_err) => {
-                    // TODO: Handle error messages!
+                MessageType::Error(error) => {
+                    debug!(?message, "RPC Error response");
                 }
             }
         };
@@ -464,7 +465,8 @@ impl Rpc {
                     },
                 )) => {
                     if !validate_immutable(v, query.target()) {
-                        // TODO: log error
+                        let target = query.target();
+                        debug!(?v, ?target, "Invalid immutable value");
                         return;
                     }
 
@@ -489,6 +491,7 @@ impl Rpc {
                         }) => salt,
                         _ => &None,
                     };
+                    let target = query.target();
 
                     if let Ok(item) = MutableItem::from_dht_message(
                         query.target(),
@@ -503,7 +506,7 @@ impl Rpc {
                             item,
                         }));
                     } else {
-                        // TODO: log error
+                        debug!(?v, ?seq, ?sig, ?salt, ?target, "Invalid mutable record");
                     }
                 }
                 // Ping response is already handled in add_node()

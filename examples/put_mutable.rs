@@ -8,6 +8,9 @@ use mainline::{common::MutableItem, Dht};
 
 use clap::Parser;
 
+use tracing::Level;
+use tracing_subscriber;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -18,6 +21,10 @@ struct Cli {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
+
     let cli = Cli::parse();
 
     let dht = Dht::default();
@@ -42,7 +49,7 @@ fn main() {
     let metadata = dht.put_mutable(item).expect("put mutable failed");
 
     println!(
-        "Stored immutable data as {:?} in {:?} seconds",
+        "Stored mutable data as {:?} in {:?} seconds",
         metadata.target(),
         start.elapsed().as_secs_f32()
     );
