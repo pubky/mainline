@@ -3,7 +3,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::common::{
     validate_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
@@ -73,7 +73,7 @@ impl Rpc {
             tokens: Tokens::new(),
             peers: PeersStore::new(),
 
-            last_table_refresh: Instant::now(),
+            last_table_refresh: Instant::now() - REFRESH_TABLE_INTERVAL,
             last_table_ping: Instant::now(),
         })
     }
@@ -135,7 +135,22 @@ impl Rpc {
         // disconnect response receivers too soon.
         //
         // Has to happen _before_ await to recv_from the socket.
-        self.queries.retain(|_, query| !query.is_done());
+        let self_id = self.id;
+        let table_size = self.routing_table.size();
+
+        self.queries.retain(|id, query| {
+            let done = query.is_done();
+
+            if done && id == &self_id {
+                if table_size == 0 {
+                    error!("Could not bootstrap the routing table");
+                } else {
+                    debug!(table_size, "Populated the routing table");
+                }
+            }
+
+            !done
+        });
         self.store_queries.retain(|_, query| !query.is_done());
 
         self.maintain_routing_table();
@@ -528,7 +543,7 @@ impl Rpc {
 
     fn maintain_routing_table(&mut self) {
         if self.routing_table.is_empty()
-            || self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL
+            && self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL
         {
             self.last_table_refresh = Instant::now();
             self.populate();

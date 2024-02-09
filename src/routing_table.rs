@@ -106,6 +106,12 @@ impl RoutingTable {
         self.buckets.values().all(|bucket| bucket.is_empty())
     }
 
+    pub fn size(&self) -> usize {
+        self.buckets
+            .values()
+            .fold(0, |acc, bucket| acc + bucket.nodes.len())
+    }
+
     pub fn contains(&self, node_id: &Id) -> bool {
         let distance = self.id.distance(node_id);
 
