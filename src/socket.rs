@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
+use tracing::{debug, trace};
 
 use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
@@ -129,7 +130,9 @@ impl KrpcSocket {
             .retain(|_, request| request.sent_at.elapsed() < request_timeout);
 
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
-            match Message::from_bytes(&buf[..amt]) {
+            let bytes = &buf[..amt];
+
+            match Message::from_bytes(bytes) {
                 Ok(message) => {
                     // Parsed correctly.
                     match message.message_type {
@@ -150,16 +153,16 @@ impl KrpcSocket {
                                     self.inflight_requests.remove(&message.transaction_id);
                                     return Some((message, from));
                                 } else {
-                                    // TODO: handle/log response from wrong address.
+                                    debug!("Response from the wrong address");
                                 }
                             } else {
-                                // TODO: handle/log unexpected transaction id.
+                                debug!("Unexpected response id");
                             };
                         }
                     }
                 }
-                Err(_err) => {
-                    // TODO: handle/log parsing errors.
+                Err(error) => {
+                    debug!(?error, ?bytes, "Received invalid message");
                 }
             };
         };
@@ -211,6 +214,7 @@ impl KrpcSocket {
 
     /// Send a raw dht message
     fn send(&mut self, address: SocketAddr, message: Message) -> Result<()> {
+        trace!(?message, "Sending a message");
         self.socket.send_to(&message.to_bytes()?, address)?;
         Ok(())
     }
