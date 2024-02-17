@@ -7,6 +7,7 @@ mod socket;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -14,11 +15,12 @@ use tracing::{debug, error};
 
 use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
-    AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
-    GetImmutableResponseArguments, GetMutableRequestArguments, GetMutableResponseArguments,
-    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
-    MessageType, NoValuesResponseArguments, PingRequestArguments, PingResponseArguments,
-    PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
+    AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
+    FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableRequestArguments,
+    GetMutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
+    GetValueRequestArguments, Message, MessageType, NoValuesResponseArguments,
+    PingRequestArguments, PingResponseArguments, PutImmutableRequestArguments,
+    PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
 pub use response::{
@@ -40,6 +42,10 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+// Stored data in server mode.
+const MAX_INFO_HASHES: usize = 2000;
+const MAX_PEERS: usize = 500;
 
 #[derive(Debug)]
 pub struct Rpc {
@@ -78,7 +84,10 @@ impl Rpc {
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
-            peers: PeersStore::new(),
+            peers: PeersStore::new(
+                NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
+                NonZeroUsize::new(MAX_PEERS).unwrap(),
+            ),
 
             last_table_refresh: Instant::now() - REFRESH_TABLE_INTERVAL,
             last_table_ping: Instant::now(),
@@ -351,7 +360,6 @@ impl Rpc {
 
     fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
         match request {
-            // TODO: Handle bad requests (send an error message).
             RequestSpecific::Ping(_) => {
                 self.socket.response(
                     from,
@@ -395,6 +403,7 @@ impl Rpc {
                 port,
                 implied_port,
                 token,
+                requester_id,
                 ..
             }) => {
                 if self.tokens.validate(from, token) {
@@ -403,7 +412,7 @@ impl Rpc {
                         _ => SocketAddr::new(from.ip(), *port),
                     };
 
-                    self.peers.add_peer(*info_hash, peer);
+                    self.peers.add_peer(*info_hash, (requester_id, peer));
 
                     self.socket.response(
                         from,
@@ -413,18 +422,75 @@ impl Rpc {
                         }),
                     );
                 } else {
-                    // TODO: Send an error message.
+                    self.socket.error(
+                        from,
+                        transaction_id,
+                        ErrorSpecific {
+                            code: 203,
+                            description: "Bad token".to_string(),
+                        },
+                    );
+                    debug!(?from, ?token, "Invalid token");
                 }
             }
             RequestSpecific::PutImmutable(PutImmutableRequestArguments { v, target, .. }) => {
-                if v.len() > 1000 || !validate_immutable(v, target) {
-                    // TODO: return and log error.
+                if v.len() > 1000 {
+                    self.socket.error(
+                        from,
+                        transaction_id,
+                        ErrorSpecific {
+                            code: 205,
+                            description: "Message (v field) too big.".to_string(),
+                        },
+                    );
+                    // return;
                 }
+                if !validate_immutable(v, target) {
+                    self.socket.error(
+                        from,
+                        transaction_id,
+                        ErrorSpecific {
+                            code: 203,
+                            description: "Target doesn't match the sha1 hash of v field"
+                                .to_string(),
+                        },
+                    );
+                    // return;
+                }
+
                 // TODO: store immutable items.
             }
+            RequestSpecific::PutMutable(PutMutableRequestArguments {
+                requester_id,
+                target,
+                token,
+                v,
+                k,
+                seq,
+                sig,
+                salt,
+            }) => {
+                if v.len() > 1000 {
+                    self.socket.error(
+                        from,
+                        transaction_id,
+                        ErrorSpecific {
+                            code: 205,
+                            description: "Message (v field) too big.".to_string(),
+                        },
+                    );
+                    // return;
+                }
+            }
             _ => {
-                // TODO: How to deal with unknown requests?
-                // Maybe just return CloserNodesAndToken to the sender?
+                self.socket.error(
+                    from,
+                    transaction_id,
+                    ErrorSpecific {
+                        code: 204,
+                        description: "Method Unknown".to_string(),
+                    },
+                );
             }
         }
     }

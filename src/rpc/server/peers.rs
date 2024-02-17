@@ -1,73 +1,75 @@
 //! Manage announced peers for info_hashes
 
-use std::{collections::HashMap, net::SocketAddr};
+use std::{net::SocketAddr, num::NonZeroUsize};
 
-use rand::{rngs::ThreadRng, seq::SliceRandom, thread_rng};
+use rand::{rngs::ThreadRng, thread_rng, Rng};
 
-use crate::{common::MAX_BUCKET_SIZE_K, Id};
+use crate::common::Id;
 
-const MAX_PEERS: usize = 10000;
-const MAX_PEERS_PER_INFO_HASH: usize = 100;
+use lru::LruCache;
 
 #[derive(Debug)]
 pub struct PeersStore {
     rng: ThreadRng,
-    lru: Vec<(Id, SocketAddr)>,
-    peers: HashMap<Id, Vec<SocketAddr>>,
+    info_hashes: LruCache<Id, LruCache<Id, SocketAddr>>,
+    max_peers: NonZeroUsize,
 }
 
 impl PeersStore {
-    pub fn new() -> Self {
+    pub fn new(max_info_hashes: NonZeroUsize, max_peers: NonZeroUsize) -> Self {
         Self {
             rng: thread_rng(),
-            lru: Vec::new(),
-            peers: HashMap::new(),
+            info_hashes: LruCache::new(max_info_hashes),
+            max_peers,
         }
     }
 
-    pub fn add_peer(&mut self, info_hash: Id, peer: SocketAddr) {
-        let incoming = (info_hash, peer);
-
-        // If the item is already in the LRU, bring it to the end.
-        // This is where we ensure unique (info_hash, peer) tuple in the store.
-        if let Some(index) = self.lru.iter().position(|i| i == &incoming) {
-            // Bring the item to the end of the LRU
-            self.lru.remove(index);
-            self.lru.push(incoming);
-            return;
-        }
-
-        // If the LRU is full, remove the oldest item.
-        if self.lru.len() >= MAX_PEERS {
-            let (info_hash, _) = self.lru.remove(0);
-            let peers = self.peers.get_mut(&info_hash).unwrap();
-            peers.remove(0);
-        }
-
-        let info_hash_peers = self.peers.entry(info_hash).or_default();
-
-        // If the info_hash is full of peers, remove the oldest one.
-        if info_hash_peers.len() >= MAX_PEERS_PER_INFO_HASH {
-            let peer = info_hash_peers.remove(0);
-
-            self.lru.retain(|i| i != &(info_hash, peer))
-        }
-
-        // Add the new item to the info_hash_peers
-        info_hash_peers.push(peer);
-        self.lru.push(incoming);
+    pub fn add_peer(&mut self, info_hash: Id, peer: (&Id, SocketAddr)) {
+        if let Some(info_hash_lru) = self.info_hashes.get_mut(&info_hash) {
+            info_hash_lru.put(*peer.0, peer.1);
+        } else {
+            let mut info_hash_lru = LruCache::new(self.max_peers);
+            info_hash_lru.put(*peer.0, peer.1);
+            self.info_hashes.put(info_hash, info_hash_lru);
+        };
     }
 
     pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddr>> {
-        if let Some(peers) = self.peers.get(info_hash) {
-            let peers = peers.clone();
+        if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
+            let size = info_hash_lru.len();
+            let target_size = 20;
 
-            let random_20: Vec<SocketAddr> = peers
-                .choose_multiple(&mut self.rng, MAX_BUCKET_SIZE_K)
-                .cloned()
-                .collect();
+            if size == 0 {
+                return None;
+            } else if size < target_size {
+                return Some(
+                    info_hash_lru
+                        .iter()
+                        .map(|n| n.1.to_owned())
+                        .collect::<Vec<_>>(),
+                );
+            }
 
-            return Some(random_20);
+            let mut results = Vec::with_capacity(20);
+
+            let mut current_chance = 1.0; // Start with a 100% chance
+
+            for (index, (id, addr)) in info_hash_lru.iter().enumerate() {
+                // Calculate the chance of adding the current item based on remaining items and slots
+                let remaining_slots = target_size - results.len();
+                let remaining_items = info_hash_lru.len() - index;
+                current_chance = remaining_slots as f64 / remaining_items as f64;
+
+                // Randomly decide to add the item based on the current chance
+                if self.rng.gen_bool(current_chance) {
+                    results.push(addr.to_owned());
+                    if results.len() == target_size {
+                        break;
+                    }
+                }
+            }
+
+            return Some(results);
         }
 
         None
@@ -79,35 +81,82 @@ mod test {
     use super::*;
 
     #[test]
-    fn lru() {
-        let mut store = PeersStore::new();
+    fn max_info_hashes() {
+        let mut store = PeersStore::new(
+            NonZeroUsize::new(1).unwrap(),
+            NonZeroUsize::new(100).unwrap(),
+        );
 
         let info_hash_a = Id::random();
         let info_hash_b = Id::random();
 
-        store.add_peer(info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0)));
-        store.add_peer(info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0)));
-        store.add_peer(info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0)));
+        store.add_peer(
+            info_hash_a,
+            (&info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0))),
+        );
+        store.add_peer(
+            info_hash_b,
+            (&info_hash_b, SocketAddr::from(([127, 0, 1, 1], 0))),
+        );
 
-        store.add_peer(info_hash_b, SocketAddr::from(([127, 0, 2, 1], 0)));
+        assert_eq!(store.info_hashes.len(), 1);
+        assert_eq!(
+            store.get_random_peers(&info_hash_b),
+            Some(vec![SocketAddr::from(([127, 0, 1, 1], 0))])
+        );
+    }
 
-        store.add_peer(info_hash_a, SocketAddr::from(([127, 0, 1, 2], 0)));
-        store.add_peer(info_hash_b, SocketAddr::from(([127, 0, 2, 2], 0)));
-        store.add_peer(info_hash_a, SocketAddr::from(([127, 0, 1, 2], 0)));
+    #[test]
+    fn all_peers() {
+        let mut store =
+            PeersStore::new(NonZeroUsize::new(1).unwrap(), NonZeroUsize::new(2).unwrap());
 
-        let mut order: Vec<(Id, SocketAddr)> = Vec::new();
+        let info_hash_a = Id::random();
+        let info_hash_b = Id::random();
+        let info_hash_c = Id::random();
 
-        for item in &store.lru {
-            order.push(*item);
+        store.add_peer(
+            info_hash_a,
+            (&info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0))),
+        );
+        store.add_peer(
+            info_hash_a,
+            (&info_hash_b, SocketAddr::from(([127, 0, 1, 2], 0))),
+        );
+        store.add_peer(
+            info_hash_a,
+            (&info_hash_c, SocketAddr::from(([127, 0, 1, 3], 0))),
+        );
+
+        assert_eq!(
+            store.get_random_peers(&info_hash_a),
+            Some(vec![
+                SocketAddr::from(([127, 0, 1, 3], 0)),
+                SocketAddr::from(([127, 0, 1, 2], 0)),
+            ])
+        );
+    }
+
+    #[test]
+    fn random_peers_subset() {
+        let mut store = PeersStore::new(
+            NonZeroUsize::new(1).unwrap(),
+            NonZeroUsize::new(200).unwrap(),
+        );
+
+        let info_hash = Id::random();
+
+        for i in (0..200) {
+            store.add_peer(
+                info_hash,
+                (&Id::random(), SocketAddr::from(([127, 0, 1, i], 0))),
+            )
         }
 
-        let expected = vec![
-            (info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0))),
-            (info_hash_b, SocketAddr::from(([127, 0, 2, 1], 0))),
-            (info_hash_b, SocketAddr::from(([127, 0, 2, 2], 0))),
-            (info_hash_a, SocketAddr::from(([127, 0, 1, 2], 0))),
-        ];
+        assert_eq!(store.info_hashes.get(&info_hash).unwrap().len(), 200);
 
-        assert_eq!(order, expected);
+        let sample = store.get_random_peers(&info_hash).unwrap();
+
+        assert_eq!(sample.len(), 20);
     }
 }
