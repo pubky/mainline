@@ -3,12 +3,13 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
-use crate::common::{
-    Id, Node, ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
+use super::response::{
+    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
+    ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
 };
+use super::socket::KrpcSocket;
+use crate::common::{Id, Node, RoutingTable};
 use crate::messages::RequestSpecific;
-use crate::routing_table::RoutingTable;
-use crate::socket::KrpcSocket;
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and

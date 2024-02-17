@@ -11,12 +11,7 @@ pub mod common;
 pub mod dht;
 pub mod error;
 mod messages;
-mod peers;
-mod query;
-mod routing_table;
 mod rpc;
-mod socket;
-mod tokens;
 
 pub use crate::common::Id;
 pub use crate::error::Error;

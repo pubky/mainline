@@ -9,12 +9,11 @@ use bytes::Bytes;
 use flume::{Receiver, Sender};
 
 use crate::{
-    common::{
-        hash_immutable, target_from_key, GetImmutableResponse, GetMutableResponse, GetPeerResponse,
-        Id, MutableItem, Node, Response, ResponseMessage, ResponseSender, StoreQueryMetdata,
+    common::{hash_immutable, target_from_key, Id, MutableItem, Node, RoutingTable},
+    rpc::{
+        GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseMessage,
+        ResponseSender, Rpc, StoreQueryMetdata,
     },
-    routing_table::RoutingTable,
-    rpc::Rpc,
     Result,
 };
 

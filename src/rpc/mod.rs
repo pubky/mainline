@@ -1,3 +1,10 @@
+//! K-RPC implementation
+
+mod query;
+pub mod response;
+mod server;
+mod socket;
+
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
@@ -5,10 +12,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use tracing::{debug, error};
 
-use crate::common::{
-    validate_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
-    Node, ResponseSender, ResponseValue,
-};
+use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
     AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
     GetImmutableResponseArguments, GetMutableRequestArguments, GetMutableResponseArguments,
@@ -17,12 +21,15 @@ use crate::messages::{
     PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
-use crate::peers::PeersStore;
-use crate::query::{Query, StoreQuery};
-use crate::routing_table::RoutingTable;
-use crate::socket::KrpcSocket;
-use crate::tokens::Tokens;
+pub use response::{
+    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
+    ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
+};
+
 use crate::Result;
+use query::{Query, StoreQuery};
+use server::{PeersStore, Tokens};
+use socket::KrpcSocket;
 
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -55,7 +62,7 @@ pub struct Rpc {
 
 impl Rpc {
     pub fn new() -> Result<Self> {
-        // TODO: One day I might implement BEP42.
+        // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
         let socket = KrpcSocket::new()?;

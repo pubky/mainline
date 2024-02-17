@@ -2,12 +2,12 @@
 
 use bytes::Bytes;
 
-use crate::common::{
-    hash_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
-    Node, Response, ResponseDone, ResponseMessage, StoreQueryMetdata,
-};
+use crate::common::{hash_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::dht::ActorMessage;
-use crate::routing_table::RoutingTable;
+use crate::rpc::{
+    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
+    ResponseMessage, ResponseSender, Rpc, StoreQueryMetdata,
+};
 use crate::{Dht, Result};
 use std::net::SocketAddr;
 

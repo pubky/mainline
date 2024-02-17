@@ -4,7 +4,7 @@ use std::{collections::HashMap, net::SocketAddr};
 
 use rand::{rngs::ThreadRng, seq::SliceRandom, thread_rng};
 
-use crate::{routing_table::MAX_BUCKET_SIZE_K, Id};
+use crate::{common::MAX_BUCKET_SIZE_K, Id};
 
 const MAX_PEERS: usize = 10000;
 const MAX_PEERS_PER_INFO_HASH: usize = 100;
