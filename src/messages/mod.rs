@@ -51,10 +51,9 @@ pub enum RequestSpecific {
     FindNode(FindNodeRequestArguments),
     GetPeers(GetPeersRequestArguments),
     AnnouncePeer(AnnouncePeerRequestArguments),
-    GetImmutable(GetImmutableRequestArguments),
     PutImmutable(PutImmutableRequestArguments),
-    GetMutable(GetMutableRequestArguments),
     PutMutable(PutMutableRequestArguments),
+    GetValue(GetValueRequestArguments),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -94,9 +93,14 @@ pub struct FindNodeResponseArguments {
 // Get anything
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct GetImmutableRequestArguments {
+pub struct GetValueRequestArguments {
     pub requester_id: Id,
     pub target: Id,
+    pub seq: Option<i64>,
+    // A bit of a hack, using this to carry an optional
+    // salt in the query.request field of [crate::query]
+    // not really encoded, decoded or sent over the wire.
+    pub salt: Option<Bytes>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -146,16 +150,6 @@ pub struct GetImmutableResponseArguments {
 // === Get Mutable ===
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct GetMutableRequestArguments {
-    pub requester_id: Id,
-    pub target: Id,
-    // A bit of a hack, using this to carry an optional
-    // salt in the query.request field of [crate::query]
-    // not really encoded, decoded or sent over the wire.
-    pub salt: Option<Bytes>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
@@ -188,6 +182,7 @@ pub struct PutMutableRequestArguments {
     pub seq: i64,
     pub sig: Vec<u8>,
     pub salt: Option<Vec<u8>>,
+    pub cas: Option<i64>,
 }
 
 impl Message {
@@ -237,14 +232,6 @@ impl Message {
                             },
                         }
                     }
-                    RequestSpecific::GetImmutable(get_value_arguments) => {
-                        internal::DHTRequestSpecific::GetValue {
-                            arguments: internal::DHTGetValueRequestArguments {
-                                id: get_value_arguments.requester_id.to_vec(),
-                                target: get_value_arguments.target.to_vec(),
-                            },
-                        }
-                    }
                     RequestSpecific::PutImmutable(put_immutable_arguments) => {
                         internal::DHTRequestSpecific::PutValue {
                             arguments: internal::DHTPutValueRequestArguments {
@@ -256,14 +243,16 @@ impl Message {
                                 seq: None,
                                 sig: None,
                                 salt: None,
+                                cas: None,
                             },
                         }
                     }
-                    RequestSpecific::GetMutable(get_mutable_args) => {
+                    RequestSpecific::GetValue(get_mutable_args) => {
                         internal::DHTRequestSpecific::GetValue {
                             arguments: internal::DHTGetValueRequestArguments {
                                 id: get_mutable_args.requester_id.to_vec(),
                                 target: get_mutable_args.target.to_vec(),
+                                seq: get_mutable_args.seq,
                             },
                         }
                     }
@@ -278,6 +267,7 @@ impl Message {
                                 seq: Some(put_mutable_arguments.seq),
                                 sig: Some(put_mutable_arguments.sig),
                                 salt: put_mutable_arguments.salt,
+                                cas: put_mutable_arguments.cas,
                             },
                         }
                     }
@@ -414,9 +404,11 @@ impl Message {
                             })
                         }
                         internal::DHTRequestSpecific::GetValue { arguments } => {
-                            RequestSpecific::GetImmutable(GetImmutableRequestArguments {
+                            RequestSpecific::GetValue(GetValueRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
                                 target: Id::from_bytes(arguments.target)?,
+                                seq: arguments.seq,
+                                salt: None,
                             })
                         }
                         internal::DHTRequestSpecific::PutValue { arguments } => {
@@ -431,6 +423,7 @@ impl Message {
                                     seq: arguments.seq.unwrap(),
                                     sig: arguments.sig.unwrap(),
                                     salt: arguments.salt,
+                                    cas: arguments.cas,
                                 })
                             } else {
                                 RequestSpecific::PutImmutable(PutImmutableRequestArguments {
@@ -563,10 +556,9 @@ impl Message {
                 RequestSpecific::FindNode(arguments) => arguments.requester_id,
                 RequestSpecific::GetPeers(arguments) => arguments.requester_id,
                 RequestSpecific::AnnouncePeer(arguments) => arguments.requester_id,
-                RequestSpecific::GetImmutable(arguments) => arguments.requester_id,
                 RequestSpecific::PutImmutable(arguments) => arguments.requester_id,
-                RequestSpecific::GetMutable(arguments) => arguments.requester_id,
                 RequestSpecific::PutMutable(arguments) => arguments.requester_id,
+                RequestSpecific::GetValue(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(arguments) => arguments.responder_id,
@@ -966,10 +958,12 @@ mod tests {
             version: Some(vec![72, 73]),
             requester_ip: None,
             read_only: false,
-            message_type: MessageType::Request(RequestSpecific::GetImmutable(
-                GetImmutableRequestArguments {
+            message_type: MessageType::Request(RequestSpecific::GetValue(
+                GetValueRequestArguments {
                     requester_id: Id::random(),
                     target: Id::random(),
+                    seq: Some(1231),
+                    salt: None,
                 },
             )),
         };
@@ -1046,6 +1040,7 @@ mod tests {
                     seq: 100,
                     sig: vec![0, 1, 2, 3],
                     salt: Some(vec![0, 2, 4, 8]),
+                    cas: Some(100),
                 },
             )),
         };

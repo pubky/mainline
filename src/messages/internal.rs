@@ -238,6 +238,9 @@ pub struct DHTGetValueRequestArguments {
 
     #[serde(with = "serde_bytes")]
     pub target: Vec<u8>,
+
+    #[serde(default)]
+    pub seq: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -306,6 +309,9 @@ pub struct DHTPutValueRequestArguments {
 
     #[serde(default)]
     pub seq: Option<i64>,
+
+    #[serde(default)]
+    pub cas: Option<i64>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]

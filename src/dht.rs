@@ -459,7 +459,10 @@ impl Testnet {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::time::Duration;
+
+    use ed25519_dalek::SigningKey;
 
     use super::*;
 
@@ -475,6 +478,18 @@ mod test {
         });
 
         dht.block_until_shutdown();
+    }
+
+    #[test]
+    fn bind_twice() {
+        let a = Dht::default();
+        let b = Dht::builder()
+            .port(a.local_addr().unwrap().port())
+            .as_server()
+            .build();
+
+        let result = b.handle.unwrap().join();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -510,13 +525,19 @@ mod test {
         let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
         let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
 
-        match a.put_immutable("foo".into()) {
+        let value: Bytes = "Hello World!".into();
+        let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
+
+        match a.put_immutable(value.clone()) {
             Ok(result) => {
+                assert_ne!(result.stored_at().len(), 0);
+                assert_eq!(result.target(), expected_target);
+
                 let responses: Vec<_> = b.get_immutable(result.target()).collect();
 
                 match responses.first() {
                     Some(r) => {
-                        assert_eq!(r.value, Bytes::from("foo"));
+                        assert_eq!(r.value, value);
                     }
                     None => {
                         panic!("No respnoses")
@@ -530,14 +551,42 @@ mod test {
     }
 
     #[test]
-    fn bind_twice() {
-        let a = Dht::default();
-        let b = Dht::builder()
-            .port(a.local_addr().unwrap().port())
-            .as_server()
-            .build();
+    fn put_get_mutable() {
+        let testnet = Testnet::new(10);
 
-        let result = b.handle.unwrap().join();
-        assert!(result.is_err());
+        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+        let value: Bytes = "Hello World!".into();
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        match a.put_mutable(item.clone()) {
+            Ok(result) => {
+                assert_ne!(result.stored_at().len(), 0);
+
+                let responses: Vec<_> = b
+                    .get_mutable(signer.verifying_key().as_bytes(), None)
+                    .collect();
+
+                match responses.first() {
+                    Some(r) => {
+                        assert_eq!(&r.item, &item);
+                    }
+                    None => {
+                        panic!("No respnoses")
+                    }
+                }
+            }
+            Err(_) => {
+                panic!("Expected put_immutable to succeeed")
+            }
+        };
     }
 }

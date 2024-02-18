@@ -17,11 +17,10 @@ use tracing::{debug, error};
 use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
     AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
-    FindNodeResponseArguments, GetImmutableRequestArguments, GetImmutableResponseArguments,
-    GetMutableRequestArguments, GetMutableResponseArguments, GetPeersRequestArguments,
-    GetPeersResponseArguments, Message, MessageType, NoValuesResponseArguments,
-    PingRequestArguments, PingResponseArguments, PutImmutableRequestArguments,
-    PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
+    FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
+    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
+    MessageType, NoValuesResponseArguments, PingRequestArguments, PingResponseArguments,
+    PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
 pub use response::{
@@ -31,7 +30,7 @@ pub use response::{
 
 use crate::Result;
 use query::{Query, StoreQuery};
-use server::{PeersStore, Tokens};
+use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
 
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
@@ -188,13 +187,12 @@ impl Rpc {
 
             match &message.message_type {
                 MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
+                    handle_request(self, from, message.transaction_id, request_specific)
                 }
                 MessageType::Response(_) => {
                     self.handle_response(from, &message);
                 }
                 MessageType::Error(error) => {
-                    dbg!(&error);
                     debug!(?message, "RPC Error response");
                 }
             }
@@ -250,9 +248,11 @@ impl Rpc {
     pub fn get_immutable(&mut self, target: Id, sender: ResponseSender) {
         self.query(
             target,
-            RequestSpecific::GetImmutable(GetImmutableRequestArguments {
+            RequestSpecific::GetValue(GetValueRequestArguments {
                 requester_id: self.id,
                 target,
+                seq: None,
+                salt: None,
             }),
             Some(sender),
         )
@@ -288,9 +288,10 @@ impl Rpc {
     pub fn get_mutable(&mut self, target: Id, salt: Option<Bytes>, sender: ResponseSender) {
         self.query(
             target,
-            RequestSpecific::GetMutable(GetMutableRequestArguments {
+            RequestSpecific::GetValue(GetValueRequestArguments {
                 requester_id: self.id,
                 target,
+                seq: None,
                 salt,
             }),
             Some(sender),
@@ -313,6 +314,7 @@ impl Rpc {
                         seq: *item.seq(),
                         sig: item.signature().to_vec(),
                         salt: item.salt().clone().map(|s| s.to_vec()),
+                        cas: *item.cas(),
                     }),
                     &mut self.socket,
                 );
@@ -368,163 +370,6 @@ impl Rpc {
         }
 
         self.queries.insert(target, query);
-    }
-
-    fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
-        match request {
-            RequestSpecific::Ping(_) => {
-                self.socket.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::Ping(PingResponseArguments {
-                        responder_id: self.id,
-                    }),
-                );
-            }
-            RequestSpecific::FindNode(FindNodeRequestArguments { target, .. }) => {
-                self.socket.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::FindNode(FindNodeResponseArguments {
-                        responder_id: self.id,
-                        nodes: self.routing_table.closest(target),
-                    }),
-                );
-            }
-            RequestSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
-                self.socket.response(
-                    from,
-                    transaction_id,
-                    match self.peers.get_random_peers(info_hash) {
-                        Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                            responder_id: self.id,
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(self.routing_table.closest(info_hash)),
-                            values: peers,
-                        }),
-                        None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                            responder_id: self.id,
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(self.routing_table.closest(info_hash)),
-                        }),
-                    },
-                );
-            }
-            RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
-                info_hash,
-                port,
-                implied_port,
-                token,
-                requester_id,
-                ..
-            }) => {
-                if self.tokens.validate(from, token) {
-                    let peer = match implied_port {
-                        Some(true) => from,
-                        _ => SocketAddr::new(from.ip(), *port),
-                    };
-
-                    self.peers.add_peer(*info_hash, (requester_id, peer));
-
-                    self.socket.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::Ping(PingResponseArguments {
-                            responder_id: self.id,
-                        }),
-                    );
-                } else {
-                    self.socket.error(
-                        from,
-                        transaction_id,
-                        ErrorSpecific {
-                            code: 203,
-                            description: "Bad token".to_string(),
-                        },
-                    );
-                    debug!(?from, ?token, "Invalid token");
-                }
-            }
-            RequestSpecific::PutImmutable(PutImmutableRequestArguments { v, target, .. }) => {
-                if v.len() > 1000 {
-                    self.socket.error(
-                        from,
-                        transaction_id,
-                        ErrorSpecific {
-                            code: 205,
-                            description: "Message (v field) too big.".to_string(),
-                        },
-                    );
-                    return;
-                }
-                if !validate_immutable(v, target) {
-                    self.socket.error(
-                        from,
-                        transaction_id,
-                        ErrorSpecific {
-                            code: 203,
-                            description: "Target doesn't match the sha1 hash of v field"
-                                .to_string(),
-                        },
-                    );
-                    return;
-                }
-
-                self.immutable_values.put(*target, v.to_owned().into());
-            }
-            RequestSpecific::GetImmutable(GetImmutableRequestArguments {
-                requester_id,
-                target,
-            }) => self.socket.response(
-                from,
-                transaction_id,
-                match self.immutable_values.get(target) {
-                    Some(v) => ResponseSpecific::GetImmutable(GetImmutableResponseArguments {
-                        responder_id: self.id,
-                        token: self.tokens.generate_token(from).into(),
-                        nodes: Some(self.routing_table.closest(target)),
-                        v: v.to_vec(),
-                    }),
-                    None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                        responder_id: self.id,
-                        token: self.tokens.generate_token(from).into(),
-                        nodes: Some(self.routing_table.closest(target)),
-                    }),
-                },
-            ),
-            RequestSpecific::PutMutable(PutMutableRequestArguments {
-                requester_id,
-                target,
-                token,
-                v,
-                k,
-                seq,
-                sig,
-                salt,
-            }) => {
-                if v.len() > 1000 {
-                    self.socket.error(
-                        from,
-                        transaction_id,
-                        ErrorSpecific {
-                            code: 205,
-                            description: "Message (v field) too big.".to_string(),
-                        },
-                    );
-                    // return;
-                }
-            }
-            _ => {
-                self.socket.error(
-                    from,
-                    transaction_id,
-                    ErrorSpecific {
-                        code: 204,
-                        description: "Method Unknown".to_string(),
-                    },
-                );
-            }
-        }
     }
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) {
@@ -607,9 +452,7 @@ impl Rpc {
                     },
                 )) => {
                     let salt = match query.request() {
-                        RequestSpecific::GetMutable(GetMutableRequestArguments {
-                            salt, ..
-                        }) => salt,
+                        RequestSpecific::GetValue(GetValueRequestArguments { salt, .. }) => salt,
                         _ => &None,
                     };
                     let target = query.target();
@@ -621,6 +464,7 @@ impl Rpc {
                         seq,
                         sig,
                         salt,
+                        &None,
                     ) {
                         query.response(ResponseValue::Mutable(GetMutableResponse {
                             from: Node::new(*responder_id, from),
