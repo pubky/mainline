@@ -11,14 +11,15 @@ use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use lru::LruCache;
 use tracing::{debug, error};
 
 use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
     AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
-    FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableRequestArguments,
-    GetMutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
-    GetValueRequestArguments, Message, MessageType, NoValuesResponseArguments,
+    FindNodeResponseArguments, GetImmutableRequestArguments, GetImmutableResponseArguments,
+    GetMutableRequestArguments, GetMutableResponseArguments, GetPeersRequestArguments,
+    GetPeersResponseArguments, Message, MessageType, NoValuesResponseArguments,
     PingRequestArguments, PingResponseArguments, PutImmutableRequestArguments,
     PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
@@ -46,6 +47,10 @@ const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 // Stored data in server mode.
 const MAX_INFO_HASHES: usize = 2000;
 const MAX_PEERS: usize = 500;
+const MAX_VALUES: usize = 1000;
+
+// TODO: RpcBuilder with settings here and the DhtBuilder.
+// TODO: store and read to local stores, at least for immutable and mutable values.
 
 #[derive(Debug)]
 pub struct Rpc {
@@ -54,7 +59,10 @@ pub struct Rpc {
     queries: HashMap<Id, Query>,
     store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
+
     peers: PeersStore,
+    immutable_values: LruCache<Id, Bytes>,
+    mutable_values: LruCache<Id, MutableItem>,
 
     /// Last time we refreshed the routing table with a find_node query.
     last_table_refresh: Instant,
@@ -84,10 +92,13 @@ impl Rpc {
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
+
             peers: PeersStore::new(
                 NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
                 NonZeroUsize::new(MAX_PEERS).unwrap(),
             ),
+            immutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
+            mutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
 
             last_table_refresh: Instant::now() - REFRESH_TABLE_INTERVAL,
             last_table_ping: Instant::now(),
@@ -183,6 +194,7 @@ impl Rpc {
                     self.handle_response(from, &message);
                 }
                 MessageType::Error(error) => {
+                    dbg!(&error);
                     debug!(?message, "RPC Error response");
                 }
             }
@@ -238,7 +250,7 @@ impl Rpc {
     pub fn get_immutable(&mut self, target: Id, sender: ResponseSender) {
         self.query(
             target,
-            RequestSpecific::GetValue(GetValueRequestArguments {
+            RequestSpecific::GetImmutable(GetImmutableRequestArguments {
                 requester_id: self.id,
                 target,
             }),
@@ -443,7 +455,7 @@ impl Rpc {
                             description: "Message (v field) too big.".to_string(),
                         },
                     );
-                    // return;
+                    return;
                 }
                 if !validate_immutable(v, target) {
                     self.socket.error(
@@ -455,11 +467,31 @@ impl Rpc {
                                 .to_string(),
                         },
                     );
-                    // return;
+                    return;
                 }
 
-                // TODO: store immutable items.
+                self.immutable_values.put(*target, v.to_owned().into());
             }
+            RequestSpecific::GetImmutable(GetImmutableRequestArguments {
+                requester_id,
+                target,
+            }) => self.socket.response(
+                from,
+                transaction_id,
+                match self.immutable_values.get(target) {
+                    Some(v) => ResponseSpecific::GetImmutable(GetImmutableResponseArguments {
+                        responder_id: self.id,
+                        token: self.tokens.generate_token(from).into(),
+                        nodes: Some(self.routing_table.closest(target)),
+                        v: v.to_vec(),
+                    }),
+                    None => ResponseSpecific::NoValues(NoValuesResponseArguments {
+                        responder_id: self.id,
+                        token: self.tokens.generate_token(from).into(),
+                        nodes: Some(self.routing_table.closest(target)),
+                    }),
+                },
+            ),
             RequestSpecific::PutMutable(PutMutableRequestArguments {
                 requester_id,
                 target,
@@ -511,6 +543,7 @@ impl Rpc {
                 responder_id,
             })) = message.message_type
             {
+                // Mark storage at that node as a success.
                 query.success(responder_id);
             }
 

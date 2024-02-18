@@ -4,8 +4,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use super::response::{
-    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
-    ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
+    ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
 };
 use super::socket::KrpcSocket;
 use crate::common::{Id, Node, RoutingTable};
@@ -109,7 +108,7 @@ impl Query {
         self.with_token.add(node.clone());
     }
 
-    /// Add reveived response
+    /// Add received response
     pub fn response(&mut self, response: ResponseValue) {
         self.responses.push(response.clone());
 

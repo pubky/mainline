@@ -6,7 +6,7 @@ use crate::common::{hash_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::dht::ActorMessage;
 use crate::rpc::{
     GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
-    ResponseMessage, ResponseSender, Rpc, StoreQueryMetdata,
+    ResponseMessage, StoreQueryMetdata,
 };
 use crate::{Dht, Result};
 use std::net::SocketAddr;
@@ -200,5 +200,44 @@ impl<T> Response<T> {
             },
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::Testnet;
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn announce_get_peer_async() {
+        async fn test() {
+            let testnet = Testnet::new(10);
+
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .as_async();
+            let b = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .as_async();
+
+            let info_hash = Id::random();
+
+            match a.announce_peer(info_hash, Some(45555)).await {
+                Ok(_) => {
+                    if let Some(r) = b.get_peers(info_hash).next_async().await {
+                        assert_eq!(r.peer.port(), 45555);
+                    } else {
+                        panic!("No respnoses")
+                    }
+                }
+                Err(_) => {}
+            };
+        }
+        futures::executor::block_on(test());
     }
 }

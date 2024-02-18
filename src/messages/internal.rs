@@ -78,13 +78,13 @@ pub enum DHTRequestSpecific {
     #[serde(rename = "get")]
     GetValue {
         #[serde(rename = "a")]
-        arguments: DHTGetValueArguments,
+        arguments: DHTGetValueRequestArguments,
     },
 
     #[serde(rename = "put")]
     PutValue {
         #[serde(rename = "a")]
-        arguments: DHTPutValueArguments,
+        arguments: DHTPutValueRequestArguments,
     },
 }
 
@@ -232,7 +232,7 @@ pub struct DHTAnnouncePeerRequestArguments {
 // === Get Value ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct DHTGetValueArguments {
+pub struct DHTGetValueRequestArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
 
@@ -283,7 +283,7 @@ pub struct DHTGetMutableResponseArguments {
 // === Put Value ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct DHTPutValueArguments {
+pub struct DHTPutValueRequestArguments {
     #[serde(with = "serde_bytes")]
     pub id: Vec<u8>,
 
@@ -297,13 +297,17 @@ pub struct DHTPutValueArguments {
     pub v: Vec<u8>,
 
     #[serde(with = "serde_bytes")]
+    #[serde(default)]
     pub k: Option<Vec<u8>>,
 
     #[serde(with = "serde_bytes")]
+    #[serde(default)]
     pub sig: Option<Vec<u8>>,
 
+    #[serde(default)]
     pub seq: Option<i64>,
 
     #[serde(with = "serde_bytes")]
+    #[serde(default)]
     pub salt: Option<Vec<u8>>,
 }

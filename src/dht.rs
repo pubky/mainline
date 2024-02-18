@@ -503,35 +503,30 @@ mod test {
         };
     }
 
-    #[cfg(feature = "async")]
     #[test]
-    fn announce_get_peer_async() {
-        async fn test() {
-            let testnet = Testnet::new(10);
+    fn put_get_immutable() {
+        let testnet = Testnet::new(10);
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .as_async();
-            let b = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .as_async();
+        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
 
-            let info_hash = Id::random();
+        match a.put_immutable("foo".into()) {
+            Ok(result) => {
+                let responses: Vec<_> = b.get_immutable(result.target()).collect();
 
-            match a.announce_peer(info_hash, Some(45555)).await {
-                Ok(_) => {
-                    if let Some(r) = b.get_peers(info_hash).next_async().await {
-                        assert_eq!(r.peer.port(), 45555);
-                    } else {
+                match responses.first() {
+                    Some(r) => {
+                        assert_eq!(r.value, Bytes::from("foo"));
+                    }
+                    None => {
                         panic!("No respnoses")
                     }
                 }
-                Err(_) => {}
-            };
-        }
-        futures::executor::block_on(test());
+            }
+            Err(_) => {
+                panic!("Expected put_immutable to succeeed")
+            }
+        };
     }
 
     #[test]
