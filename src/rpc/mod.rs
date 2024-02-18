@@ -47,9 +47,6 @@ const MAX_INFO_HASHES: usize = 2000;
 const MAX_PEERS: usize = 500;
 const MAX_VALUES: usize = 1000;
 
-// TODO: RpcBuilder with settings here and the DhtBuilder.
-// TODO: store and read to local stores, at least for immutable and mutable values.
-
 #[derive(Debug)]
 pub struct Rpc {
     socket: KrpcSocket,
