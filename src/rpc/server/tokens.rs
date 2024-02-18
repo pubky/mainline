@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use tracing::trace;
+
 const SECRET_SIZE: usize = 20;
 const TOKEN_SIZE: usize = 4;
 const ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
@@ -56,6 +58,8 @@ impl Tokens {
     }
 
     pub fn rotate(&mut self) {
+        trace!("Rotating secrets");
+
         self.prev_secret = self.curr_secret;
         self.curr_secret = self.rng.gen();
 

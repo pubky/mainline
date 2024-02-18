@@ -1,28 +1,36 @@
+//! K-RPC implementation
+
+mod query;
+pub mod response;
+mod server;
+mod socket;
+
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use lru::LruCache;
 use tracing::{debug, error};
 
-use crate::common::{
-    validate_immutable, GetImmutableResponse, GetMutableResponse, GetPeerResponse, Id, MutableItem,
-    Node, ResponseSender, ResponseValue,
-};
+use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
-    AnnouncePeerRequestArguments, FindNodeRequestArguments, FindNodeResponseArguments,
-    GetImmutableResponseArguments, GetMutableRequestArguments, GetMutableResponseArguments,
-    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
-    MessageType, NoValuesResponseArguments, PingRequestArguments, PingResponseArguments,
+    AnnouncePeerRequestArguments, FindNodeRequestArguments, GetImmutableResponseArguments,
+    GetMutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
+    GetValueRequestArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
     PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
-use crate::peers::PeersStore;
-use crate::query::{Query, StoreQuery};
-use crate::routing_table::RoutingTable;
-use crate::socket::KrpcSocket;
-use crate::tokens::Tokens;
+pub use response::{
+    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
+    ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
+};
+
 use crate::Result;
+use query::{Query, StoreQuery};
+use server::{handle_request, PeersStore, Tokens};
+use socket::KrpcSocket;
 
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -34,6 +42,11 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
+// Stored data in server mode.
+const MAX_INFO_HASHES: usize = 2000;
+const MAX_PEERS: usize = 500;
+const MAX_VALUES: usize = 1000;
+
 #[derive(Debug)]
 pub struct Rpc {
     socket: KrpcSocket,
@@ -41,7 +54,10 @@ pub struct Rpc {
     queries: HashMap<Id, Query>,
     store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
+
     peers: PeersStore,
+    immutable_values: LruCache<Id, Bytes>,
+    mutable_values: LruCache<Id, MutableItem>,
 
     /// Last time we refreshed the routing table with a find_node query.
     last_table_refresh: Instant,
@@ -55,7 +71,7 @@ pub struct Rpc {
 
 impl Rpc {
     pub fn new() -> Result<Self> {
-        // TODO: One day I might implement BEP42.
+        // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
         let socket = KrpcSocket::new()?;
@@ -71,7 +87,13 @@ impl Rpc {
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
-            peers: PeersStore::new(),
+
+            peers: PeersStore::new(
+                NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
+                NonZeroUsize::new(MAX_PEERS).unwrap(),
+            ),
+            immutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
+            mutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
 
             last_table_refresh: Instant::now() - REFRESH_TABLE_INTERVAL,
             last_table_ping: Instant::now(),
@@ -122,6 +144,11 @@ impl Rpc {
     // === Public Methods ===
 
     pub fn tick(&mut self) {
+        // === Tokens ===
+        if self.tokens.should_update() {
+            self.tokens.rotate()
+        }
+
         // === Tick Queries ===
         for (_, query) in self.queries.iter_mut() {
             query.tick(&mut self.socket);
@@ -161,13 +188,13 @@ impl Rpc {
 
             match &message.message_type {
                 MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
+                    handle_request(self, from, message.transaction_id, request_specific)
                 }
                 MessageType::Response(_) => {
                     self.handle_response(from, &message);
                 }
                 MessageType::Error(error) => {
-                    debug!(?message, "RPC Error response");
+                    debug!(?error, "RPC Error response");
                 }
             }
         };
@@ -225,6 +252,8 @@ impl Rpc {
             RequestSpecific::GetValue(GetValueRequestArguments {
                 requester_id: self.id,
                 target,
+                seq: None,
+                salt: None,
             }),
             Some(sender),
         )
@@ -260,9 +289,10 @@ impl Rpc {
     pub fn get_mutable(&mut self, target: Id, salt: Option<Bytes>, sender: ResponseSender) {
         self.query(
             target,
-            RequestSpecific::GetMutable(GetMutableRequestArguments {
+            RequestSpecific::GetValue(GetValueRequestArguments {
                 requester_id: self.id,
                 target,
+                seq: None,
                 salt,
             }),
             Some(sender),
@@ -285,6 +315,7 @@ impl Rpc {
                         seq: *item.seq(),
                         sig: item.signature().to_vec(),
                         salt: item.salt().clone().map(|s| s.to_vec()),
+                        cas: *item.cas(),
                     }),
                     &mut self.socket,
                 );
@@ -342,86 +373,6 @@ impl Rpc {
         self.queries.insert(target, query);
     }
 
-    fn handle_request(&mut self, from: SocketAddr, transaction_id: u16, request: &RequestSpecific) {
-        match request {
-            // TODO: Handle bad requests (send an error message).
-            RequestSpecific::Ping(_) => {
-                self.socket.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::Ping(PingResponseArguments {
-                        responder_id: self.id,
-                    }),
-                );
-            }
-            RequestSpecific::FindNode(FindNodeRequestArguments { target, .. }) => {
-                self.socket.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::FindNode(FindNodeResponseArguments {
-                        responder_id: self.id,
-                        nodes: self.routing_table.closest(target),
-                    }),
-                );
-            }
-            RequestSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
-                self.socket.response(
-                    from,
-                    transaction_id,
-                    match self.peers.get_random_peers(info_hash) {
-                        Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                            responder_id: self.id,
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(self.routing_table.closest(info_hash)),
-                            values: peers,
-                        }),
-                        None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                            responder_id: self.id,
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(self.routing_table.closest(info_hash)),
-                        }),
-                    },
-                );
-            }
-            RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
-                info_hash,
-                port,
-                implied_port,
-                token,
-                ..
-            }) => {
-                if self.tokens.validate(from, token) {
-                    let peer = match implied_port {
-                        Some(true) => from,
-                        _ => SocketAddr::new(from.ip(), *port),
-                    };
-
-                    self.peers.add_peer(*info_hash, peer);
-
-                    self.socket.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::Ping(PingResponseArguments {
-                            responder_id: self.id,
-                        }),
-                    );
-                } else {
-                    // TODO: Send an error message.
-                }
-            }
-            RequestSpecific::PutImmutable(PutImmutableRequestArguments { v, target, .. }) => {
-                if v.len() > 1000 || !validate_immutable(v, target) {
-                    // TODO: return and log error.
-                }
-                // TODO: store immutable items.
-            }
-            _ => {
-                // TODO: How to deal with unknown requests?
-                // Maybe just return CloserNodesAndToken to the sender?
-            }
-        }
-    }
-
     fn handle_response(&mut self, from: SocketAddr, message: &Message) {
         if message.read_only {
             return;
@@ -438,6 +389,7 @@ impl Rpc {
                 responder_id,
             })) = message.message_type
             {
+                // Mark storage at that node as a success.
                 query.success(responder_id);
             }
 
@@ -501,9 +453,7 @@ impl Rpc {
                     },
                 )) => {
                     let salt = match query.request() {
-                        RequestSpecific::GetMutable(GetMutableRequestArguments {
-                            salt, ..
-                        }) => salt,
+                        RequestSpecific::GetValue(GetValueRequestArguments { salt, .. }) => salt,
                         _ => &None,
                     };
                     let target = query.target();
@@ -515,6 +465,7 @@ impl Rpc {
                         seq,
                         sig,
                         salt,
+                        &None,
                     ) {
                         query.response(ResponseValue::Mutable(GetMutableResponse {
                             from: Node::new(*responder_id, from),

@@ -21,6 +21,8 @@ pub struct MutableItem {
     signature: [u8; 64],
     /// Optional salt
     salt: Option<Bytes>,
+    /// Optional compare and swap seq
+    cas: Option<i64>,
 }
 
 impl MutableItem {
@@ -38,6 +40,12 @@ impl MutableItem {
         )
     }
 
+    /// Set the cas number if needed.
+    pub fn with_cas(mut self, cas: i64) -> Self {
+        self.cas = Some(cas);
+        self
+    }
+
     /// Create a new mutable item from an already signed value.
     pub fn new_signed_unchecked(
         key: [u8; 32],
@@ -53,6 +61,7 @@ impl MutableItem {
             seq,
             signature,
             salt,
+            cas: None,
         }
     }
 
@@ -63,6 +72,7 @@ impl MutableItem {
         seq: &i64,
         signature: &[u8],
         salt: &Option<Bytes>,
+        cas: &Option<i64>,
     ) -> Result<Self> {
         let key = VerifyingKey::try_from(key).map_err(|_| Error::InvalidMutablePublicKey)?;
 
@@ -79,6 +89,7 @@ impl MutableItem {
             seq: *seq,
             signature: signature.to_bytes(),
             salt: salt.to_owned(),
+            cas: *cas,
         })
     }
 
@@ -106,6 +117,10 @@ impl MutableItem {
 
     pub fn salt(&self) -> &Option<Bytes> {
         &self.salt
+    }
+
+    pub fn cas(&self) -> &Option<i64> {
+        &self.cas
     }
 }
 

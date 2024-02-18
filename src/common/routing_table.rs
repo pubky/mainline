@@ -230,10 +230,7 @@ mod test {
     use std::net::SocketAddr;
     use std::str::FromStr;
 
-    use crate::{
-        common::{Id, Node},
-        routing_table::{KBucket, RoutingTable, MAX_BUCKET_SIZE_K},
-    };
+    use crate::common::{Id, KBucket, Node, RoutingTable, MAX_BUCKET_SIZE_K};
 
     #[test]
     fn table_is_empty() {

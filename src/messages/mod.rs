@@ -51,10 +51,9 @@ pub enum RequestSpecific {
     FindNode(FindNodeRequestArguments),
     GetPeers(GetPeersRequestArguments),
     AnnouncePeer(AnnouncePeerRequestArguments),
-    GetValue(GetValueRequestArguments),
     PutImmutable(PutImmutableRequestArguments),
-    GetMutable(GetMutableRequestArguments),
     PutMutable(PutMutableRequestArguments),
+    GetValue(GetValueRequestArguments),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -97,6 +96,11 @@ pub struct FindNodeResponseArguments {
 pub struct GetValueRequestArguments {
     pub requester_id: Id,
     pub target: Id,
+    pub seq: Option<i64>,
+    // A bit of a hack, using this to carry an optional
+    // salt in the query.request field of [crate::query]
+    // not really encoded, decoded or sent over the wire.
+    pub salt: Option<Bytes>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -146,16 +150,6 @@ pub struct GetImmutableResponseArguments {
 // === Get Mutable ===
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct GetMutableRequestArguments {
-    pub requester_id: Id,
-    pub target: Id,
-    // A bit of a hack, using this to carry an optional
-    // salt in the query.request field of [crate::query]
-    // not really encoded, decoded or sent over the wire.
-    pub salt: Option<Bytes>,
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
@@ -188,6 +182,7 @@ pub struct PutMutableRequestArguments {
     pub seq: i64,
     pub sig: Vec<u8>,
     pub salt: Option<Vec<u8>>,
+    pub cas: Option<i64>,
 }
 
 impl Message {
@@ -237,17 +232,9 @@ impl Message {
                             },
                         }
                     }
-                    RequestSpecific::GetValue(get_value_arguments) => {
-                        internal::DHTRequestSpecific::GetValue {
-                            arguments: internal::DHTGetValueArguments {
-                                id: get_value_arguments.requester_id.to_vec(),
-                                target: get_value_arguments.target.to_vec(),
-                            },
-                        }
-                    }
                     RequestSpecific::PutImmutable(put_immutable_arguments) => {
                         internal::DHTRequestSpecific::PutValue {
-                            arguments: internal::DHTPutValueArguments {
+                            arguments: internal::DHTPutValueRequestArguments {
                                 id: put_immutable_arguments.requester_id.to_vec(),
                                 target: put_immutable_arguments.target.to_vec(),
                                 token: put_immutable_arguments.token,
@@ -256,28 +243,31 @@ impl Message {
                                 seq: None,
                                 sig: None,
                                 salt: None,
+                                cas: None,
                             },
                         }
                     }
-                    RequestSpecific::GetMutable(get_mutable_args) => {
+                    RequestSpecific::GetValue(get_mutable_args) => {
                         internal::DHTRequestSpecific::GetValue {
-                            arguments: internal::DHTGetValueArguments {
+                            arguments: internal::DHTGetValueRequestArguments {
                                 id: get_mutable_args.requester_id.to_vec(),
                                 target: get_mutable_args.target.to_vec(),
+                                seq: get_mutable_args.seq,
                             },
                         }
                     }
                     RequestSpecific::PutMutable(put_mutable_arguments) => {
                         internal::DHTRequestSpecific::PutValue {
-                            arguments: internal::DHTPutValueArguments {
+                            arguments: internal::DHTPutValueRequestArguments {
                                 id: put_mutable_arguments.requester_id.to_vec(),
                                 target: put_mutable_arguments.target.to_vec(),
                                 token: put_mutable_arguments.token,
                                 v: put_mutable_arguments.v,
-                                k: Some(put_mutable_arguments.k),
+                                k: Some(put_mutable_arguments.k.to_vec()),
                                 seq: Some(put_mutable_arguments.seq),
                                 sig: Some(put_mutable_arguments.sig),
                                 salt: put_mutable_arguments.salt,
+                                cas: put_mutable_arguments.cas,
                             },
                         }
                     }
@@ -417,6 +407,8 @@ impl Message {
                             RequestSpecific::GetValue(GetValueRequestArguments {
                                 requester_id: Id::from_bytes(arguments.id)?,
                                 target: Id::from_bytes(arguments.target)?,
+                                seq: arguments.seq,
+                                salt: None,
                             })
                         }
                         internal::DHTRequestSpecific::PutValue { arguments } => {
@@ -431,6 +423,7 @@ impl Message {
                                     seq: arguments.seq.unwrap(),
                                     sig: arguments.sig.unwrap(),
                                     salt: arguments.salt,
+                                    cas: arguments.cas,
                                 })
                             } else {
                                 RequestSpecific::PutImmutable(PutImmutableRequestArguments {
@@ -563,10 +556,9 @@ impl Message {
                 RequestSpecific::FindNode(arguments) => arguments.requester_id,
                 RequestSpecific::GetPeers(arguments) => arguments.requester_id,
                 RequestSpecific::AnnouncePeer(arguments) => arguments.requester_id,
-                RequestSpecific::GetValue(arguments) => arguments.requester_id,
                 RequestSpecific::PutImmutable(arguments) => arguments.requester_id,
-                RequestSpecific::GetMutable(arguments) => arguments.requester_id,
                 RequestSpecific::PutMutable(arguments) => arguments.requester_id,
+                RequestSpecific::GetValue(arguments) => arguments.requester_id,
             },
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(arguments) => arguments.responder_id,
@@ -970,6 +962,8 @@ mod tests {
                 GetValueRequestArguments {
                     requester_id: Id::random(),
                     target: Id::random(),
+                    seq: Some(1231),
+                    salt: None,
                 },
             )),
         };
@@ -994,6 +988,59 @@ mod tests {
                     token: vec![99, 100, 101, 102],
                     nodes: None,
                     v: vec![99, 100, 101, 102],
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_put_immutable_request() {
+        let original_msg = Message {
+            transaction_id: 3,
+            version: Some(vec![1]),
+            requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
+            read_only: false,
+            message_type: MessageType::Request(RequestSpecific::PutImmutable(
+                PutImmutableRequestArguments {
+                    requester_id: Id::random(),
+                    target: Id::random(),
+                    token: vec![99, 100, 101, 102],
+                    v: vec![99, 100, 101, 102],
+                },
+            )),
+        };
+
+        let serde_msg = original_msg.clone().into_serde_message();
+        let bytes = serde_msg.to_bytes().unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
+        assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_put_mutable_request() {
+        let original_msg = Message {
+            transaction_id: 3,
+            version: Some(vec![1]),
+            requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
+            read_only: false,
+            message_type: MessageType::Request(RequestSpecific::PutMutable(
+                PutMutableRequestArguments {
+                    requester_id: Id::random(),
+                    target: Id::random(),
+                    token: vec![99, 100, 101, 102],
+                    v: vec![99, 100, 101, 102],
+                    k: vec![100, 101, 102, 103],
+                    seq: 100,
+                    sig: vec![0, 1, 2, 3],
+                    salt: Some(vec![0, 2, 4, 8]),
+                    cas: Some(100),
                 },
             )),
         };
