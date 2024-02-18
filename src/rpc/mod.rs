@@ -16,10 +16,9 @@ use tracing::{debug, error};
 
 use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
-    AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
-    FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
-    MessageType, NoValuesResponseArguments, PingRequestArguments, PingResponseArguments,
+    AnnouncePeerRequestArguments, FindNodeRequestArguments, GetImmutableResponseArguments,
+    GetMutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
+    GetValueRequestArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
     PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
@@ -148,6 +147,11 @@ impl Rpc {
     // === Public Methods ===
 
     pub fn tick(&mut self) {
+        // === Tokens ===
+        if self.tokens.should_update() {
+            self.tokens.rotate()
+        }
+
         // === Tick Queries ===
         for (_, query) in self.queries.iter_mut() {
             query.tick(&mut self.socket);
@@ -193,7 +197,7 @@ impl Rpc {
                     self.handle_response(from, &message);
                 }
                 MessageType::Error(error) => {
-                    debug!(?message, "RPC Error response");
+                    debug!(?error, "RPC Error response");
                 }
             }
         };

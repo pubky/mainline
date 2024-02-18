@@ -1,21 +1,16 @@
 //! Request hanlders
 
-use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::num::NonZeroUsize;
-use std::time::{Duration, Instant};
+use std::net::SocketAddr;
 
-use bytes::Bytes;
-use lru::LruCache;
-use tracing::{debug, error};
+use tracing::debug;
 
-use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
+use crate::common::{validate_immutable, Id, MutableItem};
 use crate::messages::{
     AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
     FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
-    MessageType, NoValuesResponseArguments, PingRequestArguments, PingResponseArguments,
-    PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
+    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments,
+    NoValuesResponseArguments, PingResponseArguments, PutImmutableRequestArguments,
+    PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
 };
 
 use super::super::Rpc;
@@ -135,15 +130,14 @@ pub fn handle_request(
             );
         }
         RequestSpecific::PutMutable(PutMutableRequestArguments {
-            requester_id,
             target,
-            token,
             v,
             k,
             seq,
             sig,
             salt,
             cas,
+            ..
         }) => {
             if v.len() > 1000 {
                 rpc.socket.error(
@@ -257,16 +251,6 @@ pub fn handle_request(
                 handle_get_mutable(rpc, from, transaction_id, requester_id, target, seq);
             };
         }
-        _ => {
-            rpc.socket.error(
-                from,
-                transaction_id,
-                ErrorSpecific {
-                    code: 204,
-                    description: "Method Unknown".to_string(),
-                },
-            );
-        }
     }
 }
 
@@ -274,9 +258,9 @@ fn handle_get_mutable(
     rpc: &mut Rpc,
     from: SocketAddr,
     transaction_id: u16,
-    requester_id: &Id,
+    _requester_id: &Id,
     target: &Id,
-    seq: &Option<i64>,
+    _seq: &Option<i64>,
 ) {
     rpc.socket.response(
         from,

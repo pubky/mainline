@@ -91,7 +91,9 @@ impl KrpcSocket {
         );
 
         let tid = message.transaction_id;
-        let _ = self.send(address, message);
+        let _ = self.send(address, message).map_err(|e| {
+            debug!(?e, "Error sending request message");
+        });
 
         tid
     }
@@ -105,18 +107,17 @@ impl KrpcSocket {
     ) {
         let message =
             self.response_message(MessageType::Response(response), address, transaction_id);
-        let _ = self.send(address, message);
+        let _ = self.send(address, message).map_err(|e| {
+            debug!(?e, "Error sending response message");
+        });
     }
 
     /// Send an error to the given address.
-    pub fn error(
-        &mut self,
-        address: SocketAddr,
-        transaction_id: u16,
-        error: ErrorSpecific,
-    ) -> Result<()> {
+    pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
-        self.send(address, message)
+        let _ = self.send(address, message).map_err(|e| {
+            debug!(?e, "Error sending error");
+        });
     }
 
     /// Receives a single krpc message on the socket.

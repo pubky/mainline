@@ -75,7 +75,7 @@ impl Id {
         let mut rng = rand::thread_rng();
         let r: u8 = rng.gen();
 
-        let mut bytes: [u8; 20] = rng.gen();
+        let bytes: [u8; 20] = rng.gen();
 
         match ip {
             IpAddr::V4(addr) => from_ipv4_and_r(bytes, addr, r),
@@ -96,7 +96,7 @@ impl Id {
 
                 expected == actual
             }
-            IpAddr::V6(ipv6) => {
+            IpAddr::V6(_ipv6) => {
                 unimplemented!()
 
                 // // For IPv6, checking the ULA range fc00::/7

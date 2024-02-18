@@ -52,13 +52,11 @@ impl PeersStore {
 
             let mut results = Vec::with_capacity(20);
 
-            let mut current_chance = 1.0; // Start with a 100% chance
-
-            for (index, (id, addr)) in info_hash_lru.iter().enumerate() {
+            for (index, (_, addr)) in info_hash_lru.iter().enumerate() {
                 // Calculate the chance of adding the current item based on remaining items and slots
                 let remaining_slots = target_size - results.len();
                 let remaining_items = info_hash_lru.len() - index;
-                current_chance = remaining_slots as f64 / remaining_items as f64;
+                let current_chance = remaining_slots as f64 / remaining_items as f64;
 
                 // Randomly decide to add the item based on the current chance
                 if self.rng.gen_bool(current_chance) {
