@@ -1,5 +1,4 @@
 #![doc = include_str!("../README.md")]
-#![allow(unused)]
 
 //! # Mainline
 //! Rust implementation of read-only BitTorrent Mainline DHT client.

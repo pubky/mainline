@@ -226,7 +226,6 @@ impl Default for KBucket {
 
 #[cfg(test)]
 mod test {
-    use std::convert::TryInto;
     use std::net::SocketAddr;
     use std::str::FromStr;
 
@@ -247,7 +246,7 @@ mod test {
 
         let mut expected_nodes: Vec<Node> = vec![];
 
-        for i in 0..20 {
+        for _ in 0..20 {
             expected_nodes.push(Node::random());
         }
 
@@ -312,7 +311,6 @@ mod test {
 
     #[test]
     fn should_not_add_more_than_k() {
-        let id = Id::random();
         let mut bucket = KBucket::new();
 
         for i in 0..MAX_BUCKET_SIZE_K {

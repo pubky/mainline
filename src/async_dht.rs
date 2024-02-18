@@ -205,8 +205,6 @@ impl<T> Response<T> {
 
 #[cfg(test)]
 mod test {
-    use std::time::Duration;
-
     use super::*;
     use crate::Testnet;
 

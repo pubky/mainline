@@ -144,7 +144,7 @@ mod test {
 
         let info_hash = Id::random();
 
-        for i in (0..200) {
+        for i in 0..200 {
             store.add_peer(
                 info_hash,
                 (&Id::random(), SocketAddr::from(([127, 0, 1, i], 0))),
