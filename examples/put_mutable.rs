@@ -4,7 +4,7 @@ use std::{
 };
 
 use ed25519_dalek::SigningKey;
-use mainline::{common::MutableItem, Dht};
+use mainline::{Dht, MutableItem};
 
 use clap::Parser;
 

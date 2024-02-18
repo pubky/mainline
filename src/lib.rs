@@ -10,11 +10,12 @@ pub mod async_dht;
 pub mod common;
 pub mod dht;
 pub mod error;
-mod messages;
-mod rpc;
+pub mod messages;
+pub mod rpc;
 
-pub use crate::common::Id;
+pub use crate::common::*;
 pub use crate::error::Error;
+pub use crate::rpc::response::*;
 pub use dht::{Dht, Testnet};
 
 // Alias Result to be the crate Result.
