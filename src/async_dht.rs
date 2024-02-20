@@ -150,7 +150,7 @@ impl AsyncDht {
         let mut response = Response::new(receiver);
 
         // Block until we got a Done response!
-        for _ in &mut response {}
+        while (response.next_async().await).is_some() {}
 
         self.0.put_mutable_to(item, response.closest_nodes)
     }

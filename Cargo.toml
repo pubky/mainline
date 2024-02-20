@@ -34,6 +34,11 @@ async = ["flume/async"]
 default = ["async"]
 
 [[example]]
+name = "async_put_mutable"
+path = "examples/async/put_mutable.rs"
+required-features = ["async"]
+
+[[example]]
 name = "async_get_immutable"
 path = "examples/async/get_immutable.rs"
 required-features = ["async"]

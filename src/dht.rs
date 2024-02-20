@@ -314,7 +314,7 @@ impl Dht {
         Response::new(receiver)
     }
 
-    /// Put an immutable data to the DHT.
+    /// Put a mutable data to the DHT.
     pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
         let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
 
@@ -332,7 +332,7 @@ impl Dht {
         self.put_mutable_to(item, response.closest_nodes)
     }
 
-    /// Put an immutable data to specific nodes.
+    /// Put a mutable data to specific nodes.
     pub fn put_mutable_to(&self, item: MutableItem, nodes: Vec<Node>) -> Result<StoreQueryMetdata> {
         let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
 
