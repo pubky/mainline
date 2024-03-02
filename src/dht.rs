@@ -149,11 +149,20 @@ impl Dht {
         receiver.recv().map_err(|e| e.into())
     }
 
-    /// Returns a clone of the routing table of this node.
+    /// Returns a clone of the [RoutingTable] table of this node.
     pub fn routing_table(&self) -> Result<RoutingTable> {
         let (sender, receiver) = flume::bounded::<RoutingTable>(1);
 
         let _ = self.sender.send(ActorMessage::RoutingTable(sender));
+
+        receiver.recv().map_err(|e| e.into())
+    }
+
+    /// Returns the size of the [RoutingTable] without cloning the entire table.
+    pub fn routing_table_size(&self) -> Result<usize> {
+        let (sender, receiver) = flume::bounded::<usize>(1);
+
+        let _ = self.sender.send(ActorMessage::RoutingTableSize(sender));
 
         receiver.recv().map_err(|e| e.into())
     }
@@ -375,6 +384,9 @@ impl Dht {
                     ActorMessage::RoutingTable(sender) => {
                         let _ = sender.send(rpc.routing_table());
                     }
+                    ActorMessage::RoutingTableSize(sender) => {
+                        let _ = sender.send(rpc.routing_table_size());
+                    }
                     ActorMessage::GetPeers(info_hash, sender) => {
                         rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
                     }
@@ -412,6 +424,7 @@ pub(crate) enum ActorMessage {
     Shutdown,
     LocalAddress(Sender<SocketAddr>),
     RoutingTable(Sender<RoutingTable>),
+    RoutingTableSize(Sender<usize>),
 
     GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
     AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),

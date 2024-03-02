@@ -141,6 +141,11 @@ impl Rpc {
         self.routing_table.clone()
     }
 
+    /// Returns a clone of the routing_table size.
+    pub fn routing_table_size(&self) -> usize {
+        self.routing_table.size()
+    }
+
     // === Public Methods ===
 
     pub fn tick(&mut self) {

@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 pub struct AsyncDht(Dht);
 
 impl AsyncDht {
+    /// Returns the local address of the udp socket this node is listening on.
     pub async fn local_addr(&self) -> Result<SocketAddr> {
         let (sender, receiver) = flume::bounded::<SocketAddr>(1);
 
@@ -23,10 +24,20 @@ impl AsyncDht {
         receiver.recv_async().await.map_err(|e| e.into())
     }
 
+    /// Returns a clone of the [RoutingTable] table of this node.
     pub async fn routing_table(&self) -> Result<RoutingTable> {
         let (sender, receiver) = flume::bounded::<RoutingTable>(1);
 
         let _ = self.0.sender.send(ActorMessage::RoutingTable(sender));
+
+        receiver.recv_async().await.map_err(|e| e.into())
+    }
+
+    /// Returns the size of the [RoutingTable] without cloning the entire table.
+    pub async fn routing_table_size(&self) -> Result<usize> {
+        let (sender, receiver) = flume::bounded::<usize>(1);
+
+        let _ = self.0.sender.send(ActorMessage::RoutingTableSize(sender));
 
         receiver.recv_async().await.map_err(|e| e.into())
     }
