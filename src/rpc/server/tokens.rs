@@ -93,6 +93,12 @@ impl Tokens {
     }
 }
 
+impl Default for Tokens {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -100,7 +106,7 @@ mod test {
 
     #[test]
     fn valid_tokens() {
-        let mut tokens = Tokens::new();
+        let mut tokens = Tokens::default();
 
         let address = SocketAddr::from(([127, 0, 0, 1], 6881));
         let token = tokens.generate_token(address);

@@ -11,6 +11,7 @@ use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use flume::Sender;
 use lru::LruCache;
 use tracing::{debug, error};
 
@@ -67,6 +68,8 @@ pub struct Rpc {
     // Options
     id: Id,
     bootstrap: Vec<String>,
+
+    custom_request_handler: Option<Sender<(SocketAddr, u16, RequestSpecific)>>,
 }
 
 impl Rpc {
@@ -86,7 +89,7 @@ impl Rpc {
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
             store_queries: HashMap::new(),
-            tokens: Tokens::new(),
+            tokens: Tokens::default(),
 
             peers: PeersStore::new(
                 NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
@@ -97,6 +100,8 @@ impl Rpc {
 
             last_table_refresh: Instant::now() - REFRESH_TABLE_INTERVAL,
             last_table_ping: Instant::now(),
+
+            custom_request_handler: None,
         })
     }
 
@@ -125,6 +130,20 @@ impl Rpc {
     /// Sets requests timeout in milliseconds
     pub fn with_request_timeout(mut self, timeout: u64) -> Self {
         self.socket.request_timeout = Duration::from_millis(timeout);
+        self
+    }
+
+    /// Disable the default request handling and receive incoming requests instead.
+    ///
+    /// Default request handler can still be called with [handle_request()](Rpc::handle_request).
+    ///
+    /// Call [respond()](Rpc::respond()) to send the response to the requester.
+    pub fn with_custom_request_handler(
+        mut self,
+        sender: Sender<(SocketAddr, u16, RequestSpecific)>,
+    ) -> Self {
+        self.socket.read_only = false;
+        self.custom_request_handler = Some(sender);
         self
     }
 
@@ -191,16 +210,16 @@ impl Rpc {
             // Add a node to our routing table on any incoming request or response.
             self.add_node(&message, from);
 
-            match &message.message_type {
+            match message.message_type {
                 MessageType::Request(request_specific) => {
-                    handle_request(self, from, message.transaction_id, request_specific)
+                    if let Some(sender) = &self.custom_request_handler {
+                        let _ = sender.send((from, message.transaction_id, request_specific));
+                    } else {
+                        handle_request(self, from, message.transaction_id, &request_specific);
+                    }
                 }
-                MessageType::Response(_) => {
-                    self.handle_response(from, &message);
-                }
-                MessageType::Error(error) => {
-                    debug!(?error, "RPC Error response");
-                }
+                MessageType::Response(_) => self.handle_response(from, &message),
+                MessageType::Error(error) => debug!(?error, "RPC Error response"),
             }
         };
     }
@@ -328,6 +347,27 @@ impl Rpc {
         }
 
         self.store_queries.insert(*item.target(), query);
+    }
+
+    /// Default request handler as a server.
+    pub fn handle_request(
+        &mut self,
+        from: SocketAddr,
+        transaction_id: u16,
+        request_specific: &RequestSpecific,
+    ) {
+        handle_request(self, from, transaction_id, request_specific);
+    }
+
+    /// Send a response
+    pub fn respond(
+        &mut self,
+        address: SocketAddr,
+        transaction_id: u16,
+        response_specific: ResponseSpecific,
+    ) {
+        self.socket
+            .response(address, transaction_id, response_specific)
     }
 
     // === Private Methods ===
