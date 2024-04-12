@@ -1,5 +1,6 @@
 //! K-RPC implementation
 
+mod closest;
 mod query;
 pub mod response;
 mod server;
@@ -28,6 +29,7 @@ pub use response::{
 };
 
 use crate::Result;
+use closest::ClosestNodes;
 use query::{Query, StoreQuery};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
@@ -54,6 +56,7 @@ pub struct Rpc {
     queries: HashMap<Id, Query>,
     store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
+    closest_nodes: HashMap<Id, ClosestNodes>,
 
     peers: PeersStore,
     immutable_values: LruCache<Id, Bytes>,
@@ -87,6 +90,7 @@ impl Rpc {
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
+            closest_nodes: HashMap::new(),
 
             peers: PeersStore::new(
                 NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
@@ -162,29 +166,7 @@ impl Rpc {
             query.tick(&mut self.socket);
         }
 
-        // === Remove done queries ===
-        // Has to happen _after_ ticking queries otherwise we might
-        // disconnect response receivers too soon.
-        //
-        // Has to happen _before_ await to recv_from the socket.
-        let self_id = self.id;
-        let table_size = self.routing_table.size();
-
-        self.queries.retain(|id, query| {
-            let done = query.is_done();
-
-            if done && id == &self_id {
-                if table_size == 0 {
-                    error!("Could not bootstrap the routing table");
-                } else {
-                    debug!(table_size, "Populated the routing table");
-                }
-            }
-
-            !done
-        });
-        self.store_queries.retain(|_, query| !query.is_done());
-
+        self.maintain_queries();
         self.maintain_routing_table();
 
         if let Some((message, from)) = self.socket.recv_from() {
@@ -371,6 +353,12 @@ impl Rpc {
                 query.add_candidate(node)
             }
 
+            if let Some(cached_closest) = self.closest_nodes.get(&target) {
+                for node in cached_closest.nodes.clone() {
+                    query.add_candidate(node.clone())
+                }
+            }
+
             // After adding the nodes, we need to start the query.
             query.start(&mut self.socket);
         }
@@ -495,6 +483,40 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
+    }
+
+    fn maintain_queries(&mut self) {
+        // === Remove done queries ===
+        // Has to happen _after_ ticking queries otherwise we might
+        // disconnect response receivers too soon.
+        //
+        // Has to happen _before_ await to recv_from the socket.
+        let self_id = self.id;
+        let table_size = self.routing_table.size();
+
+        self.closest_nodes.retain(|_, c| !c.expired());
+        let mut closest_nodes = vec![];
+        self.queries.retain(|id, query| {
+            let done = query.is_done();
+
+            if done {
+                closest_nodes.push((*id, query.closest()));
+
+                if id == &self_id {
+                    if table_size == 0 {
+                        error!("Could not bootstrap the routing table");
+                    } else {
+                        debug!(table_size, "Populated the routing table");
+                    }
+                }
+            }
+
+            !done
+        });
+        for (id, nodes) in closest_nodes {
+            self.closest_nodes.insert(id, ClosestNodes::new(nodes));
+        }
+        self.store_queries.retain(|_, query| !query.is_done());
     }
 
     fn maintain_routing_table(&mut self) {
