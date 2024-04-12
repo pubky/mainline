@@ -12,7 +12,7 @@ use tracing::trace;
 
 const SECRET_SIZE: usize = 20;
 const TOKEN_SIZE: usize = 4;
-const ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
+pub const ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 pub struct Tokens {
