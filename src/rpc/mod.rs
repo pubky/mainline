@@ -166,37 +166,7 @@ impl Rpc {
             query.tick(&mut self.socket);
         }
 
-        // === Remove done queries ===
-        // Has to happen _after_ ticking queries otherwise we might
-        // disconnect response receivers too soon.
-        //
-        // Has to happen _before_ await to recv_from the socket.
-        let self_id = self.id;
-        let table_size = self.routing_table.size();
-
-        for (id, query) in &self.queries {
-            if query.is_done() {
-                let closest_nodes: ClosestNodes = query.into();
-                self.closest_nodes.insert(*id, closest_nodes);
-            }
-        }
-
-        self.closest_nodes.retain(|_, c| !c.expired());
-        self.queries.retain(|id, query| {
-            let done = query.is_done();
-
-            if done && id == &self_id {
-                if table_size == 0 {
-                    error!("Could not bootstrap the routing table");
-                } else {
-                    debug!(table_size, "Populated the routing table");
-                }
-            }
-
-            !done
-        });
-        self.store_queries.retain(|_, query| !query.is_done());
-
+        self.maintain_queries();
         self.maintain_routing_table();
 
         if let Some((message, from)) = self.socket.recv_from() {
@@ -513,6 +483,40 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
+    }
+
+    fn maintain_queries(&mut self) {
+        // === Remove done queries ===
+        // Has to happen _after_ ticking queries otherwise we might
+        // disconnect response receivers too soon.
+        //
+        // Has to happen _before_ await to recv_from the socket.
+        let self_id = self.id;
+        let table_size = self.routing_table.size();
+
+        self.closest_nodes.retain(|_, c| !c.expired());
+        let mut closest_nodes = vec![];
+        self.queries.retain(|id, query| {
+            let done = query.is_done();
+
+            if done {
+                closest_nodes.push((*id, query.closest()));
+
+                if id == &self_id {
+                    if table_size == 0 {
+                        error!("Could not bootstrap the routing table");
+                    } else {
+                        debug!(table_size, "Populated the routing table");
+                    }
+                }
+            }
+
+            !done
+        });
+        for (id, nodes) in closest_nodes {
+            self.closest_nodes.insert(id, ClosestNodes::new(nodes));
+        }
+        self.store_queries.retain(|_, query| !query.is_done());
     }
 
     fn maintain_routing_table(&mut self) {

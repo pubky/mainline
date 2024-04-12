@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::Node;
 
-use super::{query::Query, server::ROTATE_INTERVAL};
+use super::server::ROTATE_INTERVAL;
 
 /// Similar to the token rotation interval described in BEP_0005
 const CLOSEST_NODES_EXPIRY_DURATION: Duration = ROTATE_INTERVAL;
@@ -14,16 +14,14 @@ pub struct ClosestNodes {
 }
 
 impl ClosestNodes {
-    pub fn expired(&self) -> bool {
-        Instant::now().duration_since(self.last_seen) > CLOSEST_NODES_EXPIRY_DURATION
-    }
-}
-
-impl From<&Query> for ClosestNodes {
-    fn from(query: &Query) -> Self {
-        ClosestNodes {
-            nodes: query.closest(),
+    pub fn new(nodes: Vec<Node>) -> Self {
+        Self {
+            nodes,
             last_seen: Instant::now(),
         }
+    }
+
+    pub fn expired(&self) -> bool {
+        Instant::now().duration_since(self.last_seen) > CLOSEST_NODES_EXPIRY_DURATION
     }
 }
