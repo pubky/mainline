@@ -56,6 +56,10 @@ impl Query {
         &self.request
     }
 
+    pub fn closest(&self) -> Vec<Node> {
+        self.with_token.closest(&self.target)
+    }
+
     // === Public Methods ===
 
     /// Add a sender to the query and send all replies we found so far to it.

@@ -1,5 +1,6 @@
 //! K-RPC implementation
 
+mod closest;
 mod query;
 pub mod response;
 mod server;
@@ -28,6 +29,7 @@ pub use response::{
 };
 
 use crate::Result;
+use closest::ClosestNodes;
 use query::{Query, StoreQuery};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
@@ -54,6 +56,7 @@ pub struct Rpc {
     queries: HashMap<Id, Query>,
     store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
+    closest_nodes: HashMap<Id, ClosestNodes>,
 
     peers: PeersStore,
     immutable_values: LruCache<Id, Bytes>,
@@ -87,6 +90,7 @@ impl Rpc {
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
+            closest_nodes: HashMap::new(),
 
             peers: PeersStore::new(
                 NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
@@ -170,6 +174,14 @@ impl Rpc {
         let self_id = self.id;
         let table_size = self.routing_table.size();
 
+        for (id, query) in &self.queries {
+            if query.is_done() {
+                let closest_nodes: ClosestNodes = query.into();
+                self.closest_nodes.insert(*id, closest_nodes);
+            }
+        }
+
+        self.closest_nodes.retain(|_, c| !c.expired());
         self.queries.retain(|id, query| {
             let done = query.is_done();
 
@@ -369,6 +381,12 @@ impl Rpc {
             // Seed this query with the closest nodes we know about.
             for node in closest {
                 query.add_candidate(node)
+            }
+
+            if let Some(cached_closest) = self.closest_nodes.get(&target) {
+                for node in cached_closest.nodes.clone() {
+                    query.add_candidate(node.clone())
+                }
             }
 
             // After adding the nodes, we need to start the query.
