@@ -1,6 +1,5 @@
 //! K-RPC implementation
 
-mod closest;
 mod query;
 pub mod response;
 mod server;
@@ -29,7 +28,6 @@ pub use response::{
 };
 
 use crate::Result;
-use closest::ClosestNodes;
 use query::{Query, StoreQuery};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
@@ -48,6 +46,7 @@ const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MAX_INFO_HASHES: usize = 2000;
 const MAX_PEERS: usize = 500;
 const MAX_VALUES: usize = 1000;
+const MAX_CACHED_BUCKETS: usize = 1000;
 
 #[derive(Debug)]
 pub struct Rpc {
@@ -56,7 +55,7 @@ pub struct Rpc {
     queries: HashMap<Id, Query>,
     store_queries: HashMap<Id, StoreQuery>,
     tokens: Tokens,
-    closest_nodes: HashMap<Id, ClosestNodes>,
+    closest_nodes: LruCache<Id, Vec<Node>>,
 
     peers: PeersStore,
     immutable_values: LruCache<Id, Bytes>,
@@ -90,7 +89,7 @@ impl Rpc {
             queries: HashMap::new(),
             store_queries: HashMap::new(),
             tokens: Tokens::new(),
-            closest_nodes: HashMap::new(),
+            closest_nodes: LruCache::new(NonZeroUsize::new(MAX_CACHED_BUCKETS).unwrap()),
 
             peers: PeersStore::new(
                 NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
@@ -354,7 +353,7 @@ impl Rpc {
             }
 
             if let Some(cached_closest) = self.closest_nodes.get(&target) {
-                for node in cached_closest.nodes.clone() {
+                for node in cached_closest {
                     query.add_candidate(node.clone())
                 }
             }
@@ -494,7 +493,6 @@ impl Rpc {
         let self_id = self.id;
         let table_size = self.routing_table.size();
 
-        self.closest_nodes.retain(|_, c| !c.expired());
         let mut closest_nodes = vec![];
         self.queries.retain(|id, query| {
             let done = query.is_done();
@@ -514,7 +512,7 @@ impl Rpc {
             !done
         });
         for (id, nodes) in closest_nodes {
-            self.closest_nodes.insert(id, ClosestNodes::new(nodes));
+            self.closest_nodes.put(id, nodes);
         }
         self.store_queries.retain(|_, query| !query.is_done());
     }

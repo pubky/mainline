@@ -5,14 +5,13 @@ use rand::{rngs::ThreadRng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use tracing::trace;
 
 const SECRET_SIZE: usize = 20;
 const TOKEN_SIZE: usize = 4;
-pub const ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 pub struct Tokens {
@@ -46,7 +45,7 @@ impl Tokens {
     // === Public Methods ===
 
     pub fn should_update(&self) -> bool {
-        self.last_updated.elapsed() > ROTATE_INTERVAL
+        self.last_updated.elapsed() > crate::TOKEN_ROTATE_INTERVAL
     }
 
     /// Validate that the token was generated within the past 10 minutes

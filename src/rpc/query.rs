@@ -18,7 +18,7 @@ pub struct Query {
     target: Id,
     request: RequestSpecific,
     candidates: RoutingTable,
-    with_token: RoutingTable,
+    responders: RoutingTable,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
@@ -28,13 +28,13 @@ pub struct Query {
 impl Query {
     pub fn new(target: Id, request: RequestSpecific) -> Self {
         let candidates = RoutingTable::new().with_id(target);
-        let with_token = RoutingTable::new().with_id(target);
+        let responders = RoutingTable::new().with_id(target);
 
         Self {
             target,
             request,
             candidates,
-            with_token,
+            responders,
             inflight_requests: Vec::new(),
             visited: HashSet::new(),
             senders: Vec::new(),
@@ -56,8 +56,9 @@ impl Query {
         &self.request
     }
 
+    /// Return the closest responding nodes after the query is done.
     pub fn closest(&self) -> Vec<Node> {
-        self.with_token.closest(&self.target)
+        self.responders.closest(&self.target)
     }
 
     // === Public Methods ===
@@ -109,7 +110,7 @@ impl Query {
 
     /// Add a node that responded with a token as a probable storage node.
     pub fn add_responding_node(&mut self, node: Node) {
-        self.with_token.add(node.clone());
+        self.responders.add(node.clone());
     }
 
     /// Add received response
@@ -166,7 +167,7 @@ impl Query {
         let done = ResponseDone {
             visited: self.visited.len(),
             // Basically, we were using the routing table as a temporary
-            closest_nodes: self.with_token.closest(&self.target),
+            closest_nodes: self.responders.closest(&self.target),
         };
 
         match sender {

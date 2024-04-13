@@ -11,6 +11,7 @@ use crate::common::Id;
 /// on inserting a new node.
 pub const STALE_TIME: Duration = Duration::from_secs(15 * 60);
 const MIN_PING_BACKOFF_INTERVAL: Duration = Duration::from_secs(10);
+pub const TOKEN_ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 #[derive(Clone, PartialEq)]
 /// Node entry in Kademlia routing table
@@ -71,6 +72,11 @@ impl Node {
     /// Node is last seen more than a threshold ago.
     pub fn is_stale(&self) -> bool {
         self.last_seen.elapsed() > STALE_TIME
+    }
+
+    /// Node's token was received 5 minutes ago or less
+    pub fn valid_token(&self) -> bool {
+        self.last_seen.elapsed() > TOKEN_ROTATE_INTERVAL
     }
 
     pub(crate) fn should_ping(&self) -> bool {
