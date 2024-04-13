@@ -68,22 +68,7 @@ pub fn handle_request(
             requester_id,
             ..
         }) => {
-            if rpc.tokens.validate(from, token) {
-                let peer = match implied_port {
-                    Some(true) => from,
-                    _ => SocketAddr::new(from.ip(), *port),
-                };
-
-                rpc.peers.add_peer(*info_hash, (requester_id, peer));
-
-                rpc.socket.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::Ping(PingResponseArguments {
-                        responder_id: rpc.id,
-                    }),
-                );
-            } else {
+            if !rpc.tokens.validate(from, token) {
                 rpc.socket.error(
                     from,
                     transaction_id,
@@ -93,9 +78,40 @@ pub fn handle_request(
                     },
                 );
                 debug!(?from, ?token, "Invalid token");
+                return;
             }
+
+            let peer = match implied_port {
+                Some(true) => from,
+                _ => SocketAddr::new(from.ip(), *port),
+            };
+
+            rpc.peers.add_peer(*info_hash, (requester_id, peer));
+
+            rpc.socket.response(
+                from,
+                transaction_id,
+                ResponseSpecific::Ping(PingResponseArguments {
+                    responder_id: rpc.id,
+                }),
+            );
         }
-        RequestSpecific::PutImmutable(PutImmutableRequestArguments { v, target, .. }) => {
+        RequestSpecific::PutImmutable(PutImmutableRequestArguments {
+            v, target, token, ..
+        }) => {
+            if !rpc.tokens.validate(from, token) {
+                rpc.socket.error(
+                    from,
+                    transaction_id,
+                    ErrorSpecific {
+                        code: 203,
+                        description: "Bad token".to_string(),
+                    },
+                );
+                debug!(?from, ?token, "Invalid token");
+                return;
+            }
+
             if v.len() > 1000 {
                 rpc.socket.error(
                     from,
@@ -137,8 +153,21 @@ pub fn handle_request(
             sig,
             salt,
             cas,
+            token,
             ..
         }) => {
+            if !rpc.tokens.validate(from, token) {
+                rpc.socket.error(
+                    from,
+                    transaction_id,
+                    ErrorSpecific {
+                        code: 203,
+                        description: "Bad token".to_string(),
+                    },
+                );
+                debug!(?from, ?token, "Invalid token");
+                return;
+            }
             if v.len() > 1000 {
                 rpc.socket.error(
                     from,
@@ -226,14 +255,9 @@ pub fn handle_request(
                 }
             }
         }
-        RequestSpecific::GetValue(GetValueRequestArguments {
-            requester_id,
-            target,
-            seq,
-            ..
-        }) => {
+        RequestSpecific::GetValue(GetValueRequestArguments { target, seq, .. }) => {
             if seq.is_some() {
-                return handle_get_mutable(rpc, from, transaction_id, requester_id, target, seq);
+                return handle_get_mutable(rpc, from, transaction_id, target);
             }
 
             if let Some(v) = rpc.immutable_values.get(target) {
@@ -248,20 +272,13 @@ pub fn handle_request(
                     }),
                 )
             } else {
-                handle_get_mutable(rpc, from, transaction_id, requester_id, target, seq);
+                handle_get_mutable(rpc, from, transaction_id, target);
             };
         }
     }
 }
 
-fn handle_get_mutable(
-    rpc: &mut Rpc,
-    from: SocketAddr,
-    transaction_id: u16,
-    _requester_id: &Id,
-    target: &Id,
-    _seq: &Option<i64>,
-) {
+fn handle_get_mutable(rpc: &mut Rpc, from: SocketAddr, transaction_id: u16, target: &Id) {
     rpc.socket.response(
         from,
         transaction_id,
