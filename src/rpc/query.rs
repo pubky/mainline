@@ -3,12 +3,14 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 
+use flume::Sender;
+
 use super::response::{
     ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
 };
 use super::socket::KrpcSocket;
 use crate::common::{Id, Node, RoutingTable};
-use crate::messages::RequestSpecific;
+use crate::messages::{PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific};
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and
@@ -52,6 +54,7 @@ impl Query {
         &self.target
     }
 
+    /// Return the query's request sent to every visited node.
     pub fn request(&self) -> &RequestSpecific {
         &self.request
     }
@@ -159,7 +162,6 @@ impl Query {
                     let _ = sender.send(ResponseMessage::ResponseValue(mutable_item));
                 }
             }
-            _ => {}
         };
     }
 
@@ -180,8 +182,6 @@ impl Query {
             ResponseSender::GetMutable(sender) => {
                 let _ = sender.send(ResponseMessage::ResponseDone(done));
             }
-            // Responder::StoreItem doesn't need a ResponseDone, it works in StoreQuery
-            _ => {}
         };
     }
 
@@ -222,29 +222,64 @@ pub struct StoreQuery {
     /// Nodes that confirmed success
     stored_at: Vec<Id>,
     inflight_requests: Vec<u16>,
-    sender: ResponseSender,
+    sender: Option<Sender<StoreQueryMetdata>>,
+    request: PutRequestSpecific,
 }
 
+// TODO: can we make both queries the same thing?
 impl StoreQuery {
-    pub fn new(target: Id, sender: ResponseSender) -> Self {
+    pub fn new(
+        target: Id,
+        request: PutRequestSpecific,
+        sender: Option<Sender<StoreQueryMetdata>>,
+    ) -> Self {
         Self {
             target,
             closest_nodes: Vec::new(),
             stored_at: Vec::new(),
             inflight_requests: Vec::new(),
             sender,
+            request,
         }
     }
 
-    pub fn request(&mut self, node: Node, request: RequestSpecific, socket: &mut KrpcSocket) {
-        let tid = socket.request(node.address, request);
-
-        self.closest_nodes.push(node);
-        self.inflight_requests.push(tid);
+    pub fn alredy_started(&self) -> bool {
+        !self.closest_nodes.is_empty()
     }
 
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Vec<Node>) {
+        if self.alredy_started() {
+            panic!("should not start twice");
+        };
+
+        for node in nodes {
+            // Set correct values to the request placeholders
+
+            self.request(node, socket)
+        }
+    }
+
+    pub fn request(&mut self, node: Node, socket: &mut KrpcSocket) {
+        if let Some(token) = node.token.clone() {
+            let tid = socket.request(
+                node.address,
+                RequestSpecific {
+                    requester_id: Id::random(),
+                    request_type: RequestTypeSpecific::Put(PutRequest {
+                        token,
+                        put_request_type: self.request.clone(),
+                    }),
+                },
+            );
+
+            self.closest_nodes.push(node);
+            self.inflight_requests.push(tid);
+        }
+    }
+
+    // the closest nodes were set and all inflight_requests were done.
     pub fn is_done(&self) -> bool {
-        self.inflight_requests.is_empty()
+        self.inflight_requests.is_empty() && !self.closest_nodes.is_empty()
     }
 
     pub fn remove_inflight_request(&mut self, tid: u16) -> bool {
@@ -266,7 +301,7 @@ impl StoreQuery {
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.is_done() {
-            if let ResponseSender::StoreItem(sender) = &self.sender {
+            if let Some(sender) = &self.sender {
                 let _ = sender.send(StoreQueryMetdata::new(
                     self.target,
                     self.closest_nodes.clone(),

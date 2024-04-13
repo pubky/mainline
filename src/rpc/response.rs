@@ -49,8 +49,6 @@ pub enum ResponseSender {
     GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
     GetImmutable(Sender<ResponseMessage<GetImmutableResponse>>),
     GetMutable(Sender<ResponseMessage<GetMutableResponse>>),
-
-    StoreItem(Sender<StoreQueryMetdata>),
 }
 
 #[derive(Clone, Debug)]

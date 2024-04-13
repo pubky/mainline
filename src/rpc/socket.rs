@@ -240,7 +240,7 @@ mod test {
 
     use crate::{
         common::Id,
-        messages::{PingRequestArguments, PingResponseArguments},
+        messages::{PingResponseArguments, RequestTypeSpecific},
     };
 
     use super::*;
@@ -268,9 +268,10 @@ mod test {
         client.next_tid = 120;
 
         let client_address = client.local_addr();
-        let request = RequestSpecific::Ping(PingRequestArguments {
+        let request = RequestSpecific {
             requester_id: Id::random(),
-        });
+            request_type: RequestTypeSpecific::Ping,
+        };
 
         let expected_request = request.clone();
 
@@ -413,9 +414,10 @@ mod test {
         client.next_tid = 120;
 
         let _ = client.local_addr();
-        let request = RequestSpecific::Ping(PingRequestArguments {
+        let request = RequestSpecific {
             requester_id: Id::random(),
-        });
+            request_type: RequestTypeSpecific::Ping,
+        };
 
         let _ = request.clone();
 

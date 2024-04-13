@@ -26,24 +26,30 @@ fn main() {
     let public_key = from_hex(cli.public_key.clone());
     let dht = Dht::default();
 
-    let start = Instant::now();
-    let mut first = false;
+    println!("Looking up mutable item: {} ...", cli.public_key);
+    println!("\n=== COLD LOOKUP ===");
+    lookup(&dht, public_key);
 
-    println!("\nLooking up mutable item: {} ...\n", cli.public_key);
+    println!("\n=== SUBSEQUENT LOOKUP ===");
+    println!("Looking up mutable item: {} ...", cli.public_key);
+    lookup(&dht, public_key);
+}
 
-    let mut count = 0;
-
+fn lookup(dht: &Dht, public_key: VerifyingKey) {
     let mut response = &mut dht.get_mutable(public_key.as_bytes(), None);
 
+    let start = Instant::now();
+    let mut first = false;
+    let mut count = 0;
+
+    println!("Streaming mutable items:");
     for res in &mut response {
         if !first {
             first = true;
             println!(
-                "Got first result in {:?} seconds\n",
-                start.elapsed().as_secs_f32()
+                "Got first result in {:?} milliseconds",
+                start.elapsed().as_millis()
             );
-
-            println!("Streaming mutable items:\n");
         }
 
         count += 1;

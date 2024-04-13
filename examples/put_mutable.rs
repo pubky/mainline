@@ -29,8 +29,6 @@ fn main() {
 
     let dht = Dht::default();
 
-    let start = Instant::now();
-
     let signer = from_hex(cli.secret_key);
 
     println!(
@@ -46,12 +44,24 @@ fn main() {
 
     let item = MutableItem::new(signer, cli.value.as_bytes().to_owned().into(), seq, None);
 
-    let metadata = dht.put_mutable(item).expect("put mutable failed");
+    println!("\n=== COLD LOOKUP ===");
+    put(&dht, &item);
+
+    println!("\n=== SUBSEQUENT LOOKUP ===");
+    // You can now republish to the same closest nodes
+    // skipping the the lookup step.
+    put(&dht, &item);
+}
+
+fn put(dht: &Dht, item: &MutableItem) {
+    let start = Instant::now();
+
+    let metadata = dht.put_mutable(item.clone()).expect("put mutable failed");
 
     println!(
-        "Stored mutable data as {:?} in {:?} seconds",
+        "Stored mutable data as {:?} in {:?} milliseconds",
         metadata.target(),
-        start.elapsed().as_secs_f32()
+        start.elapsed().as_millis()
     );
 
     let stored_at = metadata.stored_at();
@@ -59,34 +69,6 @@ fn main() {
     for node in stored_at {
         println!("   {:?}", node);
     }
-
-    // You can now republish to the same closest nodes
-    // skipping the the lookup step.
-    //
-    // This time we choose to not sepcify the port, effectively
-    // making the port implicit to be detected by the storing node
-    // from the source address of the put_immutable request
-    //
-    // Uncomment the following lines to try it out:
-
-    // println!(
-    //     "Publishing immutable data again to {:?} closest_nodes ...",
-    //     metadata.closest_nodes().len()
-    // );
-    //
-    // let again = Instant::now();
-    // match dht.put_immutable_to(target, value, metadata.closest_nodes()) {
-    //     Ok(metadata) => {
-    //         println!(
-    //             "Published again to {:?} nodes in {:?} seconds",
-    //             metadata.stored_at().len(),
-    //             again.elapsed().as_secs()
-    //         );
-    //     }
-    //     Err(err) => {
-    //         println!("Error: {:?}", err);
-    //     }
-    // }
 }
 
 fn from_hex(s: String) -> SigningKey {
