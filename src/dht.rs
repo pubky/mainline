@@ -15,10 +15,7 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{
-        GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseMessage,
-        ResponseSender, Rpc, StoreQueryMetdata,
-    },
+    rpc::{ResponseSender, Rpc, StoreQueryMetdata},
     Result,
 };
 
@@ -215,23 +212,23 @@ impl Dht {
     ///     &response.closest_nodes.len()
     /// );
     /// ```
-    pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
+    pub fn get_peers(&self, info_hash: Id) -> Receiver<SocketAddr> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
+        let (sender, receiver) = flume::unbounded::<SocketAddr>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
         let _ = self.sender.send(ActorMessage::Get(
             info_hash,
             request,
-            ResponseSender::GetPeer(sender),
+            ResponseSender::Peer(sender),
         ));
 
-        Response::new(receiver)
+        receiver
     }
 
     /// Announce a peer for a given infohash.
@@ -263,8 +260,8 @@ impl Dht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
+    pub fn get_immutable(&self, target: Id) -> Receiver<Bytes> {
+        let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
             target,
@@ -275,10 +272,10 @@ impl Dht {
         let _ = self.sender.send(ActorMessage::Get(
             target,
             request,
-            ResponseSender::GetImmutable(sender),
+            ResponseSender::Immutable(sender),
         ));
 
-        Response::new(receiver)
+        receiver
     }
 
     /// Put an immutable data to the DHT.
@@ -300,14 +297,10 @@ impl Dht {
     // === Mutable data ===
 
     /// Get a mutable data by its public_key and optional salt.
-    pub fn get_mutable(
-        &self,
-        public_key: &[u8; 32],
-        salt: Option<Bytes>,
-    ) -> Response<GetMutableResponse> {
+    pub fn get_mutable(&self, public_key: &[u8; 32], salt: Option<Bytes>) -> Receiver<MutableItem> {
         let target = target_from_key(public_key, &salt);
 
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
+        let (sender, receiver) = flume::unbounded::<MutableItem>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
             target,
@@ -318,10 +311,10 @@ impl Dht {
         let _ = self.sender.send(ActorMessage::Get(
             target,
             request,
-            ResponseSender::GetMutable(sender),
+            ResponseSender::Mutable(sender),
         ));
 
-        Response::new(receiver)
+        receiver
     }
 
     /// Put a mutable data to the DHT.

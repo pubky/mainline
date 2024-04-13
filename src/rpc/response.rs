@@ -1,93 +1,22 @@
 //! A struct to iterate on incoming responses for a query.
 use bytes::Bytes;
-use flume::{Receiver, Sender};
+use flume::Sender;
 use std::net::SocketAddr;
 
 use super::{Id, MutableItem, Node};
 
 #[derive(Clone, Debug)]
-pub struct Response<T> {
-    pub(crate) receiver: Receiver<ResponseMessage<T>>,
-    pub closest_nodes: Vec<Node>,
-    pub visited: usize,
-}
-
-impl<T> Response<T> {
-    pub(crate) fn new(receiver: Receiver<ResponseMessage<T>>) -> Self {
-        Self {
-            receiver,
-            visited: 0,
-            closest_nodes: Vec::new(),
-        }
-    }
-}
-
-impl<T> Iterator for &mut Response<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.receiver.recv() {
-            Ok(item) => match item {
-                ResponseMessage::ResponseValue(value) => Some(value),
-                ResponseMessage::ResponseDone(ResponseDone {
-                    visited,
-                    closest_nodes,
-                }) => {
-                    self.visited = visited;
-                    self.closest_nodes = closest_nodes;
-
-                    None
-                }
-            },
-            _ => None,
-        }
-    }
+pub enum Response {
+    Peer(SocketAddr),
+    Immutable(Bytes),
+    Mutable(MutableItem),
 }
 
 #[derive(Clone, Debug)]
 pub enum ResponseSender {
-    GetPeer(Sender<ResponseMessage<GetPeerResponse>>),
-    GetImmutable(Sender<ResponseMessage<GetImmutableResponse>>),
-    GetMutable(Sender<ResponseMessage<GetMutableResponse>>),
-}
-
-#[derive(Clone, Debug)]
-pub enum ResponseMessage<T> {
-    ResponseValue(T),
-    ResponseDone(ResponseDone),
-}
-
-#[derive(Clone, Debug)]
-pub enum ResponseValue {
-    Peer(GetPeerResponse),
-    Immutable(GetImmutableResponse),
-    Mutable(GetMutableResponse),
-}
-
-#[derive(Clone, Debug)]
-pub struct GetPeerResponse {
-    pub from: Node,
-    pub peer: SocketAddr,
-}
-
-#[derive(Clone, Debug)]
-pub struct GetImmutableResponse {
-    pub from: Node,
-    pub value: Bytes,
-}
-
-#[derive(Clone, Debug)]
-pub struct GetMutableResponse {
-    pub from: Node,
-    pub item: MutableItem,
-}
-
-#[derive(Clone, Debug)]
-pub struct ResponseDone {
-    /// Number of nodes visited.
-    pub visited: usize,
-    /// Closest nodes in the routing tablue.
-    pub closest_nodes: Vec<Node>,
+    Peer(Sender<SocketAddr>),
+    Mutable(Sender<MutableItem>),
+    Immutable(Sender<Bytes>),
 }
 
 #[derive(Clone, Debug)]

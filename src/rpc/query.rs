@@ -4,10 +4,9 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use flume::Sender;
+use tracing::info;
 
-use super::response::{
-    ResponseDone, ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
-};
+use super::response::{Response, ResponseSender, StoreQueryMetdata};
 use super::socket::KrpcSocket;
 use crate::common::{Id, Node, RoutingTable};
 use crate::messages::{PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific};
@@ -24,7 +23,7 @@ pub struct Query {
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
-    responses: Vec<ResponseValue>,
+    responses: Vec<Response>,
 }
 
 impl Query {
@@ -117,12 +116,15 @@ impl Query {
     }
 
     /// Add received response
-    pub fn response(&mut self, response: ResponseValue) {
-        self.responses.push(response.clone());
+    pub fn response(&mut self, from: SocketAddr, response: Response) {
+        let query = self.target;
+        info!(?query, ?from, "Got value");
 
         for sender in &self.senders {
-            self.send_value(sender, response.clone())
+            self.send_value(sender, response.to_owned())
         }
+
+        self.responses.push(response);
     }
 
     /// Query closest nodes for this query's target and message.
@@ -145,44 +147,19 @@ impl Query {
 
     // === Private Methods ===
 
-    fn send_value(&self, sender: &ResponseSender, value: ResponseValue) {
-        match sender {
-            ResponseSender::GetPeer(sender) => {
-                if let ResponseValue::Peer(peer) = value {
-                    let _ = sender.send(ResponseMessage::ResponseValue(peer));
-                }
+    fn send_value(&self, sender: &ResponseSender, response: Response) {
+        match (sender, response) {
+            (ResponseSender::Peer(s), Response::Peer(r)) => {
+                let _ = s.send(r);
             }
-            ResponseSender::GetImmutable(sender) => {
-                if let ResponseValue::Immutable(immutable_item) = value {
-                    let _ = sender.send(ResponseMessage::ResponseValue(immutable_item));
-                }
+            (ResponseSender::Mutable(s), Response::Mutable(r)) => {
+                let _ = s.send(r);
             }
-            ResponseSender::GetMutable(sender) => {
-                if let ResponseValue::Mutable(mutable_item) = value {
-                    let _ = sender.send(ResponseMessage::ResponseValue(mutable_item));
-                }
+            (ResponseSender::Immutable(s), Response::Immutable(r)) => {
+                let _ = s.send(r);
             }
-        };
-    }
-
-    fn send_done(&self, sender: &ResponseSender) {
-        let done = ResponseDone {
-            visited: self.visited.len(),
-            // Basically, we were using the routing table as a temporary
-            closest_nodes: self.responders.closest(&self.target),
-        };
-
-        match sender {
-            ResponseSender::GetPeer(sender) => {
-                let _ = sender.send(ResponseMessage::ResponseDone(done));
-            }
-            ResponseSender::GetImmutable(sender) => {
-                let _ = sender.send(ResponseMessage::ResponseDone(done));
-            }
-            ResponseSender::GetMutable(sender) => {
-                let _ = sender.send(ResponseMessage::ResponseDone(done));
-            }
-        };
+            _ => {}
+        }
     }
 
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
@@ -199,10 +176,8 @@ impl Query {
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.inflight_requests.is_empty() {
-            // Send Done to all receivers to end iterators
-            for sender in &self.senders {
-                self.send_done(sender);
-            }
+            let visited = self.visited.len();
+            info!(?self.target, ?visited, "Query done");
 
             // No more closer nodes to visit, and no inflight requests to wait for
             // reset the visited set.

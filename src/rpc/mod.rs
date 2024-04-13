@@ -1,7 +1,7 @@
 //! K-RPC implementation
 
 mod query;
-pub mod response;
+mod response;
 mod server;
 mod socket;
 
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use flume::Sender;
 use lru::LruCache;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
 use crate::messages::{
@@ -23,10 +23,7 @@ use crate::messages::{
     ResponseSpecific,
 };
 
-pub use response::{
-    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
-    ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
-};
+pub use response::{Response, ResponseSender, StoreQueryMetdata};
 
 use crate::Result;
 use query::{Query, StoreQuery};
@@ -362,21 +359,15 @@ impl Rpc {
 
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                    responder_id,
                     values,
                     ..
                 })) => {
                     for peer in values.clone() {
-                        query.response(ResponseValue::Peer(GetPeerResponse {
-                            from: Node::new(*responder_id, from),
-                            peer,
-                        }));
+                        query.response(from, Response::Peer(peer));
                     }
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
-                    GetImmutableResponseArguments {
-                        responder_id, v, ..
-                    },
+                    GetImmutableResponseArguments { v, .. },
                 )) => {
                     if !validate_immutable(v, query.target()) {
                         let target = query.target();
@@ -384,20 +375,10 @@ impl Rpc {
                         return;
                     }
 
-                    query.response(ResponseValue::Immutable(GetImmutableResponse {
-                        from: Node::new(*responder_id, from),
-                        value: v.to_owned().into(),
-                    }));
+                    query.response(from, Response::Immutable(v.to_owned().into()));
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
-                    GetMutableResponseArguments {
-                        responder_id,
-                        v,
-                        seq,
-                        sig,
-                        k,
-                        ..
-                    },
+                    GetMutableResponseArguments { v, seq, sig, k, .. },
                 )) => {
                     let salt = match query.request().request_type.clone() {
                         RequestTypeSpecific::GetValue(args) => args.salt,
@@ -414,10 +395,7 @@ impl Rpc {
                         salt.to_owned(),
                         &None,
                     ) {
-                        query.response(ResponseValue::Mutable(GetMutableResponse {
-                            from: Node::new(*responder_id, from),
-                            item,
-                        }));
+                        query.response(from, Response::Mutable(item));
                     } else {
                         debug!(?v, ?seq, ?sig, ?salt, ?target, "Invalid mutable record");
                     }
@@ -454,7 +432,7 @@ impl Rpc {
                     if table_size == 0 {
                         error!("Could not bootstrap the routing table");
                     } else {
-                        debug!(table_size, "Populated the routing table");
+                        trace!(table_size, "Populated the routing table");
                     }
                 }
             }

@@ -17,9 +17,7 @@ struct Cli {
 }
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     let cli = Cli::parse();
 
@@ -36,52 +34,42 @@ fn main() {
 }
 
 fn lookup(dht: &Dht, public_key: VerifyingKey) {
-    let mut response = &mut dht.get_mutable(public_key.as_bytes(), None);
-
     let start = Instant::now();
     let mut first = false;
     let mut count = 0;
 
+    let receiver = dht.get_mutable(public_key.as_bytes(), None);
+
     println!("Streaming mutable items:");
-    for res in &mut response {
+    while let Ok(item) = receiver.recv() {
         if !first {
             first = true;
             println!(
-                "Got first result in {:?} milliseconds",
+                "\nGot first result in {:?} milliseconds\n",
                 start.elapsed().as_millis()
             );
         }
 
         count += 1;
 
-        match String::from_utf8(res.item.value().to_vec()) {
-            Ok(string) => {
-                println!(
-                    "Got mutable item: {:?}, seq: {:?} | from: {:?}",
-                    string,
-                    res.item.seq(),
-                    res.from
-                );
-            }
-            Err(_) => {
-                println!(
-                    "Got mutable item: {:?}, seq: {:?} | from: {:?}",
-                    res.item.value(),
-                    res.item.seq(),
-                    res.from
-                );
-            }
-        };
+        {
+            match String::from_utf8(item.value().to_vec()) {
+                Ok(string) => {
+                    println!("Got mutable item: {:?}, seq: {:?}", string, item.seq());
+                }
+                Err(_) => {
+                    println!(
+                        "Got mutable item: {:?}, seq: {:?}",
+                        item.value(),
+                        item.seq(),
+                    );
+                }
+            };
+        }
     }
 
     println!(
-        "Visited {:?} nodes, found {:?} closest nodes",
-        response.visited,
-        &response.closest_nodes.len()
-    );
-
-    println!(
-        "\nQuery exhausted in {:?} seconds, got {:?} peers.",
+        "\nQuery exhausted in {:?} seconds, got {:?} values.",
         start.elapsed().as_secs_f32(),
         count
     );
