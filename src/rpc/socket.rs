@@ -116,7 +116,7 @@ impl KrpcSocket {
     pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
         let _ = self.send(address, message).map_err(|e| {
-            debug!(?e, "Error sending error");
+            debug!(?e, "Error sending error message");
         });
     }
 
@@ -153,11 +153,10 @@ impl KrpcSocket {
                                     // Confirm that it is a response we actually sent.
                                     self.inflight_requests.remove(&message.transaction_id);
                                     return Some((message, from));
-                                } else {
-                                    debug!("Response from the wrong address");
                                 }
+                                debug!(?message, "Response from the wrong address");
                             } else {
-                                debug!("Unexpected response id");
+                                debug!(?message, "Unexpected response id");
                             };
                         }
                     }

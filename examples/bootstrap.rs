@@ -6,9 +6,7 @@ use tracing::Level;
 use tracing_subscriber;
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     Dht::default();
 
