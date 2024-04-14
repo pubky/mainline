@@ -179,8 +179,6 @@ impl Dht {
 
     /// Get peers for a given infohash.
     ///
-    /// Returns a blocking iterator over responses as they are received.
-    ///
     /// Note: each node of the network will only return a _random_ subset (usually 20)
     /// of the total peers it has for a given infohash, so if you are getting responses
     /// from 20 nodes, you can expect up to 400 peers in total, but if there are more
@@ -188,30 +186,6 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    ///
-    /// # Eaxmples
-    ///
-    /// ```
-    /// use mainline::{Dht, Id, Testnet};
-    ///
-    /// // Create a testnet for this example to avoid spamming the mainnet.
-    /// let testnet = Testnet::new(10);
-    ///
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
-    ///
-    /// let info_hash: Id = [0; 20].into();
-    ///
-    /// let mut response = dht.get_peers(info_hash);
-    /// for res in &mut response {
-    ///     println!("Got peer: {:?} | from: {:?}", res.peer, res.from)
-    /// }
-    ///
-    /// println!(
-    ///     "Visited {:?} nodes, found {:?} closest nodes",
-    ///     response.visited,
-    ///     &response.closest_nodes.len()
-    /// );
-    /// ```
     pub fn get_peers(&self, info_hash: Id) -> Receiver<SocketAddr> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
@@ -481,16 +455,9 @@ mod test {
 
         match a.announce_peer(info_hash, Some(45555)) {
             Ok(_) => {
-                let responses: Vec<_> = b.get_peers(info_hash).collect();
+                let peer = b.get_peers(info_hash).recv().expect("No respnoses");
 
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(r.peer.port(), 45555);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
+                assert_eq!(peer.port(), 45555);
             }
             Err(_) => {}
         };
@@ -511,16 +478,9 @@ mod test {
                 assert_ne!(result.stored_at().len(), 0);
                 assert_eq!(result.target(), expected_target);
 
-                let responses: Vec<_> = b.get_immutable(result.target()).collect();
+                let response = b.get_immutable(result.target()).recv().unwrap();
 
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(r.value, value);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
+                assert_eq!(response, value);
             }
             Err(_) => {
                 panic!("Expected put_immutable to succeeed")
@@ -548,17 +508,11 @@ mod test {
         let result = a.put_mutable(item.clone()).unwrap();
         assert_ne!(result.stored_at().len(), 0);
 
-        let responses: Vec<_> = b
+        let response = b
             .get_mutable(signer.verifying_key().as_bytes(), None)
-            .collect();
+            .recv()
+            .expect("No respnoses");
 
-        match responses.first() {
-            Some(r) => {
-                assert_eq!(&r.item, &item);
-            }
-            None => {
-                panic!("No respnoses")
-            }
-        }
+        assert_eq!(&response, &item);
     }
 }

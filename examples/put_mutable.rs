@@ -42,10 +42,10 @@ fn main() {
 
     let item = MutableItem::new(signer, cli.value.as_bytes().to_owned().into(), seq, None);
 
-    println!("\n=== COLD LOOKUP ===");
+    println!("\n=== COLD QUERY ===");
     put(&dht, &item);
 
-    println!("\n=== SUBSEQUENT LOOKUP ===");
+    println!("\n=== SUBSEQUENT QUERY ===");
     // You can now republish to the same closest nodes
     // skipping the the lookup step.
     put(&dht, &item);
