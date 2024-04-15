@@ -36,8 +36,6 @@ fn announce(dht: &Dht, info_hash: Id) {
     let start = Instant::now();
 
     dht.announce_peer(info_hash, Some(6991))
-        .recv()
-        .unwrap()
         .expect("announce_peer failed");
 
     println!(

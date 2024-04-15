@@ -195,7 +195,6 @@ pub struct PutQuery {
     error: Option<ErrorSpecific>,
 }
 
-// TODO: can we make both queries the same thing?
 impl PutQuery {
     pub fn new(target: Id, request: PutRequestSpecific, sender: Option<Sender<PutResult>>) -> Self {
         Self {
