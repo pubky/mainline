@@ -41,10 +41,8 @@ fn lookup(dht: &Dht, public_key: VerifyingKey) {
     let mut first = false;
     let mut count = 0;
 
-    let receiver = dht.get_mutable(public_key.as_bytes(), None);
-
     println!("Streaming mutable items:");
-    while let Ok(item) = receiver.recv() {
+    for item in dht.get_mutable(public_key.as_bytes(), None).unwrap() {
         count += 1;
 
         if !first {

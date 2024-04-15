@@ -148,33 +148,34 @@ impl Dht {
     pub fn local_addr(&self) -> Result<SocketAddr> {
         let (sender, receiver) = flume::bounded::<SocketAddr>(1);
 
-        let _ = self.sender.send(ActorMessage::LocalAddress(sender));
+        self.sender.send(ActorMessage::LocalAddress(sender))?;
 
-        receiver.recv().map_err(|e| e.into())
+        Ok(receiver.recv()?)
     }
 
     /// Returns a clone of the [RoutingTable] table of this node.
     pub fn routing_table(&self) -> Result<RoutingTable> {
         let (sender, receiver) = flume::bounded::<RoutingTable>(1);
 
-        let _ = self.sender.send(ActorMessage::RoutingTable(sender));
+        self.sender.send(ActorMessage::RoutingTable(sender))?;
 
-        receiver.recv().map_err(|e| e.into())
+        Ok(receiver.recv()?)
     }
 
     /// Returns the size of the [RoutingTable] without cloning the entire table.
     pub fn routing_table_size(&self) -> Result<usize> {
         let (sender, receiver) = flume::bounded::<usize>(1);
 
-        let _ = self.sender.send(ActorMessage::RoutingTableSize(sender));
+        self.sender.send(ActorMessage::RoutingTableSize(sender))?;
 
         receiver.recv().map_err(|e| e.into())
     }
 
     // === Public Methods ===
 
-    pub fn shutdown(&self) {
-        let _ = self.sender.send(ActorMessage::Shutdown).ok();
+    pub fn shutdown(&self) -> Result<()> {
+        self.sender.send(ActorMessage::Shutdown)?;
+        Ok(())
     }
 
     // === Peers ===
@@ -188,7 +189,7 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(&self, info_hash: Id) -> Receiver<SocketAddr> {
+    pub fn get_peers(&self, info_hash: Id) -> Result<flume::IntoIter<SocketAddr>> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
@@ -198,13 +199,13 @@ impl Dht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        let _ = self.sender.send(ActorMessage::Get(
+        self.sender.send(ActorMessage::Get(
             info_hash,
             request,
             ResponseSender::Peer(sender),
-        ));
+        ))?;
 
-        receiver
+        Ok(receiver.into_iter())
     }
 
     /// Announce a peer for a given infohash.
@@ -212,7 +213,7 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Receiver<PutResult> {
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id> {
         let (sender, receiver) = flume::bounded::<PutResult>(1);
 
         let (port, implied_port) = match port {
@@ -226,17 +227,16 @@ impl Dht {
             implied_port,
         });
 
-        let _ = self
-            .sender
-            .send(ActorMessage::Put(info_hash, request, sender));
+        self.sender
+            .send(ActorMessage::Put(info_hash, request, sender))?;
 
-        receiver
+        receiver.recv()?
     }
 
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Receiver<Bytes> {
+    pub fn get_immutable(&self, target: Id) -> Result<Bytes> {
         let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -245,17 +245,17 @@ impl Dht {
             salt: None,
         });
 
-        let _ = self.sender.send(ActorMessage::Get(
+        self.sender.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Immutable(sender),
-        ));
+        ))?;
 
-        receiver
+        Ok(receiver.recv()?)
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Bytes) -> Receiver<PutResult> {
+    pub fn put_immutable(&self, value: Bytes) -> Result<Id> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
         let (sender, receiver) = flume::bounded::<PutResult>(1);
@@ -265,15 +265,20 @@ impl Dht {
             v: value.clone().into(),
         });
 
-        let _ = self.sender.send(ActorMessage::Put(target, request, sender));
+        self.sender
+            .send(ActorMessage::Put(target, request, sender))?;
 
-        receiver
+        receiver.recv()?
     }
 
     // === Mutable data ===
 
     /// Get a mutable data by its public_key and optional salt.
-    pub fn get_mutable(&self, public_key: &[u8; 32], salt: Option<Bytes>) -> Receiver<MutableItem> {
+    pub fn get_mutable(
+        &self,
+        public_key: &[u8; 32],
+        salt: Option<Bytes>,
+    ) -> Result<flume::IntoIter<MutableItem>> {
         let target = target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
@@ -290,11 +295,11 @@ impl Dht {
             ResponseSender::Mutable(sender),
         ));
 
-        receiver
+        Ok(receiver.into_iter())
     }
 
     /// Put a mutable data to the DHT.
-    pub fn put_mutable(&self, item: MutableItem) -> Receiver<PutResult> {
+    pub fn put_mutable(&self, item: MutableItem) -> Result<Id> {
         let (sender, receiver) = flume::bounded::<PutResult>(1);
 
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
@@ -311,17 +316,10 @@ impl Dht {
             .sender
             .send(ActorMessage::Put(*item.target(), request, sender));
 
-        receiver
+        receiver.recv()?
     }
 
     // === Private Methods ===
-
-    #[cfg(test)]
-    fn block_until_shutdown(self) {
-        if let Some(handle) = self.handle {
-            let _ = handle.join();
-        }
-    }
 
     fn run(&mut self, settings: DhtSettings, receiver: Receiver<ActorMessage>) {
         let mut rpc = Rpc::new().unwrap().with_read_only(settings.read_only);
@@ -370,7 +368,7 @@ impl Default for Dht {
     }
 }
 
-pub(crate) enum ActorMessage {
+pub enum ActorMessage {
     LocalAddress(Sender<SocketAddr>),
     RoutingTable(Sender<RoutingTable>),
     RoutingTableSize(Sender<usize>),
@@ -413,7 +411,6 @@ impl Testnet {
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
-    use std::time::Duration;
 
     use ed25519_dalek::SigningKey;
 
@@ -423,15 +420,15 @@ mod test {
     fn shutdown() {
         let dht = Dht::default();
 
-        let clone = dht.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
+        dht.local_addr().unwrap();
 
-            clone.shutdown();
-        });
+        let a = dht.clone();
 
-        // TODO: verify correct error if we call anything after shutdown.
-        dht.block_until_shutdown();
+        dht.shutdown().unwrap();
+        dht.handle.map(|h| h.join());
+
+        let local_addr = a.local_addr();
+        assert!(local_addr.is_err());
     }
 
     #[test]
@@ -455,14 +452,12 @@ mod test {
 
         let info_hash = Id::random();
 
-        match a.announce_peer(info_hash, Some(45555)).recv() {
-            Ok(_) => {
-                let peer = b.get_peers(info_hash).recv().expect("No respnoses");
+        a.announce_peer(info_hash, Some(45555))
+            .expect("failed to announce");
 
-                assert_eq!(peer.port(), 45555);
-            }
-            Err(_) => {}
-        };
+        let peer = b.get_peers(info_hash).unwrap().next().expect("No peers");
+
+        assert_eq!(peer.port(), 45555);
     }
 
     #[test]
@@ -475,10 +470,10 @@ mod test {
         let value: Bytes = "Hello World!".into();
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        let target = a.put_immutable(value.clone()).recv().unwrap().unwrap();
+        let target = a.put_immutable(value.clone()).unwrap();
         assert_eq!(target, expected_target);
 
-        let response = b.get_immutable(target).recv().unwrap();
+        let response = b.get_immutable(target).unwrap();
         assert_eq!(response, value);
     }
 
@@ -499,12 +494,13 @@ mod test {
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        a.put_mutable(item.clone()).recv().unwrap().unwrap();
+        a.put_mutable(item.clone()).unwrap();
 
         let response = b
             .get_mutable(signer.verifying_key().as_bytes(), None)
-            .recv()
-            .expect("No respnoses");
+            .unwrap()
+            .next()
+            .expect("No mutable values");
 
         assert_eq!(&response, &item);
     }

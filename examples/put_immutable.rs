@@ -36,8 +36,6 @@ fn put_immutable(dht: &Dht, value: &Bytes) {
 
     let info_hash = dht
         .put_immutable(value.to_owned())
-        .recv()
-        .unwrap()
         .expect("put immutable failed");
 
     println!(

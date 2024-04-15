@@ -54,10 +54,7 @@ fn main() {
 fn put(dht: &Dht, item: &MutableItem) {
     let start = Instant::now();
 
-    dht.put_mutable(item.clone())
-        .recv()
-        .unwrap()
-        .expect("Put mutable failed");
+    dht.put_mutable(item.clone()).expect("Put mutable failed");
 
     println!(
         "Stored mutable data as {:?} in {:?} milliseconds",

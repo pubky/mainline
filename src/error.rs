@@ -1,6 +1,6 @@
 //! Main Crate Error
 
-use crate::messages::ErrorSpecific;
+use crate::{dht::ActorMessage, messages::ErrorSpecific};
 
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
@@ -37,6 +37,10 @@ pub enum Error {
     #[error(transparent)]
     /// Transparent [std::io::Error]
     Receive(#[from] flume::RecvError),
+
+    #[error(transparent)]
+    /// Transparent [std::io::Error]
+    DhtIsShutdown(#[from] flume::SendError<ActorMessage>),
 
     #[error("Invalid mutable item signature")]
     InvalidMutableSignature,

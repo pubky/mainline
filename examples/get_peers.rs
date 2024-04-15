@@ -41,9 +41,7 @@ fn get_peers(dht: &Dht, info_hash: &Id) {
 
     let mut count = 0;
 
-    let receiver = dht.get_peers(*info_hash);
-
-    while let Ok(peer) = receiver.recv() {
+    for peer in dht.get_peers(*info_hash).unwrap() {
         if !first {
             first = true;
             println!(
