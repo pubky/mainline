@@ -1,4 +1,4 @@
-//! Dht node./
+//! Dht node.
 
 use std::{
     net::SocketAddr,
@@ -168,7 +168,12 @@ impl Dht {
 
         self.sender.send(ActorMessage::RoutingTableSize(sender))?;
 
-        receiver.recv().map_err(|e| e.into())
+        Ok(receiver.recv()?)
+    }
+
+    /// Returns the `JoinHandle` of the actor thread
+    pub fn handle(self) -> Option<JoinHandle<()>> {
+        self.handle
     }
 
     // === Public Methods ===
@@ -425,7 +430,7 @@ mod test {
         let a = dht.clone();
 
         dht.shutdown().unwrap();
-        dht.handle.map(|h| h.join());
+        dht.handle().map(|h| h.join());
 
         let local_addr = a.local_addr();
         assert!(local_addr.is_err());
