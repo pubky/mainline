@@ -4,20 +4,22 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 
 use flume::Sender;
-use tracing::info;
+use tracing::{debug, error, info, trace, warn};
 
-use super::response::{Response, ResponseSender, StoreQueryMetdata};
 use super::socket::KrpcSocket;
-use crate::common::{Id, Node, RoutingTable};
-use crate::messages::{PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific};
+use crate::common::{Id, Node, Response, ResponseSender, RoutingTable};
+use crate::messages::{
+    ErrorSpecific, PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
+};
+use crate::{Error, PutResult};
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and
 /// repeating this process until no closer nodes (that aren't already queried) are found.
 #[derive(Debug)]
 pub struct Query {
-    target: Id,
-    request: RequestSpecific,
+    pub target: Id,
+    pub request: RequestSpecific,
     candidates: RoutingTable,
     responders: RoutingTable,
     inflight_requests: Vec<u16>,
@@ -30,6 +32,8 @@ impl Query {
     pub fn new(target: Id, request: RequestSpecific) -> Self {
         let candidates = RoutingTable::new().with_id(target);
         let responders = RoutingTable::new().with_id(target);
+
+        trace!(?target, ?request, "New Query");
 
         Self {
             target,
@@ -47,15 +51,6 @@ impl Query {
     /// No more inflight_requests and visited addresses were reset.
     pub fn is_done(&self) -> bool {
         self.inflight_requests.is_empty() && self.visited.is_empty()
-    }
-
-    pub fn target(&self) -> &Id {
-        &self.target
-    }
-
-    /// Return the query's request sent to every visited node.
-    pub fn request(&self) -> &RequestSpecific {
-        &self.request
     }
 
     /// Return the closest responding nodes after the query is done.
@@ -82,7 +77,6 @@ impl Query {
         self.visit_closest(socket);
     }
 
-    /// Add a node to the routing table.
     pub fn add_candidate(&mut self, node: Node) {
         // ready for a ipv6 routing table?
         self.candidates.add(node);
@@ -117,14 +111,15 @@ impl Query {
 
     /// Add received response
     pub fn response(&mut self, from: SocketAddr, response: Response) {
-        let query = self.target;
-        info!(?query, ?from, "Got value");
+        let target = self.target;
+
+        debug!(?target, ?response, ?from, "Query got response");
 
         for sender in &self.senders {
             self.send_value(sender, response.to_owned())
         }
 
-        self.responses.push(response);
+        self.responses.push(response.to_owned());
     }
 
     /// Query closest nodes for this query's target and message.
@@ -176,8 +171,7 @@ impl Query {
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
         if self.inflight_requests.is_empty() {
-            let visited = self.visited.len();
-            info!(?self.target, ?visited, "Query done");
+            info!(target = ?self.target, visited = ?self.visited.len(), "Query Done");
 
             // No more closer nodes to visit, and no inflight requests to wait for
             // reset the visited set.
@@ -190,71 +184,68 @@ impl Query {
 }
 
 #[derive(Debug)]
-pub struct StoreQuery {
-    target: Id,
-    /// Nodes queried
-    closest_nodes: Vec<Node>,
+pub struct PutQuery {
+    pub target: Id,
+    pub started: bool,
     /// Nodes that confirmed success
-    stored_at: Vec<Id>,
+    stored_at: u8,
     inflight_requests: Vec<u16>,
-    sender: Option<Sender<StoreQueryMetdata>>,
+    sender: Option<Sender<PutResult>>,
     request: PutRequestSpecific,
+    error: Option<ErrorSpecific>,
 }
 
 // TODO: can we make both queries the same thing?
-impl StoreQuery {
-    pub fn new(
-        target: Id,
-        request: PutRequestSpecific,
-        sender: Option<Sender<StoreQueryMetdata>>,
-    ) -> Self {
+impl PutQuery {
+    pub fn new(target: Id, request: PutRequestSpecific, sender: Option<Sender<PutResult>>) -> Self {
         Self {
             target,
-            closest_nodes: Vec::new(),
-            stored_at: Vec::new(),
+            started: false,
+            stored_at: 0,
             inflight_requests: Vec::new(),
             sender,
             request,
+            error: None,
         }
     }
 
-    pub fn alredy_started(&self) -> bool {
-        !self.closest_nodes.is_empty()
+    pub fn is_done(&self) -> bool {
+        self.started && self.inflight_requests.is_empty()
     }
 
     pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Vec<Node>) {
-        if self.alredy_started() {
-            panic!("should not start twice");
+        let target = self.target;
+        trace!(?target, "PutQuery start");
+
+        if self.started {
+            return;
         };
+
+        self.started = true;
+
+        if let Some(sender) = &self.sender {
+            if nodes.is_empty() {
+                let _ = sender.send(Err(Error::NoClosestNodes));
+            }
+        }
 
         for node in nodes {
             // Set correct values to the request placeholders
+            if let Some(token) = node.token.clone() {
+                let tid = socket.request(
+                    node.address,
+                    RequestSpecific {
+                        requester_id: Id::random(),
+                        request_type: RequestTypeSpecific::Put(PutRequest {
+                            token,
+                            put_request_type: self.request.clone(),
+                        }),
+                    },
+                );
 
-            self.request(node, socket)
+                self.inflight_requests.push(tid);
+            }
         }
-    }
-
-    pub fn request(&mut self, node: Node, socket: &mut KrpcSocket) {
-        if let Some(token) = node.token.clone() {
-            let tid = socket.request(
-                node.address,
-                RequestSpecific {
-                    requester_id: Id::random(),
-                    request_type: RequestTypeSpecific::Put(PutRequest {
-                        token,
-                        put_request_type: self.request.clone(),
-                    }),
-                },
-            );
-
-            self.closest_nodes.push(node);
-            self.inflight_requests.push(tid);
-        }
-    }
-
-    // the closest nodes were set and all inflight_requests were done.
-    pub fn is_done(&self) -> bool {
-        self.inflight_requests.is_empty() && !self.closest_nodes.is_empty()
     }
 
     pub fn remove_inflight_request(&mut self, tid: u16) -> bool {
@@ -266,8 +257,17 @@ impl StoreQuery {
         false
     }
 
-    pub fn success(&mut self, id: Id) {
-        self.stored_at.push(id);
+    pub fn success(&mut self) {
+        self.stored_at += 1
+    }
+
+    pub fn error(&mut self, error: ErrorSpecific) {
+        if error.code >= 300 && error.code < 400 {
+            warn!(target = ?self.target, ?error, "PutQuery got 3xx error");
+            self.error = Some(error)
+        } else {
+            debug!(target = ?self.target, ?error, "PutQuery got non-3xx error");
+        }
     }
 
     /// remove timed out requests
@@ -275,13 +275,21 @@ impl StoreQuery {
         self.inflight_requests
             .retain(|&tid| socket.inflight_requests.contains_key(&tid));
 
-        if self.is_done() {
-            if let Some(sender) = &self.sender {
-                let _ = sender.send(StoreQueryMetdata::new(
-                    self.target,
-                    self.closest_nodes.clone(),
-                    self.stored_at.clone(),
-                ));
+        if let Some(sender) = &self.sender {
+            if self.is_done() {
+                let target = self.target;
+
+                if self.stored_at == 0 {
+                    if let Some(error) = self.error.clone() {
+                        error!(?target, ?error, "Put Query: failed");
+
+                        let _ = sender.send(Err(Error::QueryError(error)));
+                    }
+                } else {
+                    info!(target = ?self.target, stored_at = ?self.stored_at, "PutQuery Done");
+
+                    let _ = sender.send(Ok(target));
+                }
             }
         }
     }

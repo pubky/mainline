@@ -1,7 +1,6 @@
-//! K-RPC implementation
+//! K-RPC implementatioStoreQueryMetdatan
 
 mod query;
-mod response;
 mod server;
 mod socket;
 
@@ -13,20 +12,19 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use flume::Sender;
 use lru::LruCache;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
-use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
+use crate::common::{
+    validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
+};
 use crate::messages::{
     FindNodeRequestArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-    GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType,
-    PingResponseArguments, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
-    ResponseSpecific,
+    GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType, PutRequestSpecific,
+    RequestSpecific, RequestTypeSpecific, ResponseSpecific,
 };
 
-pub use response::{Response, ResponseSender, StoreQueryMetdata};
-
 use crate::Result;
-use query::{Query, StoreQuery};
+use query::{PutQuery, Query};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
 
@@ -66,7 +64,9 @@ pub struct Rpc {
 
     // Active Queries
     queries: HashMap<Id, Query>,
-    store_queries: HashMap<Id, StoreQuery>,
+    /// Put queries are special, since they have to wait for a corresponing
+    /// get query to finish, update the closest_nodes, then `query_all` these.
+    put_queries: HashMap<Id, PutQuery>,
 
     tokens: Tokens,
 
@@ -92,7 +92,7 @@ impl Rpc {
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
-            store_queries: HashMap::new(),
+            put_queries: HashMap::new(),
             tokens: Tokens::new(),
             closest_nodes: LruCache::new(NonZeroUsize::new(MAX_CACHED_BUCKETS).unwrap()),
 
@@ -168,22 +168,26 @@ impl Rpc {
 
         // === Tick Queries ===
         // Advance queries one step at a time.
-        for (id, query) in self.store_queries.iter_mut() {
-            if !query.alredy_started() {
-                // Closest nodes if they exist and still have valid tokens
-                if let Some(closest_nodes) = self
-                    .closest_nodes
-                    .get(id)
-                    .filter(|nodes| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
-                {
-                    query.start(&mut self.socket, closest_nodes.to_vec())
-                };
-            };
-
+        for (_, query) in self.put_queries.iter_mut() {
             query.tick(&mut self.socket);
         }
-        for (_, query) in self.queries.iter_mut() {
+
+        let mut closest_nodes = Vec::with_capacity(self.queries.len());
+        for (id, query) in self.queries.iter_mut() {
             query.tick(&mut self.socket);
+
+            if query.is_done() {
+                let closest = query.closest();
+
+                if let Some(put_query) = self.put_queries.get_mut(id) {
+                    put_query.start(&mut self.socket, closest.clone())
+                }
+
+                closest_nodes.push((*id, closest));
+            };
+        }
+        for (id, nodes) in closest_nodes {
+            self.closest_nodes.put(id, nodes);
         }
 
         // === Remove done queries ===
@@ -191,7 +195,8 @@ impl Rpc {
         // disconnect response receivers too soon.
         //
         // Has to happen _before_ `self.socket.recv_from()`.
-        self.maintain_queries();
+        self.cleanup_queries();
+
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
@@ -221,11 +226,10 @@ impl Rpc {
         &mut self,
         target: Id,
         request: PutRequestSpecific,
-        sender: Option<Sender<StoreQueryMetdata>>,
+        sender: Option<Sender<PutResult>>,
     ) {
-        let mut query = StoreQuery::new(target, request.clone(), sender);
+        let mut query = PutQuery::new(target, request.clone(), sender);
 
-        // TODO: repeated code in the tick()
         if let Some(closest_nodes) = self
             .closest_nodes
             .get(&target)
@@ -249,7 +253,7 @@ impl Rpc {
             );
         };
 
-        self.store_queries.insert(target, query);
+        self.put_queries.insert(target, query);
     }
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
@@ -323,19 +327,20 @@ impl Rpc {
         }
 
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
-        if let Some(query) = self.store_queries.iter_mut().find_map(|(_, query)| {
+        if let Some(query) = self.put_queries.iter_mut().find_map(|(_, query)| {
             if query.remove_inflight_request(message.transaction_id) {
                 return Some(query);
             }
             None
         }) {
-            if let MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                responder_id,
-            })) = message.message_type
-            {
-                // Mark storage at that node as a success.
-                query.success(responder_id);
-            }
+            match &message.message_type {
+                MessageType::Response(ResponseSpecific::Ping(_)) => {
+                    // Mark storage at that node as a success.
+                    query.success();
+                }
+                MessageType::Error(error) => query.error(error.clone()),
+                _ => {}
+            };
 
             return;
         }
@@ -367,27 +372,36 @@ impl Rpc {
                     }
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
-                    GetImmutableResponseArguments { v, .. },
+                    GetImmutableResponseArguments {
+                        v, responder_id, ..
+                    },
                 )) => {
-                    if !validate_immutable(v, query.target()) {
-                        let target = query.target();
-                        debug!(?v, ?target, "Invalid immutable value");
+                    if !validate_immutable(v, &query.target) {
+                        let target = query.target;
+                        debug!(?v, ?target, ?responder_id, ?from, "Invalid immutable value");
                         return;
                     }
 
                     query.response(from, Response::Immutable(v.to_owned().into()));
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
-                    GetMutableResponseArguments { v, seq, sig, k, .. },
+                    GetMutableResponseArguments {
+                        v,
+                        seq,
+                        sig,
+                        k,
+                        responder_id,
+                        ..
+                    },
                 )) => {
-                    let salt = match query.request().request_type.clone() {
+                    let salt = match query.request.request_type.clone() {
                         RequestTypeSpecific::GetValue(args) => args.salt,
                         _ => None,
                     };
-                    let target = query.target();
+                    let target = query.target;
 
                     if let Ok(item) = MutableItem::from_dht_message(
-                        query.target(),
+                        &query.target,
                         k,
                         v.to_owned().into(),
                         seq,
@@ -397,7 +411,16 @@ impl Rpc {
                     ) {
                         query.response(from, Response::Mutable(item));
                     } else {
-                        debug!(?v, ?seq, ?sig, ?salt, ?target, "Invalid mutable record");
+                        debug!(
+                            ?v,
+                            ?seq,
+                            ?sig,
+                            ?salt,
+                            ?target,
+                            ?from,
+                            ?responder_id,
+                            "Invalid mutable record"
+                        );
                     }
                 }
                 // Ping response is already handled in add_node()
@@ -417,32 +440,25 @@ impl Rpc {
         }
     }
 
-    fn maintain_queries(&mut self) {
+    fn cleanup_queries(&mut self) {
         let self_id = self.id;
         let table_size = self.routing_table.size();
 
-        let mut closest_nodes = Vec::with_capacity(self.queries.len());
         self.queries.retain(|id, query| {
             let done = query.is_done();
 
-            if done {
-                closest_nodes.push((*id, query.closest()));
-
-                if id == &self_id {
-                    if table_size == 0 {
-                        error!("Could not bootstrap the routing table");
-                    } else {
-                        trace!(table_size, "Populated the routing table");
-                    }
+            if done && id == &self_id {
+                if table_size == 0 {
+                    error!("Could not bootstrap the routing table");
+                } else {
+                    debug!(table_size, "Populated the routing table");
                 }
             }
 
             !done
         });
-        for (id, nodes) in closest_nodes {
-            self.closest_nodes.put(id, nodes);
-        }
-        self.store_queries.retain(|_, query| !query.is_done());
+
+        self.put_queries.retain(|_, query| !query.is_done());
     }
 
     fn maintain_routing_table(&mut self) {
@@ -468,6 +484,8 @@ impl Rpc {
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
+        let node_id = self.id;
+        debug!(?node_id, "Bootstraping the routing table");
         self.get(
             self.id,
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: self.id }),

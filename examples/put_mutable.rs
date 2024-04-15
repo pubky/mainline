@@ -54,19 +54,16 @@ fn main() {
 fn put(dht: &Dht, item: &MutableItem) {
     let start = Instant::now();
 
-    let metadata = dht.put_mutable(item.clone()).expect("put mutable failed");
+    dht.put_mutable(item.clone())
+        .recv()
+        .unwrap()
+        .expect("Put mutable failed");
 
     println!(
         "Stored mutable data as {:?} in {:?} milliseconds",
-        metadata.target(),
+        item.target(),
         start.elapsed().as_millis()
     );
-
-    let stored_at = metadata.stored_at();
-    println!("Stored at: {:?} nodes", stored_at.len());
-    for node in stored_at {
-        println!("   {:?}", node);
-    }
 }
 
 fn from_hex(s: String) -> SigningKey {

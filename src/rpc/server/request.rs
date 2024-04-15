@@ -22,6 +22,8 @@ pub fn handle_request(
     transaction_id: u16,
     request: &RequestSpecific,
 ) {
+    let requester_id = request.requester_id;
+
     match &request.request_type {
         RequestTypeSpecific::Ping => {
             rpc.socket.response(
@@ -100,7 +102,14 @@ pub fn handle_request(
                             description: "Bad token".to_string(),
                         },
                     );
-                    debug!(?from, ?token, "Invalid token");
+                    debug!(
+                        ?info_hash,
+                        ?requester_id,
+                        ?from,
+                        ?token,
+                        request_type = "announce_peer",
+                        "Invalid token"
+                    );
                     return;
                 }
 
@@ -132,7 +141,14 @@ pub fn handle_request(
                             description: "Bad token".to_string(),
                         },
                     );
-                    debug!(?from, ?token, "Invalid token");
+                    debug!(
+                        ?target,
+                        ?requester_id,
+                        ?from,
+                        ?token,
+                        request_type = "put_immutable",
+                        "Invalid token"
+                    );
                     return;
                 }
 
@@ -145,6 +161,7 @@ pub fn handle_request(
                             description: "Message (v field) too big.".to_string(),
                         },
                     );
+                    debug!(?target, ?requester_id, ?from, size = ?v.len(), "Message (v field) too big.");
                     return;
                 }
                 if !validate_immutable(v, target) {
@@ -157,6 +174,7 @@ pub fn handle_request(
                                 .to_string(),
                         },
                     );
+                    debug!(?target, ?requester_id, ?from, v = ?v, "Target doesn't match the sha1 hash of v field.");
                     return;
                 }
 
@@ -189,7 +207,14 @@ pub fn handle_request(
                             description: "Bad token".to_string(),
                         },
                     );
-                    debug!(?from, ?token, "Invalid token");
+                    debug!(
+                        ?target,
+                        ?requester_id,
+                        ?from,
+                        ?token,
+                        request_type = "put_mutable",
+                        "Invalid token"
+                    );
                     return;
                 }
                 if v.len() > 1000 {
@@ -228,6 +253,12 @@ pub fn handle_request(
                                         .to_string(),
                                 },
                             );
+                            debug!(
+                                ?target,
+                                ?requester_id,
+                                ?from,
+                                "CAS mismatched, re-read value and try again."
+                            );
 
                             return;
                         }
@@ -241,6 +272,12 @@ pub fn handle_request(
                                 code: 302,
                                 description: "Sequence number less than current.".to_string(),
                             },
+                        );
+                        debug!(
+                            ?target,
+                            ?requester_id,
+                            ?from,
+                            "Sequence number less than current."
                         );
 
                         return;
@@ -267,7 +304,7 @@ pub fn handle_request(
                             }),
                         );
                     }
-                    Err(_) => {
+                    Err(error) => {
                         rpc.socket.error(
                             from,
                             transaction_id,
@@ -276,6 +313,8 @@ pub fn handle_request(
                                 description: "Invalid signature".to_string(),
                             },
                         );
+
+                        debug!(?target, ?requester_id, ?from, ?error, "Invalid signature");
                     }
                 }
             }

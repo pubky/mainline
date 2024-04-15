@@ -34,18 +34,15 @@ fn main() {
 fn put_immutable(dht: &Dht, value: &Bytes) {
     let start = Instant::now();
 
-    let metadata = dht
+    let info_hash = dht
         .put_immutable(value.to_owned())
+        .recv()
+        .unwrap()
         .expect("put immutable failed");
+
     println!(
         "Stored immutable data as {:?} in {:?} milliseconds",
-        metadata.target(),
+        info_hash,
         start.elapsed().as_millis()
     );
-    let stored_at = metadata.stored_at();
-
-    println!("Stored at: {:?} nodes", stored_at.len());
-    for node in stored_at {
-        println!("   {:?}", node);
-    }
 }

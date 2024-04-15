@@ -17,7 +17,10 @@ struct Cli {
 }
 
 fn main() {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        // Switch to DEBUG to see incoming values and the IP of the responding nodes
+        .with_max_level(Level::INFO)
+        .init();
 
     let cli = Cli::parse();
 
@@ -42,24 +45,22 @@ fn lookup(dht: &Dht, public_key: VerifyingKey) {
 
     println!("Streaming mutable items:");
     while let Ok(item) = receiver.recv() {
+        count += 1;
+
         if !first {
             first = true;
             println!(
-                "\nGot first result in {:?} milliseconds\n",
+                "\nGot first result in {:?} milliseconds:",
                 start.elapsed().as_millis()
             );
-        }
 
-        count += 1;
-
-        {
             match String::from_utf8(item.value().to_vec()) {
                 Ok(string) => {
-                    println!("Got mutable item: {:?}, seq: {:?}", string, item.seq());
+                    println!("  mutable item: {:?}, seq: {:?}\n", string, item.seq());
                 }
                 Err(_) => {
                     println!(
-                        "Got mutable item: {:?}, seq: {:?}",
+                        "  mutable item: {:?}, seq: {:?}\n",
                         item.value(),
                         item.seq(),
                     );

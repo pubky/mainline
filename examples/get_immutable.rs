@@ -39,19 +39,25 @@ fn get_immutable(dht: &Dht, info_hash: Id) {
 
     // No need to stream responses, just print the first result, since
     // all immutable data items are guaranteed to be the same.
-    let value = receiever.recv().unwrap();
-    let string = String::from_utf8(value.to_vec())
-        .expect("expected immutable data to be valid utf-8 for this demo");
+    match receiever.recv() {
+        Ok(value) => {
+            let string = String::from_utf8(value.to_vec())
+                .expect("expected immutable data to be valid utf-8 for this demo");
 
-    println!(
-        "Got result in {:?} milliseconds\n",
-        start.elapsed().as_millis()
-    );
+            println!(
+                "Got result in {:?} milliseconds\n",
+                start.elapsed().as_millis()
+            );
 
-    println!("Got immutable data: {:?}", string);
+            println!("Got immutable data: {:?}", string);
 
-    println!(
-        "\nQuery exhausted in {:?} milliseconds",
-        start.elapsed().as_millis(),
-    );
+            println!(
+                "\nQuery exhausted in {:?} milliseconds",
+                start.elapsed().as_millis(),
+            );
+        }
+        Err(_) => {
+            println!("\nFailed to find the immutable value for the provided info_hash",);
+        }
+    }
 }

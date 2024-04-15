@@ -9,13 +9,15 @@ use bytes::Bytes;
 use flume::{Receiver, Sender};
 
 use crate::{
-    common::{hash_immutable, target_from_key, Id, MutableItem, RoutingTable},
+    common::{
+        hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender, RoutingTable,
+    },
     messages::{
         AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{ResponseSender, Rpc, StoreQueryMetdata},
+    rpc::Rpc,
     Result,
 };
 
@@ -210,8 +212,8 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Receiver<PutResult> {
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
         let (port, implied_port) = match port {
             Some(port) => (port, None),
@@ -228,7 +230,7 @@ impl Dht {
             .sender
             .send(ActorMessage::Put(info_hash, request, sender));
 
-        receiver.recv().map_err(|e| e.into())
+        receiver
     }
 
     // === Immutable data ===
@@ -253,10 +255,10 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Bytes) -> Result<StoreQueryMetdata> {
+    pub fn put_immutable(&self, value: Bytes) -> Receiver<PutResult> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
             target,
@@ -265,7 +267,7 @@ impl Dht {
 
         let _ = self.sender.send(ActorMessage::Put(target, request, sender));
 
-        receiver.recv().map_err(|e| e.into())
+        receiver
     }
 
     // === Mutable data ===
@@ -292,8 +294,8 @@ impl Dht {
     }
 
     /// Put a mutable data to the DHT.
-    pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+    pub fn put_mutable(&self, item: MutableItem) -> Receiver<PutResult> {
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
             target: *item.target(),
@@ -309,7 +311,7 @@ impl Dht {
             .sender
             .send(ActorMessage::Put(*item.target(), request, sender));
 
-        receiver.recv().map_err(|e| e.into())
+        receiver
     }
 
     // === Private Methods ===
@@ -373,7 +375,7 @@ pub(crate) enum ActorMessage {
     RoutingTable(Sender<RoutingTable>),
     RoutingTableSize(Sender<usize>),
 
-    Put(Id, PutRequestSpecific, Sender<StoreQueryMetdata>),
+    Put(Id, PutRequestSpecific, Sender<PutResult>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown,
 }
@@ -453,7 +455,7 @@ mod test {
 
         let info_hash = Id::random();
 
-        match a.announce_peer(info_hash, Some(45555)) {
+        match a.announce_peer(info_hash, Some(45555)).recv() {
             Ok(_) => {
                 let peer = b.get_peers(info_hash).recv().expect("No respnoses");
 
@@ -473,19 +475,11 @@ mod test {
         let value: Bytes = "Hello World!".into();
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        match a.put_immutable(value.clone()) {
-            Ok(result) => {
-                assert_ne!(result.stored_at().len(), 0);
-                assert_eq!(result.target(), expected_target);
+        let target = a.put_immutable(value.clone()).recv().unwrap().unwrap();
+        assert_eq!(target, expected_target);
 
-                let response = b.get_immutable(result.target()).recv().unwrap();
-
-                assert_eq!(response, value);
-            }
-            Err(_) => {
-                panic!("Expected put_immutable to succeeed")
-            }
-        };
+        let response = b.get_immutable(target).recv().unwrap();
+        assert_eq!(response, value);
     }
 
     #[test]
@@ -505,8 +499,7 @@ mod test {
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        let result = a.put_mutable(item.clone()).unwrap();
-        assert_ne!(result.stored_at().len(), 0);
+        a.put_mutable(item.clone()).recv().unwrap().unwrap();
 
         let response = b
             .get_mutable(signer.verifying_key().as_bytes(), None)

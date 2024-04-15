@@ -154,15 +154,15 @@ impl KrpcSocket {
                                     self.inflight_requests.remove(&message.transaction_id);
                                     return Some((message, from));
                                 }
-                                debug!(?message, "Response from the wrong address");
+                                trace!(?message, "Response from the wrong address");
                             } else {
-                                debug!(?message, "Unexpected response id");
+                                trace!(?message, "Unexpected response id");
                             };
                         }
                     }
                 }
                 Err(error) => {
-                    debug!(?error, ?bytes, "Received invalid message");
+                    trace!(?error, ?bytes, "Received invalid message");
                 }
             };
         };

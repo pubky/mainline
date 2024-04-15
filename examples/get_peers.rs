@@ -15,7 +15,10 @@ struct Cli {
 }
 
 fn main() {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        // Switch to DEBUG to see incoming values and the IP of the responding nodes
+        .with_max_level(Level::INFO)
+        .init();
 
     let cli = Cli::parse();
 
@@ -44,15 +47,14 @@ fn get_peers(dht: &Dht, info_hash: &Id) {
         if !first {
             first = true;
             println!(
-                "Got first result in {:?} milliseconds\n",
+                "Got first result in {:?} milliseconds:",
                 start.elapsed().as_millis()
             );
 
-            println!("Streaming peers:\n");
+            println!("peer {:?}", peer,);
         }
 
         count += 1;
-        println!("Got peer {:?}", peer,);
     }
 
     println!(
