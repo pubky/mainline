@@ -1,8 +1,6 @@
-//! K-RPC implementation
+//! K-RPC implementatioStoreQueryMetdatan
 
-mod closest;
 mod query;
-pub mod response;
 mod server;
 mod socket;
 
@@ -12,25 +10,21 @@ use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use flume::Sender;
 use lru::LruCache;
 use tracing::{debug, error};
 
-use crate::common::{validate_immutable, Id, MutableItem, Node, RoutingTable};
-use crate::messages::{
-    AnnouncePeerRequestArguments, FindNodeRequestArguments, GetImmutableResponseArguments,
-    GetMutableResponseArguments, GetPeersRequestArguments, GetPeersResponseArguments,
-    GetValueRequestArguments, Message, MessageType, PingRequestArguments, PingResponseArguments,
-    PutImmutableRequestArguments, PutMutableRequestArguments, RequestSpecific, ResponseSpecific,
+use crate::common::{
+    validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
 };
-
-pub use response::{
-    GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseDone,
-    ResponseMessage, ResponseSender, ResponseValue, StoreQueryMetdata,
+use crate::messages::{
+    FindNodeRequestArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
+    GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType, PutRequestSpecific,
+    RequestSpecific, RequestTypeSpecific, ResponseSpecific,
 };
 
 use crate::Result;
-use closest::ClosestNodes;
-use query::{Query, StoreQuery};
+use query::{PutQuery, Query};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
 
@@ -48,28 +42,38 @@ const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MAX_INFO_HASHES: usize = 2000;
 const MAX_PEERS: usize = 500;
 const MAX_VALUES: usize = 1000;
+const MAX_CACHED_BUCKETS: usize = 1000;
 
 #[derive(Debug)]
 pub struct Rpc {
+    // Options
+    id: Id,
+    bootstrap: Vec<String>,
+
     socket: KrpcSocket,
+
+    // Routing
+    /// Closest nodes to this node
     routing_table: RoutingTable,
-    queries: HashMap<Id, Query>,
-    store_queries: HashMap<Id, StoreQuery>,
-    tokens: Tokens,
-    closest_nodes: HashMap<Id, ClosestNodes>,
-
-    peers: PeersStore,
-    immutable_values: LruCache<Id, Bytes>,
-    mutable_values: LruCache<Id, MutableItem>,
-
     /// Last time we refreshed the routing table with a find_node query.
     last_table_refresh: Instant,
     /// Last time we pinged nodes in the routing table.
     last_table_ping: Instant,
+    /// Closest nodes to specific target
+    closest_nodes: LruCache<Id, Vec<Node>>,
 
-    // Options
-    id: Id,
-    bootstrap: Vec<String>,
+    // Active Queries
+    queries: HashMap<Id, Query>,
+    /// Put queries are special, since they have to wait for a corresponing
+    /// get query to finish, update the closest_nodes, then `query_all` these.
+    put_queries: HashMap<Id, PutQuery>,
+
+    tokens: Tokens,
+
+    // server storage
+    peers: PeersStore,
+    immutable_values: LruCache<Id, Bytes>,
+    mutable_values: LruCache<Id, MutableItem>,
 }
 
 impl Rpc {
@@ -88,9 +92,9 @@ impl Rpc {
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
-            store_queries: HashMap::new(),
+            put_queries: HashMap::new(),
             tokens: Tokens::new(),
-            closest_nodes: HashMap::new(),
+            closest_nodes: LruCache::new(NonZeroUsize::new(MAX_CACHED_BUCKETS).unwrap()),
 
             peers: PeersStore::new(
                 NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
@@ -134,6 +138,10 @@ impl Rpc {
 
     // === Getters ===
 
+    pub fn id(&self) -> Id {
+        self.id
+    }
+
     /// Returns the address the server is listening to.
     #[inline]
     pub fn local_addr(&self) -> SocketAddr {
@@ -159,14 +167,37 @@ impl Rpc {
         }
 
         // === Tick Queries ===
-        for (_, query) in self.queries.iter_mut() {
-            query.tick(&mut self.socket);
-        }
-        for (_, query) in self.store_queries.iter_mut() {
+        // Advance queries one step at a time.
+        for (_, query) in self.put_queries.iter_mut() {
             query.tick(&mut self.socket);
         }
 
-        self.maintain_queries();
+        let mut closest_nodes = Vec::with_capacity(self.queries.len());
+        for (id, query) in self.queries.iter_mut() {
+            query.tick(&mut self.socket);
+
+            if query.is_done() {
+                let closest = query.closest();
+
+                if let Some(put_query) = self.put_queries.get_mut(id) {
+                    put_query.start(&mut self.socket, closest.clone())
+                }
+
+                closest_nodes.push((*id, closest));
+            };
+        }
+        for (id, nodes) in closest_nodes {
+            self.closest_nodes.put(id, nodes);
+        }
+
+        // === Remove done queries ===
+        // Has to happen _after_ ticking queries otherwise we might
+        // disconnect response receivers too soon.
+        //
+        // Has to happen _before_ `self.socket.recv_from()`.
+        self.cleanup_queries();
+
+        // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
         if let Some((message, from)) = self.socket.recv_from() {
@@ -187,159 +218,81 @@ impl Rpc {
         };
     }
 
-    /// Start or restart a get_peers query.
-    pub fn get_peers(&mut self, info_hash: Id, sender: ResponseSender) {
-        self.query(
-            info_hash,
-            RequestSpecific::GetPeers(GetPeersRequestArguments {
-                requester_id: self.id,
-                info_hash,
-            }),
-            Some(sender),
-        )
-    }
-
-    /// Send an announce_peer request to a list of nodes.
-    pub fn announce_peer(
-        &mut self,
-        info_hash: Id,
-        nodes: Vec<Node>,
-        port: Option<u16>,
-        sender: ResponseSender,
-    ) {
-        let (port, implied_port) = match port {
-            Some(port) => (port, None),
-            None => (0, Some(true)),
-        };
-
-        let mut query = StoreQuery::new(info_hash, sender);
-
-        for node in nodes {
-            if let Some(token) = node.token.clone() {
-                query.request(
-                    node,
-                    RequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
-                        requester_id: self.id,
-                        info_hash,
-                        port,
-                        implied_port,
-                        token,
-                    }),
-                    &mut self.socket,
-                );
-            }
-        }
-
-        self.store_queries.insert(info_hash, query);
-    }
-
-    pub fn get_immutable(&mut self, target: Id, sender: ResponseSender) {
-        self.query(
-            target,
-            RequestSpecific::GetValue(GetValueRequestArguments {
-                requester_id: self.id,
-                target,
-                seq: None,
-                salt: None,
-            }),
-            Some(sender),
-        )
-    }
-
-    pub fn put_immutable(
+    /// Store a value in the closest nodes, optionally trigger a lookup query if
+    /// the cached closest_nodes aren't fresh enough.
+    ///
+    /// `salt` is only relevant for mutable values.
+    pub fn put(
         &mut self,
         target: Id,
-        value: Bytes,
-        nodes: Vec<Node>,
-        sender: ResponseSender,
+        request: PutRequestSpecific,
+        sender: Option<Sender<PutResult>>,
     ) {
-        let mut query = StoreQuery::new(target, sender);
+        let mut query = PutQuery::new(target, request.clone(), sender);
 
-        for node in nodes {
-            if let Some(token) = node.token.clone() {
-                query.request(
-                    node,
-                    RequestSpecific::PutImmutable(PutImmutableRequestArguments {
-                        requester_id: self.id,
-                        target,
-                        token,
-                        v: value.clone().into(),
-                    }),
-                    &mut self.socket,
-                );
-            }
-        }
+        if let Some(closest_nodes) = self
+            .closest_nodes
+            .get(&target)
+            .filter(|nodes| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
+        {
+            query.start(&mut self.socket, closest_nodes.to_vec())
+        } else {
+            let salt = match request {
+                PutRequestSpecific::PutMutable(args) => args.salt,
+                _ => None,
+            };
 
-        self.store_queries.insert(target, query);
-    }
-
-    pub fn get_mutable(&mut self, target: Id, salt: Option<Bytes>, sender: ResponseSender) {
-        self.query(
-            target,
-            RequestSpecific::GetValue(GetValueRequestArguments {
-                requester_id: self.id,
+            self.get(
                 target,
-                seq: None,
-                salt,
-            }),
-            Some(sender),
-        )
+                RequestTypeSpecific::GetValue(GetValueRequestArguments {
+                    target,
+                    seq: None,
+                    salt: salt.map(|s| s.into()),
+                }),
+                None,
+            );
+        };
+
+        self.put_queries.insert(target, query);
     }
-
-    pub fn put_mutable(&mut self, item: MutableItem, nodes: Vec<Node>, sender: ResponseSender) {
-        let mut query = StoreQuery::new(*item.target(), sender);
-
-        for node in nodes {
-            if let Some(token) = node.token.clone() {
-                query.request(
-                    node,
-                    RequestSpecific::PutMutable(PutMutableRequestArguments {
-                        requester_id: self.id,
-                        target: *item.target(),
-                        token,
-                        v: item.value().clone().into(),
-                        k: item.key().to_vec(),
-                        seq: *item.seq(),
-                        sig: item.signature().to_vec(),
-                        salt: item.salt().clone().map(|s| s.to_vec()),
-                        cas: *item.cas(),
-                    }),
-                    &mut self.socket,
-                );
-            }
-        }
-
-        self.store_queries.insert(*item.target(), query);
-    }
-
-    // === Private Methods ===
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
     ///
-    /// Queries take few seconds to traverse the network, once it is done, it will be removed from
+    /// Queries take few seconds to fully traverse the network, once it is done, it will be removed from
     /// self.queries. But until then, calling `rpc.query()` multiple times, will just add the
     /// sender to the query, send all the responses seen so far, as well as subsequent responses.
     ///
     /// Effectively, we are caching responses and backing off the network for the duration it takes
     /// to traverse it.
-    fn query(&mut self, target: Id, request: RequestSpecific, sender: Option<ResponseSender>) {
+    pub fn get(
+        &mut self,
+        target: Id,
+        request: RequestTypeSpecific,
+        sender: Option<ResponseSender>,
+    ) {
         // If query is still active, add the sender to it.
         if let Some(query) = self.queries.get_mut(&target) {
             query.add_sender(sender);
             return;
         }
 
-        let mut query = Query::new(target, request);
+        let mut query = Query::new(
+            target,
+            RequestSpecific {
+                requester_id: self.id,
+                request_type: request,
+            },
+        );
 
         query.add_sender(sender);
 
         // Seed the query either with the closest nodes from the routing table, or the
         // bootstrapping nodes if the closest nodes are not enough.
 
-        let closest = self.routing_table.closest(&target);
+        let routing_table_closest = self.routing_table.closest(&target);
 
         // If we don't have enough or any closest nodes, call the bootstraping nodes.
-        if closest.is_empty() || closest.len() < self.bootstrap.len() {
+        if routing_table_closest.is_empty() || routing_table_closest.len() < self.bootstrap.len() {
             for bootstrapping_node in self.bootstrap.clone() {
                 if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
                     for address in addresses {
@@ -347,24 +300,26 @@ impl Rpc {
                     }
                 }
             }
-        } else {
-            // Seed this query with the closest nodes we know about.
-            for node in closest {
-                query.add_candidate(node)
-            }
-
-            if let Some(cached_closest) = self.closest_nodes.get(&target) {
-                for node in cached_closest.nodes.clone() {
-                    query.add_candidate(node.clone())
-                }
-            }
-
-            // After adding the nodes, we need to start the query.
-            query.start(&mut self.socket);
         }
+
+        // Seed this query with the closest nodes we know about.
+        for node in routing_table_closest {
+            query.add_candidate(node)
+        }
+
+        if let Some(cached_closest) = self.closest_nodes.get(&target) {
+            for node in cached_closest {
+                query.add_candidate(node.clone())
+            }
+        }
+
+        // After adding the nodes, we need to start the query.
+        query.start(&mut self.socket);
 
         self.queries.insert(target, query);
     }
+
+    // === Private Methods ===
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) {
         if message.read_only {
@@ -372,19 +327,20 @@ impl Rpc {
         }
 
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
-        if let Some(query) = self.store_queries.iter_mut().find_map(|(_, query)| {
+        if let Some(query) = self.put_queries.iter_mut().find_map(|(_, query)| {
             if query.remove_inflight_request(message.transaction_id) {
                 return Some(query);
             }
             None
         }) {
-            if let MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                responder_id,
-            })) = message.message_type
-            {
-                // Mark storage at that node as a success.
-                query.success(responder_id);
-            }
+            match &message.message_type {
+                MessageType::Response(ResponseSpecific::Ping(_)) => {
+                    // Mark storage at that node as a success.
+                    query.success();
+                }
+                MessageType::Error(error) => query.error(error.clone()),
+                _ => {}
+            };
 
             return;
         }
@@ -408,64 +364,63 @@ impl Rpc {
 
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                    responder_id,
                     values,
                     ..
                 })) => {
                     for peer in values.clone() {
-                        query.response(ResponseValue::Peer(GetPeerResponse {
-                            from: Node::new(*responder_id, from),
-                            peer,
-                        }));
+                        query.response(from, Response::Peer(peer));
                     }
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
                     GetImmutableResponseArguments {
-                        responder_id, v, ..
+                        v, responder_id, ..
                     },
                 )) => {
-                    if !validate_immutable(v, query.target()) {
-                        let target = query.target();
-                        debug!(?v, ?target, "Invalid immutable value");
+                    if !validate_immutable(v, &query.target) {
+                        let target = query.target;
+                        debug!(?v, ?target, ?responder_id, ?from, "Invalid immutable value");
                         return;
                     }
 
-                    query.response(ResponseValue::Immutable(GetImmutableResponse {
-                        from: Node::new(*responder_id, from),
-                        value: v.to_owned().into(),
-                    }));
+                    query.response(from, Response::Immutable(v.to_owned().into()));
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
                     GetMutableResponseArguments {
-                        responder_id,
                         v,
                         seq,
                         sig,
                         k,
+                        responder_id,
                         ..
                     },
                 )) => {
-                    let salt = match query.request() {
-                        RequestSpecific::GetValue(GetValueRequestArguments { salt, .. }) => salt,
-                        _ => &None,
+                    let salt = match query.request.request_type.clone() {
+                        RequestTypeSpecific::GetValue(args) => args.salt,
+                        _ => None,
                     };
-                    let target = query.target();
+                    let target = query.target;
 
                     if let Ok(item) = MutableItem::from_dht_message(
-                        query.target(),
+                        &query.target,
                         k,
                         v.to_owned().into(),
                         seq,
                         sig,
-                        salt,
+                        salt.to_owned(),
                         &None,
                     ) {
-                        query.response(ResponseValue::Mutable(GetMutableResponse {
-                            from: Node::new(*responder_id, from),
-                            item,
-                        }));
+                        query.response(from, Response::Mutable(item));
                     } else {
-                        debug!(?v, ?seq, ?sig, ?salt, ?target, "Invalid mutable record");
+                        debug!(
+                            ?v,
+                            ?seq,
+                            ?sig,
+                            ?salt,
+                            ?target,
+                            ?from,
+                            ?responder_id,
+                            "Invalid mutable record"
+                        );
                     }
                 }
                 // Ping response is already handled in add_node()
@@ -485,38 +440,25 @@ impl Rpc {
         }
     }
 
-    fn maintain_queries(&mut self) {
-        // === Remove done queries ===
-        // Has to happen _after_ ticking queries otherwise we might
-        // disconnect response receivers too soon.
-        //
-        // Has to happen _before_ await to recv_from the socket.
+    fn cleanup_queries(&mut self) {
         let self_id = self.id;
         let table_size = self.routing_table.size();
 
-        self.closest_nodes.retain(|_, c| !c.expired());
-        let mut closest_nodes = vec![];
         self.queries.retain(|id, query| {
             let done = query.is_done();
 
-            if done {
-                closest_nodes.push((*id, query.closest()));
-
-                if id == &self_id {
-                    if table_size == 0 {
-                        error!("Could not bootstrap the routing table");
-                    } else {
-                        debug!(table_size, "Populated the routing table");
-                    }
+            if done && id == &self_id {
+                if table_size == 0 {
+                    error!("Could not bootstrap the routing table");
+                } else {
+                    debug!(table_size, "Populated the routing table");
                 }
             }
 
             !done
         });
-        for (id, nodes) in closest_nodes {
-            self.closest_nodes.insert(id, ClosestNodes::new(nodes));
-        }
-        self.store_queries.retain(|_, query| !query.is_done());
+
+        self.put_queries.retain(|_, query| !query.is_done());
     }
 
     fn maintain_routing_table(&mut self) {
@@ -542,12 +484,11 @@ impl Rpc {
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
-        self.query(
+        let node_id = self.id;
+        debug!(?node_id, "Bootstraping the routing table");
+        self.get(
             self.id,
-            RequestSpecific::FindNode(FindNodeRequestArguments {
-                target: self.id,
-                requester_id: self.id,
-            }),
+            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: self.id }),
             None,
         );
     }
@@ -555,9 +496,10 @@ impl Rpc {
     fn ping(&mut self, address: SocketAddr) {
         self.socket.request(
             address,
-            RequestSpecific::Ping(PingRequestArguments {
+            RequestSpecific {
                 requester_id: self.id,
-            }),
+                request_type: RequestTypeSpecific::Ping,
+            },
         );
     }
 }

@@ -18,7 +18,8 @@ struct Cli {
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
+        // Switch to DEBUG to see incoming values and the IP of the responding nodes
+        .with_max_level(Level::INFO)
         .init();
 
     let cli = Cli::parse();
@@ -26,56 +27,50 @@ fn main() {
     let public_key = from_hex(cli.public_key.clone());
     let dht = Dht::default();
 
+    println!("Looking up mutable item: {} ...", cli.public_key);
+    println!("\n=== COLD LOOKUP ===");
+    lookup(&dht, public_key);
+
+    println!("\n=== SUBSEQUENT LOOKUP ===");
+    println!("Looking up mutable item: {} ...", cli.public_key);
+    lookup(&dht, public_key);
+}
+
+fn lookup(dht: &Dht, public_key: VerifyingKey) {
     let start = Instant::now();
     let mut first = false;
-
-    println!("\nLooking up mutable item: {} ...\n", cli.public_key);
-
     let mut count = 0;
 
-    let mut response = &mut dht.get_mutable(public_key.as_bytes(), None);
+    let receiver = dht.get_mutable(public_key.as_bytes(), None);
 
-    for res in &mut response {
+    println!("Streaming mutable items:");
+    while let Ok(item) = receiver.recv() {
+        count += 1;
+
         if !first {
             first = true;
             println!(
-                "Got first result in {:?} seconds\n",
-                start.elapsed().as_secs_f32()
+                "\nGot first result in {:?} milliseconds:",
+                start.elapsed().as_millis()
             );
 
-            println!("Streaming mutable items:\n");
+            match String::from_utf8(item.value().to_vec()) {
+                Ok(string) => {
+                    println!("  mutable item: {:?}, seq: {:?}\n", string, item.seq());
+                }
+                Err(_) => {
+                    println!(
+                        "  mutable item: {:?}, seq: {:?}\n",
+                        item.value(),
+                        item.seq(),
+                    );
+                }
+            };
         }
-
-        count += 1;
-
-        match String::from_utf8(res.item.value().to_vec()) {
-            Ok(string) => {
-                println!(
-                    "Got mutable item: {:?}, seq: {:?} | from: {:?}",
-                    string,
-                    res.item.seq(),
-                    res.from
-                );
-            }
-            Err(_) => {
-                println!(
-                    "Got mutable item: {:?}, seq: {:?} | from: {:?}",
-                    res.item.value(),
-                    res.item.seq(),
-                    res.from
-                );
-            }
-        };
     }
 
     println!(
-        "Visited {:?} nodes, found {:?} closest nodes",
-        response.visited,
-        &response.closest_nodes.len()
-    );
-
-    println!(
-        "\nQuery exhausted in {:?} seconds, got {:?} peers.",
+        "\nQuery exhausted in {:?} seconds, got {:?} values.",
         start.elapsed().as_secs_f32(),
         count
     );

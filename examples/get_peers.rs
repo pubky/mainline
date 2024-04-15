@@ -16,55 +16,50 @@ struct Cli {
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
+        // Switch to DEBUG to see incoming values and the IP of the responding nodes
+        .with_max_level(Level::INFO)
         .init();
 
     let cli = Cli::parse();
 
-    let infohash_parse_result: Result<Id, _> = Id::from_str(cli.infohash.as_str());
+    let info_hash = Id::from_str(cli.infohash.as_str()).expect("Expected info_hash");
 
-    match infohash_parse_result {
-        Ok(infohash) => {
-            let dht = Dht::default();
+    let dht = Dht::default();
 
-            let start = Instant::now();
-            let mut first = false;
+    println!("Looking up peers for info_hash: {} ...", info_hash);
+    println!("\n=== COLD QUERY ===");
+    get_peers(&dht, &info_hash);
 
-            println!("\nLooking up peers for infohash: {} ...\n", cli.infohash);
+    println!("\n=== SUBSEQUENT QUERY ===");
+    println!("Looking up peers for info_hash: {} ...", info_hash);
+    get_peers(&dht, &info_hash);
+}
 
-            let mut count = 0;
+fn get_peers(dht: &Dht, info_hash: &Id) {
+    let start = Instant::now();
+    let mut first = false;
 
-            let mut response = &mut dht.get_peers(infohash);
+    let mut count = 0;
 
-            for res in &mut response {
-                if !first {
-                    first = true;
-                    println!(
-                        "Got first result in {:?} seconds\n",
-                        start.elapsed().as_secs_f32()
-                    );
+    let receiver = dht.get_peers(*info_hash);
 
-                    println!("Streaming peers:\n");
-                }
-
-                count += 1;
-                println!("Got peer {:?} | from: {:?}", res.peer, res.from);
-            }
-
+    while let Ok(peer) = receiver.recv() {
+        if !first {
+            first = true;
             println!(
-                "Visited {:?} nodes, found {:?} closest nodes",
-                response.visited,
-                &response.closest_nodes.len()
+                "Got first result in {:?} milliseconds:",
+                start.elapsed().as_millis()
             );
 
-            println!(
-                "\nQuery exhausted in {:?} seconds, got {:?} peers.",
-                start.elapsed().as_secs_f32(),
-                count
-            );
+            println!("peer {:?}", peer,);
         }
-        Err(err) => {
-            println!("Error: {}", err)
-        }
-    };
+
+        count += 1;
+    }
+
+    println!(
+        "\nQuery exhausted in {:?} milliseconds, got {:?} peers.",
+        start.elapsed().as_millis(),
+        count
+    );
 }

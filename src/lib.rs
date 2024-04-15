@@ -4,8 +4,6 @@
 //! Rust implementation of read-only BitTorrent Mainline DHT client.
 
 // Public modules
-#[cfg(feature = "async")]
-pub mod async_dht;
 pub mod common;
 pub mod dht;
 pub mod error;
@@ -14,7 +12,7 @@ pub mod rpc;
 
 pub use crate::common::*;
 pub use crate::error::Error;
-pub use crate::rpc::response::*;
+pub use crate::rpc::Rpc;
 pub use dht::{Dht, DhtSettings, Testnet};
 
 // Alias Result to be the crate Result.

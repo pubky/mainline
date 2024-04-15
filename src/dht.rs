@@ -1,4 +1,4 @@
-//! Dht node.
+//! Dht node./
 
 use std::{
     net::SocketAddr,
@@ -9,11 +9,15 @@ use bytes::Bytes;
 use flume::{Receiver, Sender};
 
 use crate::{
-    common::{hash_immutable, target_from_key, Id, MutableItem, Node, RoutingTable},
-    rpc::{
-        GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseMessage,
-        ResponseSender, Rpc, StoreQueryMetdata,
+    common::{
+        hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender, RoutingTable,
     },
+    messages::{
+        AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
+        PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
+        RequestTypeSpecific,
+    },
+    rpc::Rpc,
     Result,
 };
 
@@ -177,8 +181,6 @@ impl Dht {
 
     /// Get peers for a given infohash.
     ///
-    /// Returns a blocking iterator over responses as they are received.
-    ///
     /// Note: each node of the network will only return a _random_ subset (usually 20)
     /// of the total peers it has for a given infohash, so if you are getting responses
     /// from 20 nodes, you can expect up to 400 peers in total, but if there are more
@@ -186,41 +188,23 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    ///
-    /// # Eaxmples
-    ///
-    /// ```
-    /// use mainline::{Dht, Id, Testnet};
-    ///
-    /// // Create a testnet for this example to avoid spamming the mainnet.
-    /// let testnet = Testnet::new(10);
-    ///
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
-    ///
-    /// let info_hash: Id = [0; 20].into();
-    ///
-    /// let mut response = dht.get_peers(info_hash);
-    /// for res in &mut response {
-    ///     println!("Got peer: {:?} | from: {:?}", res.peer, res.from)
-    /// }
-    ///
-    /// println!(
-    ///     "Visited {:?} nodes, found {:?} closest nodes",
-    ///     response.visited,
-    ///     &response.closest_nodes.len()
-    /// );
-    /// ```
-    pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
+    pub fn get_peers(&self, info_hash: Id) -> Receiver<SocketAddr> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
-        // Other requests like put_to and getters don't need that and is ok with
+        // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
+        let (sender, receiver) = flume::unbounded::<SocketAddr>();
 
-        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+        let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        Response::new(receiver)
+        let _ = self.sender.send(ActorMessage::Get(
+            info_hash,
+            request,
+            ResponseSender::Peer(sender),
+        ));
+
+        receiver
     }
 
     /// Announce a peer for a given infohash.
@@ -228,128 +212,106 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Receiver<PutResult> {
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
-        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+        let (port, implied_port) = match port {
+            Some(port) => (port, None),
+            None => (0, Some(true)),
+        };
 
-        let mut response = Response::new(receiver);
-
-        // Block until we got a Done response!
-        for _ in &mut response {}
-
-        self.announce_peer_to(info_hash, response.closest_nodes, port)
-    }
-
-    /// Announce a peer for a given infhoash to a specific set of nodes.
-    ///
-    /// Useful if you already have the list of closest_nodes from previous queries.
-    /// Note that tokens are only valid within a window of 5-10 minutes, so if your
-    /// list of nodes are older than 5 minutes, you should use [announce_peer](Dht::announce_peer) instead.
-    pub fn announce_peer_to(
-        &self,
-        info_hash: Id,
-        nodes: Vec<Node>,
-        port: Option<u16>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+        let request = PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+            info_hash,
+            port,
+            implied_port,
+        });
 
         let _ = self
             .sender
-            .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
+            .send(ActorMessage::Put(info_hash, request, sender));
 
-        receiver.recv().map_err(|e| e.into())
+        receiver
     }
 
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
+    pub fn get_immutable(&self, target: Id) -> Receiver<Bytes> {
+        let (sender, receiver) = flume::unbounded::<Bytes>();
 
-        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+            target,
+            seq: None,
+            salt: None,
+        });
 
-        Response::new(receiver)
+        let _ = self.sender.send(ActorMessage::Get(
+            target,
+            request,
+            ResponseSender::Immutable(sender),
+        ));
+
+        receiver
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Bytes) -> Result<StoreQueryMetdata> {
+    pub fn put_immutable(&self, value: Bytes) -> Receiver<PutResult> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
-        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
+        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
+            target,
+            v: value.clone().into(),
+        });
 
-        let mut response = Response::new(receiver);
+        let _ = self.sender.send(ActorMessage::Put(target, request, sender));
 
-        // Block until we got a Done response!
-        for _ in &mut response {}
-
-        self.put_immutable_to(target, value, response.closest_nodes)
-    }
-
-    /// Put an immutable data to specific nodes.
-    pub fn put_immutable_to(
-        &self,
-        target: Id,
-        value: Bytes,
-        nodes: Vec<Node>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
-
-        let _ = self
-            .sender
-            .send(ActorMessage::PutImmutable(target, value, nodes, sender));
-
-        receiver.recv().map_err(|e| e.into())
+        receiver
     }
 
     // === Mutable data ===
 
     /// Get a mutable data by its public_key and optional salt.
-    pub fn get_mutable(
-        &self,
-        public_key: &[u8; 32],
-        salt: Option<Bytes>,
-    ) -> Response<GetMutableResponse> {
+    pub fn get_mutable(&self, public_key: &[u8; 32], salt: Option<Bytes>) -> Receiver<MutableItem> {
         let target = target_from_key(public_key, &salt);
 
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
+        let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let _ = self
-            .sender
-            .send(ActorMessage::GetMutable(target, salt, sender));
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+            target,
+            seq: None,
+            salt,
+        });
 
-        Response::new(receiver)
+        let _ = self.sender.send(ActorMessage::Get(
+            target,
+            request,
+            ResponseSender::Mutable(sender),
+        ));
+
+        receiver
     }
 
     /// Put a mutable data to the DHT.
-    pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
+    pub fn put_mutable(&self, item: MutableItem) -> Receiver<PutResult> {
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
-        let _ = self.sender.send(ActorMessage::GetMutable(
-            *item.target(),
-            item.salt().clone(),
-            sender,
-        ));
-
-        let mut response = Response::new(receiver);
-
-        // Block until we got a Done response!
-        for _ in &mut response {}
-
-        self.put_mutable_to(item, response.closest_nodes)
-    }
-
-    /// Put a mutable data to specific nodes.
-    pub fn put_mutable_to(&self, item: MutableItem, nodes: Vec<Node>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
+            target: *item.target(),
+            v: item.value().clone().into(),
+            k: item.key().to_vec(),
+            seq: *item.seq(),
+            sig: item.signature().to_vec(),
+            salt: item.salt().clone().map(|s| s.to_vec()),
+            cas: *item.cas(),
+        });
 
         let _ = self
             .sender
-            .send(ActorMessage::PutMutable(item, nodes, sender));
+            .send(ActorMessage::Put(*item.target(), request, sender));
 
-        receiver.recv().map_err(|e| e.into())
+        receiver
     }
 
     // === Private Methods ===
@@ -387,23 +349,11 @@ impl Dht {
                     ActorMessage::RoutingTableSize(sender) => {
                         let _ = sender.send(rpc.routing_table_size());
                     }
-                    ActorMessage::GetPeers(info_hash, sender) => {
-                        rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
+                    ActorMessage::Put(target, request, sender) => {
+                        rpc.put(target, request, Some(sender));
                     }
-                    ActorMessage::AnnouncePeer(info_hash, nodes, port, sender) => {
-                        rpc.announce_peer(info_hash, nodes, port, ResponseSender::StoreItem(sender))
-                    }
-                    ActorMessage::GetImmutable(target, sender) => {
-                        rpc.get_immutable(target, ResponseSender::GetImmutable(sender))
-                    }
-                    ActorMessage::PutImmutable(target, value, nodes, sender) => {
-                        rpc.put_immutable(target, value, nodes, ResponseSender::StoreItem(sender))
-                    }
-                    ActorMessage::GetMutable(target, salt, sender) => {
-                        rpc.get_mutable(target, salt, ResponseSender::GetMutable(sender))
-                    }
-                    ActorMessage::PutMutable(item, nodes, sender) => {
-                        rpc.put_mutable(item, nodes, ResponseSender::StoreItem(sender))
+                    ActorMessage::Get(target, request, sender) => {
+                        rpc.get(target, request, Some(sender))
                     }
                 }
             }
@@ -421,23 +371,13 @@ impl Default for Dht {
 }
 
 pub(crate) enum ActorMessage {
-    Shutdown,
     LocalAddress(Sender<SocketAddr>),
     RoutingTable(Sender<RoutingTable>),
     RoutingTableSize(Sender<usize>),
 
-    GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
-    AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
-
-    GetImmutable(Id, Sender<ResponseMessage<GetImmutableResponse>>),
-    PutImmutable(Id, Bytes, Vec<Node>, Sender<StoreQueryMetdata>),
-
-    GetMutable(
-        Id,
-        Option<Bytes>,
-        Sender<ResponseMessage<GetMutableResponse>>,
-    ),
-    PutMutable(MutableItem, Vec<Node>, Sender<StoreQueryMetdata>),
+    Put(Id, PutRequestSpecific, Sender<PutResult>),
+    Get(Id, RequestTypeSpecific, ResponseSender),
+    Shutdown,
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
@@ -490,6 +430,7 @@ mod test {
             clone.shutdown();
         });
 
+        // TODO: verify correct error if we call anything after shutdown.
         dht.block_until_shutdown();
     }
 
@@ -514,18 +455,11 @@ mod test {
 
         let info_hash = Id::random();
 
-        match a.announce_peer(info_hash, Some(45555)) {
+        match a.announce_peer(info_hash, Some(45555)).recv() {
             Ok(_) => {
-                let responses: Vec<_> = b.get_peers(info_hash).collect();
+                let peer = b.get_peers(info_hash).recv().expect("No respnoses");
 
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(r.peer.port(), 45555);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
+                assert_eq!(peer.port(), 45555);
             }
             Err(_) => {}
         };
@@ -541,26 +475,11 @@ mod test {
         let value: Bytes = "Hello World!".into();
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        match a.put_immutable(value.clone()) {
-            Ok(result) => {
-                assert_ne!(result.stored_at().len(), 0);
-                assert_eq!(result.target(), expected_target);
+        let target = a.put_immutable(value.clone()).recv().unwrap().unwrap();
+        assert_eq!(target, expected_target);
 
-                let responses: Vec<_> = b.get_immutable(result.target()).collect();
-
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(r.value, value);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
-            }
-            Err(_) => {
-                panic!("Expected put_immutable to succeeed")
-            }
-        };
+        let response = b.get_immutable(target).recv().unwrap();
+        assert_eq!(response, value);
     }
 
     #[test]
@@ -580,26 +499,13 @@ mod test {
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        match a.put_mutable(item.clone()) {
-            Ok(result) => {
-                assert_ne!(result.stored_at().len(), 0);
+        a.put_mutable(item.clone()).recv().unwrap().unwrap();
 
-                let responses: Vec<_> = b
-                    .get_mutable(signer.verifying_key().as_bytes(), None)
-                    .collect();
+        let response = b
+            .get_mutable(signer.verifying_key().as_bytes(), None)
+            .recv()
+            .expect("No respnoses");
 
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(&r.item, &item);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
-            }
-            Err(_) => {
-                panic!("Expected put_immutable to succeeed")
-            }
-        };
+        assert_eq!(&response, &item);
     }
 }

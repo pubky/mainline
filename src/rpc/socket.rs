@@ -116,7 +116,7 @@ impl KrpcSocket {
     pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
         let _ = self.send(address, message).map_err(|e| {
-            debug!(?e, "Error sending error");
+            debug!(?e, "Error sending error message");
         });
     }
 
@@ -153,17 +153,16 @@ impl KrpcSocket {
                                     // Confirm that it is a response we actually sent.
                                     self.inflight_requests.remove(&message.transaction_id);
                                     return Some((message, from));
-                                } else {
-                                    debug!("Response from the wrong address");
                                 }
+                                trace!(?message, "Response from the wrong address");
                             } else {
-                                debug!("Unexpected response id");
+                                trace!(?message, "Unexpected response id");
                             };
                         }
                     }
                 }
                 Err(error) => {
-                    debug!(?error, ?bytes, "Received invalid message");
+                    trace!(?error, ?bytes, "Received invalid message");
                 }
             };
         };
@@ -240,7 +239,7 @@ mod test {
 
     use crate::{
         common::Id,
-        messages::{PingRequestArguments, PingResponseArguments},
+        messages::{PingResponseArguments, RequestTypeSpecific},
     };
 
     use super::*;
@@ -268,9 +267,10 @@ mod test {
         client.next_tid = 120;
 
         let client_address = client.local_addr();
-        let request = RequestSpecific::Ping(PingRequestArguments {
+        let request = RequestSpecific {
             requester_id: Id::random(),
-        });
+            request_type: RequestTypeSpecific::Ping,
+        };
 
         let expected_request = request.clone();
 
@@ -413,9 +413,10 @@ mod test {
         client.next_tid = 120;
 
         let _ = client.local_addr();
-        let request = RequestSpecific::Ping(PingRequestArguments {
+        let request = RequestSpecific {
             requester_id: Id::random(),
-        });
+            request_type: RequestTypeSpecific::Ping,
+        };
 
         let _ = request.clone();
 

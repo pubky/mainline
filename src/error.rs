@@ -1,5 +1,7 @@
 //! Main Crate Error
 
+use crate::messages::ErrorSpecific;
+
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
 pub enum Error {
@@ -41,4 +43,13 @@ pub enum Error {
 
     #[error("Invalid mutable item public key")]
     InvalidMutablePublicKey,
+
+    /// Failed to find any nodes close, usually means dht node failed to bootstrap,
+    /// so the routing table is empty. Check the machine's access to UDP socket,
+    /// or find better bootstrapping nodes.
+    #[error("Failed to find any nodes close to store value at")]
+    NoClosestNodes,
+
+    #[error("Query Error")]
+    QueryError(ErrorSpecific),
 }

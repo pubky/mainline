@@ -71,7 +71,7 @@ impl MutableItem {
         v: Bytes,
         seq: &i64,
         signature: &[u8],
-        salt: &Option<Bytes>,
+        salt: Option<Bytes>,
         cas: &Option<i64>,
     ) -> Result<Self> {
         let key = VerifyingKey::try_from(key).map_err(|_| Error::InvalidMutablePublicKey)?;
@@ -79,7 +79,7 @@ impl MutableItem {
         let signature =
             Signature::from_slice(signature).map_err(|_| Error::InvalidMutableSignature)?;
 
-        key.verify(&encode_signable(seq, &v, salt), &signature)
+        key.verify(&encode_signable(seq, &v, &salt), &signature)
             .map_err(|_| Error::InvalidMutableSignature)?;
 
         Ok(Self {
