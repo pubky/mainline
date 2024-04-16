@@ -234,10 +234,10 @@ mod test {
     #[test]
     fn table_is_empty() {
         let mut table = RoutingTable::new();
-        assert_eq!(table.is_empty(), true);
+        assert!(table.is_empty());
 
         table.add(Node::random());
-        assert_eq!(table.is_empty(), false);
+        assert!(!table.is_empty());
     }
 
     #[test]
@@ -254,10 +254,13 @@ mod test {
             table.add(node.clone());
         }
 
-        assert_eq!(
-            table.to_vec().sort_by(|a, b| a.id.cmp(&b.id)),
-            expected_nodes.to_vec().sort_by(|a, b| a.id.cmp(&b.id)),
-        );
+        let mut sorted_table = table.to_vec();
+        sorted_table.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut sorted_expected = expected_nodes.to_vec();
+        sorted_expected.sort_by(|a, b| a.id.cmp(&b.id));
+
+        assert_eq!(sorted_table, sorted_expected);
     }
 
     #[test]
@@ -305,8 +308,8 @@ mod test {
 
         table.add(node.clone());
 
-        assert_eq!(table.add(node), false);
-        assert_eq!(table.is_empty(), true)
+        assert!(!table.add(node));
+        assert!(table.is_empty())
     }
 
     #[test]
@@ -471,7 +474,7 @@ mod test {
         let nodes: Vec<Node> = ids
             .iter()
             .map(|str| {
-                let id = Id::from_str(*str).unwrap();
+                let id = Id::from_str(str).unwrap();
                 Node::random().with_id(id)
             })
             .collect();
@@ -508,7 +511,7 @@ mod test {
                 "b61fbd992a13af05feba939f597b5f6ee61188e3",
             ]
             .iter()
-            .map(|id| Id::from_str(*id).unwrap())
+            .map(|id| Id::from_str(id).unwrap())
             .collect();
 
             let target = local_id;
@@ -544,7 +547,7 @@ mod test {
                 "fd042ff1404b495720ad8345404ff5f25acd02a8",
             ]
             .iter()
-            .map(|str| Id::from_str(*str).unwrap())
+            .map(|str| Id::from_str(str).unwrap())
             .collect();
 
             let target = Id::from_str("d1406a3d3a8354d566f21dba8bd06c537cde2a20").unwrap();

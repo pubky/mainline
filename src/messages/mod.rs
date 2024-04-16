@@ -895,14 +895,12 @@ mod tests {
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
         assert_eq!(
-            match parsed_msg.get_closer_nodes() {
-                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
-                None => None,
-            },
-            match original_msg.get_closer_nodes() {
-                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
-                None => None,
-            },
+            parsed_msg
+                .get_closer_nodes()
+                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
+            original_msg
+                .get_closer_nodes()
+                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>())
         );
     }
 
@@ -957,14 +955,12 @@ mod tests {
         assert_eq!(parsed_msg.requester_ip, original_msg.requester_ip);
         assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
         assert_eq!(
-            match parsed_msg.get_closer_nodes() {
-                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
-                None => None,
-            },
-            match original_msg.get_closer_nodes() {
-                Some(nodes) => Some(nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
-                None => None,
-            },
+            parsed_msg
+                .get_closer_nodes()
+                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
+            original_msg
+                .get_closer_nodes()
+                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>())
         );
     }
 

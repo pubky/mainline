@@ -278,7 +278,7 @@ mod test {
             if let Some((message, from)) = server.recv_from() {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 120);
-                assert_eq!(message.read_only, true, "Read-only should be true");
+                assert!(message.read_only, "Read-only should be true");
                 assert_eq!(
                     message.version,
                     Some(VERSION.to_vec()),
@@ -321,7 +321,7 @@ mod test {
             if let Some((message, from)) = server.recv_from() {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 8);
-                assert_eq!(message.read_only, true, "Read-only should be true");
+                assert!(message.read_only, "Read-only should be true");
                 assert_eq!(
                     message.version,
                     Some(VERSION.to_vec()),
