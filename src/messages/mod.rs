@@ -82,6 +82,7 @@ pub enum ResponseSpecific {
     GetImmutable(GetImmutableResponseArguments),
     GetMutable(GetMutableResponseArguments),
     NoValues(NoValuesResponseArguments),
+    NoMoreRecentValue(NoMoreRecentValueResponseArguments),
 }
 
 // === PING ===
@@ -166,6 +167,14 @@ pub struct GetMutableResponseArguments {
     pub k: Vec<u8>,
     pub seq: i64,
     pub sig: Vec<u8>,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct NoMoreRecentValueResponseArguments {
+    pub responder_id: Id,
+    pub token: Vec<u8>,
+    pub nodes: Option<Vec<Node>>,
+    pub seq: i64,
 }
 
 // === Put Immutable ===
@@ -356,6 +365,16 @@ impl Message {
                             },
                         }
                     }
+                    ResponseSpecific::NoMoreRecentValue(args) => {
+                        internal::DHTResponseSpecific::NoMoreRecentValue {
+                            arguments: internal::DHTNoMoreRecentValueResponseArguments {
+                                id: args.responder_id.to_vec(),
+                                token: args.token.clone(),
+                                nodes: args.nodes.as_ref().map(|nodes| nodes4_to_bytes(nodes)),
+                                seq: args.seq,
+                            },
+                        }
+                    }
                 }),
 
                 MessageType::Error(err) => {
@@ -531,6 +550,19 @@ impl Message {
                                 sig: arguments.sig,
                             })
                         }
+                        internal::DHTResponseSpecific::NoMoreRecentValue { arguments } => {
+                            ResponseSpecific::NoMoreRecentValue(
+                                NoMoreRecentValueResponseArguments {
+                                    responder_id: Id::from_bytes(arguments.id)?,
+                                    token: arguments.token,
+                                    nodes: match arguments.nodes {
+                                        Some(nodes) => Some(bytes_to_nodes4(nodes)?),
+                                        None => None,
+                                    },
+                                    seq: arguments.seq,
+                                },
+                            )
+                        }
                     })
                 }
 
@@ -594,6 +626,7 @@ impl Message {
                 ResponseSpecific::GetImmutable(arguments) => arguments.responder_id,
                 ResponseSpecific::GetMutable(arguments) => arguments.responder_id,
                 ResponseSpecific::NoValues(arguments) => arguments.responder_id,
+                ResponseSpecific::NoMoreRecentValue(arguments) => arguments.responder_id,
             },
             MessageType::Error(_) => {
                 return None;
@@ -613,6 +646,7 @@ impl Message {
                 ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_ref().cloned(),
                 ResponseSpecific::GetImmutable(arguments) => arguments.nodes.as_ref().cloned(),
                 ResponseSpecific::NoValues(arguments) => arguments.nodes.as_ref().cloned(),
+                ResponseSpecific::NoMoreRecentValue(arguments) => arguments.nodes.as_ref().cloned(),
             },
             _ => None,
         }
@@ -633,6 +667,9 @@ impl Message {
                     Some((arguments.responder_id, arguments.token.clone()))
                 }
                 ResponseSpecific::NoValues(arguments) => {
+                    Some((arguments.responder_id, arguments.token.clone()))
+                }
+                ResponseSpecific::NoMoreRecentValue(arguments) => {
                     Some((arguments.responder_id, arguments.token.clone()))
                 }
             },

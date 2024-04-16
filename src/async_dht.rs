@@ -63,7 +63,8 @@ impl AsyncDht {
     // === Public Methods ===
 
     pub fn shutdown(&self) -> Result<()> {
-        self.0.shutdown()
+        self.0.shutdown();
+        self.0.handle.join()
     }
 
     // === Peers ===
@@ -168,16 +169,13 @@ impl AsyncDht {
         &self,
         public_key: &[u8; 32],
         salt: Option<Bytes>,
+        seq: Option<i64>,
     ) -> Result<flume::r#async::RecvStream<MutableItem>> {
         let target = target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
-            target,
-            seq: None,
-            salt,
-        });
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
         let _ = self.0.sender.send(ActorMessage::Get(
             target,
@@ -344,13 +342,51 @@ mod test {
             a.put_mutable(item.clone()).await.unwrap();
 
             let response = b
-                .get_mutable(signer.verifying_key().as_bytes(), None)
+                .get_mutable(signer.verifying_key().as_bytes(), None, None)
                 .unwrap()
                 .next()
                 .await
                 .expect("No mutable values");
 
             assert_eq!(&response, &item);
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn put_get_mutable_no_more_recent_value() {
+        async fn test() {
+            let testnet = Testnet::new(10);
+
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .as_async();
+            let b = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let seq = 1000;
+            let value: Bytes = "Hello World!".into();
+
+            let item = MutableItem::new(signer.clone(), value, seq, None);
+
+            a.put_mutable(item.clone()).await.unwrap();
+
+            let response = b
+                .get_mutable(signer.verifying_key().as_bytes(), None, Some(seq))
+                .unwrap()
+                .next()
+                .await;
+
+            assert!(&response.is_none());
         }
 
         futures::executor::block_on(test());

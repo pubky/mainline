@@ -96,6 +96,11 @@ pub enum DHTResponseSpecific {
         arguments: DHTGetMutableResponseArguments,
     },
 
+    NoMoreRecentValue {
+        #[serde(rename = "r")]
+        arguments: DHTNoMoreRecentValueResponseArguments,
+    },
+
     GetImmutable {
         #[serde(rename = "r")]
         arguments: DHTGetImmutableResponseArguments,
@@ -257,6 +262,21 @@ pub struct DHTGetImmutableResponseArguments {
 
     #[serde(with = "serde_bytes")]
     pub v: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct DHTNoMoreRecentValueResponseArguments {
+    #[serde(with = "serde_bytes")]
+    pub id: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    pub token: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub nodes: Option<Vec<u8>>,
+
+    pub seq: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
