@@ -20,7 +20,7 @@ fn main() {
 
     let cli = Cli::parse();
 
-    let dht = Dht::default();
+    let dht = Dht::client().unwrap();
     let value = Bytes::from(cli.value.to_owned());
 
     println!("\nStoring immutable data: {} ...\n", cli.value);

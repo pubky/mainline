@@ -5,17 +5,17 @@
 
 // Public modules
 #[cfg(feature = "async")]
-pub mod async_dht;
-pub mod common;
-pub mod dht;
-pub mod error;
-pub mod messages;
-pub mod rpc;
+mod async_dht;
+mod common;
+mod dht;
+mod error;
+mod messages;
+mod rpc;
 
 pub use crate::common::*;
 pub use crate::error::Error;
-pub use crate::rpc::Rpc;
 pub use dht::{Dht, DhtSettings, Testnet};
+pub use rpc::Rpc;
 
 // Alias Result to be the crate Result.
 pub type Result<T, E = Error> = core::result::Result<T, E>;

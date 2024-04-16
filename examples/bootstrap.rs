@@ -10,7 +10,7 @@ fn main() {
         .with_max_level(Level::DEBUG)
         .init();
 
-    Dht::default();
+    Dht::client().unwrap();
 
     thread::sleep(Duration::from_secs(5));
 }

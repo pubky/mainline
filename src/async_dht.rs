@@ -1,7 +1,7 @@
 //! AsyncDht node.
 
 use bytes::Bytes;
-use std::{net::SocketAddr, thread::JoinHandle};
+use std::net::SocketAddr;
 
 use crate::{
     common::{
@@ -32,7 +32,7 @@ impl AsyncDht {
     pub async fn local_addr(&self) -> Result<SocketAddr> {
         let (sender, receiver) = flume::bounded::<SocketAddr>(1);
 
-        self.0.sender.send(ActorMessage::LocalAddress(sender))?;
+        self.0 .0.send(ActorMessage::LocalAddress(sender))?;
 
         Ok(receiver.recv_async().await?)
     }
@@ -41,7 +41,7 @@ impl AsyncDht {
     pub async fn routing_table(&self) -> Result<RoutingTable> {
         let (sender, receiver) = flume::bounded::<RoutingTable>(1);
 
-        self.0.sender.send(ActorMessage::RoutingTable(sender))?;
+        self.0 .0.send(ActorMessage::RoutingTable(sender))?;
 
         Ok(receiver.recv_async().await?)
     }
@@ -50,21 +50,19 @@ impl AsyncDht {
     pub async fn routing_table_size(&self) -> Result<usize> {
         let (sender, receiver) = flume::bounded::<usize>(1);
 
-        self.0.sender.send(ActorMessage::RoutingTableSize(sender))?;
+        self.0 .0.send(ActorMessage::RoutingTableSize(sender))?;
 
         Ok(receiver.recv_async().await?)
     }
 
-    /// Returns the `JoinHandle` of the actor thread
-    pub fn handle(self) -> Option<JoinHandle<()>> {
-        self.0.handle()
-    }
-
     // === Public Methods ===
 
-    pub fn shutdown(&self) -> Result<()> {
-        self.0.shutdown();
-        self.0.handle.join()
+    pub async fn shutdown(&self) -> Result<()> {
+        let (sender, receiver) = flume::bounded::<()>(1);
+
+        self.0 .0.send(ActorMessage::Shutdown(sender))?;
+
+        Ok(receiver.recv_async().await?)
     }
 
     // === Peers ===
@@ -88,7 +86,7 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.0.sender.send(ActorMessage::Get(
+        self.0 .0.send(ActorMessage::Get(
             info_hash,
             request,
             ResponseSender::Peer(sender),
@@ -117,7 +115,7 @@ impl AsyncDht {
         });
 
         self.0
-            .sender
+             .0
             .send(ActorMessage::Put(info_hash, request, sender))?;
 
         receiver.recv_async().await?
@@ -135,7 +133,7 @@ impl AsyncDht {
             salt: None,
         });
 
-        self.0.sender.send(ActorMessage::Get(
+        self.0 .0.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Immutable(sender),
@@ -155,9 +153,7 @@ impl AsyncDht {
             v: value.clone().into(),
         });
 
-        self.0
-            .sender
-            .send(ActorMessage::Put(target, request, sender))?;
+        self.0 .0.send(ActorMessage::Put(target, request, sender))?;
 
         receiver.recv_async().await?
     }
@@ -177,7 +173,7 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.0.sender.send(ActorMessage::Get(
+        let _ = self.0 .0.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Mutable(sender),
@@ -202,7 +198,7 @@ impl AsyncDht {
 
         let _ = self
             .0
-            .sender
+             .0
             .send(ActorMessage::Put(*item.target(), request, sender));
 
         receiver.recv_async().await?
@@ -223,35 +219,17 @@ mod test {
     #[test]
     fn shutdown() {
         async fn test() {
-            let dht = Dht::default().as_async();
+            let dht = Dht::client().unwrap().as_async();
 
             dht.local_addr().await.unwrap();
 
             let a = dht.clone();
 
-            dht.shutdown().unwrap();
-            dht.handle().map(|h| h.join());
+            dht.shutdown().await.unwrap();
 
             let local_addr = a.local_addr().await;
             assert!(local_addr.is_err());
         }
-        futures::executor::block_on(test());
-    }
-
-    #[test]
-    fn bind_twice() {
-        async fn test() {
-            let a = Dht::default().as_async();
-            let b = Dht::builder()
-                .port(a.local_addr().await.unwrap().port())
-                .as_server()
-                .build()
-                .as_async();
-
-            let result = b.handle().unwrap().join();
-            assert!(result.is_err());
-        }
-
         futures::executor::block_on(test());
     }
 
@@ -263,10 +241,12 @@ mod test {
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
 
             let info_hash = Id::random();
@@ -296,10 +276,12 @@ mod test {
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
 
             let value: Bytes = "Hello World!".into();
@@ -323,10 +305,12 @@ mod test {
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
 
             let signer = SigningKey::from_bytes(&[
@@ -362,10 +346,12 @@ mod test {
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
                 .build()
+                .unwrap()
                 .as_async();
 
             let signer = SigningKey::from_bytes(&[

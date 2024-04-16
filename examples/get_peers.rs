@@ -24,7 +24,7 @@ fn main() {
 
     let info_hash = Id::from_str(cli.infohash.as_str()).expect("Expected info_hash");
 
-    let dht = Dht::default();
+    let dht = Dht::client().unwrap();
 
     println!("Looking up peers for info_hash: {} ...", info_hash);
     println!("\n=== COLD QUERY ===");

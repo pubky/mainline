@@ -2,7 +2,7 @@
 
 use std::{net::SocketAddr, num::NonZeroUsize};
 
-use rand::{rngs::ThreadRng, thread_rng, Rng};
+use rand::{thread_rng, Rng};
 
 use crate::common::Id;
 
@@ -10,7 +10,6 @@ use lru::LruCache;
 
 #[derive(Debug)]
 pub struct PeersStore {
-    rng: ThreadRng,
     info_hashes: LruCache<Id, LruCache<Id, SocketAddr>>,
     max_peers: NonZeroUsize,
 }
@@ -18,7 +17,6 @@ pub struct PeersStore {
 impl PeersStore {
     pub fn new(max_info_hashes: NonZeroUsize, max_peers: NonZeroUsize) -> Self {
         Self {
-            rng: thread_rng(),
             info_hashes: LruCache::new(max_info_hashes),
             max_peers,
         }
@@ -41,7 +39,8 @@ impl PeersStore {
 
             if size == 0 {
                 return None;
-            } else if size < target_size {
+            }
+            if size < target_size {
                 return Some(
                     info_hash_lru
                         .iter()
@@ -59,7 +58,7 @@ impl PeersStore {
                 let current_chance = remaining_slots as f64 / remaining_items as f64;
 
                 // Randomly decide to add the item based on the current chance
-                if self.rng.gen_bool(current_chance) {
+                if random_bool(current_chance) {
                     results.push(addr.to_owned());
                     if results.len() == target_size {
                         break;
@@ -72,6 +71,10 @@ impl PeersStore {
 
         None
     }
+}
+
+fn random_bool(chance: f64) -> bool {
+    thread_rng().gen_bool(chance)
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ fn main() {
 
     let cli = Cli::parse();
 
-    let dht = Dht::default();
+    let dht = Dht::client().unwrap();
 
     let signer = from_hex(cli.secret_key);
 
