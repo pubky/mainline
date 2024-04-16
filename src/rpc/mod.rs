@@ -19,8 +19,9 @@ use crate::common::{
 };
 use crate::messages::{
     FindNodeRequestArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-    GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType, PutRequestSpecific,
-    RequestSpecific, RequestTypeSpecific, ResponseSpecific,
+    GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType,
+    NoMoreRecentValueResponseArguments, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
+    ResponseSpecific,
 };
 
 use crate::Result;
@@ -422,6 +423,23 @@ impl Rpc {
                             "Invalid mutable record"
                         );
                     }
+                }
+                MessageType::Response(ResponseSpecific::NoMoreRecentValue(
+                    NoMoreRecentValueResponseArguments {
+                        seq, responder_id, ..
+                    },
+                )) => {
+                    debug!(
+                        target= ?query.target,
+                        salt= ?match query.request.request_type.clone() {
+                            RequestTypeSpecific::GetValue(args) => args.salt,
+                            _ => None,
+                        },
+                        ?seq,
+                        ?from,
+                        ?responder_id,
+                        "No more recent mutable value"
+                    );
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()

@@ -9,9 +9,9 @@ use crate::messages::{
     AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
     FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
     GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments,
-    NoValuesResponseArguments, PingResponseArguments, PutImmutableRequestArguments,
-    PutMutableRequestArguments, PutRequest, PutRequestSpecific, RequestSpecific,
-    RequestTypeSpecific, ResponseSpecific,
+    NoMoreRecentValueResponseArguments, NoValuesResponseArguments, PingResponseArguments,
+    PutImmutableRequestArguments, PutMutableRequestArguments, PutRequest, PutRequestSpecific,
+    RequestSpecific, RequestTypeSpecific, ResponseSpecific,
 };
 
 use super::super::Rpc;
@@ -65,7 +65,7 @@ pub fn handle_request(
         }
         RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, .. }) => {
             if seq.is_some() {
-                return handle_get_mutable(rpc, from, transaction_id, target);
+                return handle_get_mutable(rpc, from, transaction_id, target, seq);
             }
 
             if let Some(v) = rpc.immutable_values.get(target) {
@@ -80,7 +80,7 @@ pub fn handle_request(
                     }),
                 )
             } else {
-                handle_get_mutable(rpc, from, transaction_id, target);
+                handle_get_mutable(rpc, from, transaction_id, target, seq);
             };
         }
         RequestTypeSpecific::Put(PutRequest {
@@ -322,25 +322,39 @@ pub fn handle_request(
     }
 }
 
-fn handle_get_mutable(rpc: &mut Rpc, from: SocketAddr, transaction_id: u16, target: &Id) {
+fn handle_get_mutable(
+    rpc: &mut Rpc,
+    from: SocketAddr,
+    transaction_id: u16,
+    target: &Id,
+    seq: &Option<i64>,
+) {
     rpc.socket.response(
         from,
         transaction_id,
         match rpc.mutable_values.get(target) {
             Some(item) => {
-                // TODO: support seq (NoMoreRecentValue)
-                // if let Some(seq) = seq {
-                // }
+                let no_more_recent_values = seq.map(|request_seq| item.seq() <= &request_seq);
 
-                ResponseSpecific::GetMutable(GetMutableResponseArguments {
-                    responder_id: rpc.id,
-                    token: rpc.tokens.generate_token(from).into(),
-                    nodes: Some(rpc.routing_table.closest(target)),
-                    v: item.value().to_vec(),
-                    k: item.key().to_vec(),
-                    seq: *item.seq(),
-                    sig: item.signature().to_vec(),
-                })
+                match no_more_recent_values {
+                    Some(true) => {
+                        ResponseSpecific::NoMoreRecentValue(NoMoreRecentValueResponseArguments {
+                            responder_id: rpc.id,
+                            token: rpc.tokens.generate_token(from).into(),
+                            nodes: Some(rpc.routing_table.closest(target)),
+                            seq: *item.seq(),
+                        })
+                    }
+                    _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
+                        responder_id: rpc.id,
+                        token: rpc.tokens.generate_token(from).into(),
+                        nodes: Some(rpc.routing_table.closest(target)),
+                        v: item.value().to_vec(),
+                        k: item.key().to_vec(),
+                        seq: *item.seq(),
+                        sig: item.signature().to_vec(),
+                    }),
+                }
             }
             None => ResponseSpecific::NoValues(NoValuesResponseArguments {
                 responder_id: rpc.id,

@@ -282,17 +282,14 @@ impl Dht {
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
+        seq: Option<i64>,
         salt: Option<Bytes>,
     ) -> Result<flume::IntoIter<MutableItem>> {
         let target = target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
-            target,
-            seq: None,
-            salt,
-        });
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
         let _ = self.sender.send(ActorMessage::Get(
             target,
@@ -502,11 +499,38 @@ mod test {
         a.put_mutable(item.clone()).unwrap();
 
         let response = b
-            .get_mutable(signer.verifying_key().as_bytes(), None)
+            .get_mutable(signer.verifying_key().as_bytes(), None, None)
             .unwrap()
             .next()
             .expect("No mutable values");
 
         assert_eq!(&response, &item);
+    }
+
+    #[test]
+    fn put_get_mutable_no_more_recent_value() {
+        let testnet = Testnet::new(10);
+
+        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+        let value: Bytes = "Hello World!".into();
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        a.put_mutable(item.clone()).unwrap();
+
+        let response = b
+            .get_mutable(signer.verifying_key().as_bytes(), Some(seq), None)
+            .unwrap()
+            .next();
+
+        assert!(&response.is_none());
     }
 }
