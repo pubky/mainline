@@ -25,7 +25,7 @@ fn main() {
     let cli = Cli::parse();
 
     let public_key = from_hex(cli.public_key.clone());
-    let dht = Dht::default();
+    let dht = Dht::client().unwrap();
 
     println!("Looking up mutable item: {} ...", cli.public_key);
     println!("\n=== COLD LOOKUP ===");

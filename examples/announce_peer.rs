@@ -21,7 +21,7 @@ fn main() {
 
     let info_hash = Id::from_str(cli.infohash.as_str()).expect("invalid infohash");
 
-    let dht = Dht::default();
+    let dht = Dht::client().unwrap();
 
     println!("\nAnnouncing peer on an infohash: {} ...\n", cli.infohash);
 

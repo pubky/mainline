@@ -1,7 +1,7 @@
 //! Manage tokens for remote client IPs.
 
 use crc::{Crc, CRC_32_ISCSI};
-use rand::{rngs::ThreadRng, Rng};
+use rand::{thread_rng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
@@ -15,7 +15,6 @@ const TOKEN_SIZE: usize = 4;
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 pub struct Tokens {
-    rng: ThreadRng,
     prev_secret: [u8; SECRET_SIZE],
     curr_secret: [u8; SECRET_SIZE],
     last_updated: Instant,
@@ -29,15 +28,9 @@ impl Debug for Tokens {
 
 impl Tokens {
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
-
-        let prev_secret = rng.gen();
-        let curr_secret = rng.gen();
-
         Tokens {
-            rng,
-            prev_secret,
-            curr_secret,
+            prev_secret: random_secret(),
+            curr_secret: random_secret(),
             last_updated: Instant::now(),
         }
     }
@@ -60,7 +53,7 @@ impl Tokens {
         trace!("Rotating secrets");
 
         self.prev_secret = self.curr_secret;
-        self.curr_secret = self.rng.gen();
+        self.curr_secret = random_secret();
 
         self.last_updated = Instant::now();
     }
@@ -90,6 +83,12 @@ impl Tokens {
 
         checksum.to_be_bytes()
     }
+}
+
+fn random_secret() -> [u8; SECRET_SIZE] {
+    let mut rng = thread_rng();
+
+    rng.gen()
 }
 
 #[cfg(test)]

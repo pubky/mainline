@@ -35,11 +35,11 @@ pub enum Error {
     InvalidTransactionId(Vec<u8>),
 
     #[error(transparent)]
-    /// Transparent [std::io::Error]
+    /// Transparent [flume::RecvError]
     Receive(#[from] flume::RecvError),
 
     #[error(transparent)]
-    /// Transparent [std::io::Error]
+    /// The dht was shutdown.
     DhtIsShutdown(#[from] flume::SendError<ActorMessage>),
 
     #[error("Invalid mutable item signature")]
