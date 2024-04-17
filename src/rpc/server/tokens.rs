@@ -38,7 +38,7 @@ impl Tokens {
     // === Public Methods ===
 
     pub fn should_update(&self) -> bool {
-        self.last_updated.elapsed() > crate::TOKEN_ROTATE_INTERVAL
+        self.last_updated.elapsed() > crate::common::TOKEN_ROTATE_INTERVAL
     }
 
     /// Validate that the token was generated within the past 10 minutes

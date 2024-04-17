@@ -46,6 +46,7 @@ const MAX_VALUES: usize = 1000;
 const MAX_CACHED_BUCKETS: usize = 1000;
 
 #[derive(Debug)]
+/// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
 pub struct Rpc {
     // Options
     id: Id,
@@ -78,6 +79,7 @@ pub struct Rpc {
 }
 
 impl Rpc {
+    /// Create a new Rpc
     pub fn new() -> Result<Self> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
@@ -111,21 +113,26 @@ impl Rpc {
 
     // === Options ===
 
+    /// Override the Rpc's Id which is set randomly be default.
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
         self
     }
 
+    /// Set the Rpc to read_only, so it won't handle incoming request,
+    /// and will tell other nodes that so, so they don't bother calling.
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.socket.read_only = read_only;
         self
     }
 
+    /// Override bootstraping nodes.
     pub fn with_bootstrap(mut self, bootstrap: Vec<String>) -> Self {
         self.bootstrap = bootstrap;
         self
     }
 
+    /// Override the port (will make new Udp socket).
     pub fn with_port(mut self, port: u16) -> Result<Self> {
         self.socket = KrpcSocket::bind(port)?;
         Ok(self)
@@ -139,6 +146,7 @@ impl Rpc {
 
     // === Getters ===
 
+    /// Returns the node's Id
     pub fn id(&self) -> Id {
         self.id
     }
@@ -161,6 +169,9 @@ impl Rpc {
 
     // === Public Methods ===
 
+    /// Advance the inflight queries, receive incoming requests,
+    /// maintain the routing table, and everything else that needs
+    /// to happen at every tick.
     pub fn tick(&mut self) {
         // === Tokens ===
         if self.tokens.should_update() {

@@ -6,9 +6,7 @@ use bytes::Bytes;
 use flume::{Receiver, Sender};
 
 use crate::{
-    common::{
-        hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender, RoutingTable,
-    },
+    common::{hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender},
     messages::{
         AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
@@ -19,6 +17,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+/// Mainlin eDht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
 pub struct Builder {
@@ -26,6 +25,7 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Create a Dht node.
     pub fn build(&self) -> Result<Dht> {
         Dht::new(self.settings.clone())
     }
@@ -50,6 +50,7 @@ impl Builder {
 }
 
 #[derive(Debug, Clone)]
+/// Dht settings
 pub struct DhtSettings {
     pub bootstrap: Option<Vec<String>>,
     pub read_only: bool,
@@ -67,6 +68,7 @@ impl Default for DhtSettings {
 }
 
 impl Dht {
+    /// Returns a builder to edit settings before creating a Dht node.
     pub fn builder() -> Builder {
         Builder {
             settings: DhtSettings::default(),
@@ -120,26 +122,9 @@ impl Dht {
         Ok(receiver.recv()?)
     }
 
-    /// Returns a clone of the [RoutingTable] table of this node.
-    pub fn routing_table(&self) -> Result<RoutingTable> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
-
-        self.0.send(ActorMessage::RoutingTable(sender))?;
-
-        Ok(receiver.recv()?)
-    }
-
-    /// Returns the size of the [RoutingTable] without cloning the entire table.
-    pub fn routing_table_size(&self) -> Result<usize> {
-        let (sender, receiver) = flume::bounded::<usize>(1);
-
-        self.0.send(ActorMessage::RoutingTableSize(sender))?;
-
-        Ok(receiver.recv()?)
-    }
-
     // === Public Methods ===
 
+    /// Shutdown the actor thread loop.
     pub fn shutdown(&self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
@@ -297,12 +282,6 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
                 ActorMessage::LocalAddress(sender) => {
                     let _ = sender.send(rpc.local_addr());
                 }
-                ActorMessage::RoutingTable(sender) => {
-                    let _ = sender.send(rpc.routing_table());
-                }
-                ActorMessage::RoutingTableSize(sender) => {
-                    let _ = sender.send(rpc.routing_table_size());
-                }
                 ActorMessage::Put(target, request, sender) => {
                     rpc.put(target, request, Some(sender));
                 }
@@ -318,8 +297,6 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
 
 pub enum ActorMessage {
     LocalAddress(Sender<SocketAddr>),
-    RoutingTable(Sender<RoutingTable>),
-    RoutingTableSize(Sender<usize>),
 
     Put(Id, PutRequestSpecific, Sender<PutResult>),
     Get(Id, RequestTypeSpecific, ResponseSender),

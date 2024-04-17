@@ -8,6 +8,7 @@ use std::convert::TryFrom;
 use crate::{Error, Id, Result};
 
 #[derive(Clone, Debug, PartialEq)]
+/// [Bep_0044](https://www.bittorrent.org/beps/bep_0044.html)'s Mutable item.
 pub struct MutableItem {
     /// hash of the key and optional salt
     target: Id,

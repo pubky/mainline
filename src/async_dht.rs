@@ -4,9 +4,7 @@ use bytes::Bytes;
 use std::net::SocketAddr;
 
 use crate::{
-    common::{
-        hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender, RoutingTable,
-    },
+    common::{hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender},
     dht::{ActorMessage, Dht},
     messages::{
         AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
@@ -23,6 +21,7 @@ impl Dht {
 }
 
 #[derive(Debug, Clone)]
+/// Async version of the Dht node.
 pub struct AsyncDht(Dht);
 
 impl AsyncDht {
@@ -37,26 +36,9 @@ impl AsyncDht {
         Ok(receiver.recv_async().await?)
     }
 
-    /// Returns a clone of the [RoutingTable] table of this node.
-    pub async fn routing_table(&self) -> Result<RoutingTable> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
-
-        self.0 .0.send(ActorMessage::RoutingTable(sender))?;
-
-        Ok(receiver.recv_async().await?)
-    }
-
-    /// Returns the size of the [RoutingTable] without cloning the entire table.
-    pub async fn routing_table_size(&self) -> Result<usize> {
-        let (sender, receiver) = flume::bounded::<usize>(1);
-
-        self.0 .0.send(ActorMessage::RoutingTableSize(sender))?;
-
-        Ok(receiver.recv_async().await?)
-    }
-
     // === Public Methods ===
 
+    /// Shutdown the actor thread loop.
     pub async fn shutdown(&self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 

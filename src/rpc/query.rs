@@ -7,11 +7,11 @@ use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
 
 use super::socket::KrpcSocket;
-use crate::common::{Id, Node, Response, ResponseSender, RoutingTable};
+use crate::common::{Id, Node, PutResult, Response, ResponseSender, RoutingTable};
 use crate::messages::{
     ErrorSpecific, PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
 };
-use crate::{Error, PutResult};
+use crate::Error;
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and

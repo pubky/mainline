@@ -30,7 +30,7 @@ impl Id {
 
         Id { bytes }
     }
-    /// Create a new Id from some bytes. Returns Err if `bytes` is not of length [ID_SIZE].
+    /// Create a new Id from some bytes. Returns Err if the input is not 20 bytes long.
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
         let bytes = bytes.as_ref();
         if bytes.len() != ID_SIZE {
