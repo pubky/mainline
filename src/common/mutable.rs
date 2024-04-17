@@ -41,6 +41,23 @@ impl MutableItem {
         )
     }
 
+    /// Return the target of a [MutableItem] by hashing its `public_key` and an optional `salt`
+    pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Bytes>) -> Id {
+        let mut encoded = vec![];
+
+        encoded.extend(public_key);
+
+        if let Some(salt) = salt {
+            encoded.extend(salt);
+        }
+
+        let mut hasher = Sha1::new();
+        hasher.update(&encoded);
+        let hash = hasher.digest().bytes();
+
+        Id::from_bytes(hash).unwrap()
+    }
+
     /// Set the cas number if needed.
     pub fn with_cas(mut self, cas: i64) -> Self {
         self.cas = Some(cas);
@@ -56,7 +73,7 @@ impl MutableItem {
         salt: Option<Bytes>,
     ) -> Self {
         Self {
-            target: target_from_key(&key, &salt),
+            target: MutableItem::target_from_key(&key, &salt),
             key,
             value,
             seq,
@@ -123,22 +140,6 @@ impl MutableItem {
     pub fn cas(&self) -> &Option<i64> {
         &self.cas
     }
-}
-
-pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Bytes>) -> Id {
-    let mut encoded = vec![];
-
-    encoded.extend(public_key);
-
-    if let Some(salt) = salt {
-        encoded.extend(salt);
-    }
-
-    let mut hasher = Sha1::new();
-    hasher.update(&encoded);
-    let hash = hasher.digest().bytes();
-
-    Id::from_bytes(hash).unwrap()
 }
 
 pub fn encode_signable(seq: &i64, value: &Bytes, salt: &Option<Bytes>) -> Bytes {

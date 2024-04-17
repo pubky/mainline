@@ -4,7 +4,7 @@ use bytes::Bytes;
 use std::net::SocketAddr;
 
 use crate::{
-    common::{hash_immutable, target_from_key, Id, MutableItem, PutResult, ResponseSender},
+    common::{hash_immutable, Id, MutableItem, PutResult, ResponseSender},
     dht::{ActorMessage, Dht},
     messages::{
         AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
@@ -149,7 +149,7 @@ impl AsyncDht {
         salt: Option<Bytes>,
         seq: Option<i64>,
     ) -> Result<flume::r#async::RecvStream<MutableItem>> {
-        let target = target_from_key(public_key, &salt);
+        let target = MutableItem::target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
