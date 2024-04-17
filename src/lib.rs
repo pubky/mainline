@@ -13,7 +13,7 @@ mod rpc;
 
 #[cfg(feature = "async")]
 pub use crate::async_dht::AsyncDht;
-pub use crate::common::{Id, MutableItem};
+pub use crate::common::{messages, Id, MutableItem};
 pub use crate::error::Error;
 pub use dht::{Dht, DhtSettings, Testnet};
 pub use rpc::Rpc;
