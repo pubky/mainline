@@ -32,3 +32,6 @@ tracing-subscriber = "0.3"
 [features]
 async = ["flume/async"]
 default = []
+
+[package.metadata.docs.rs]
+all-features = true
