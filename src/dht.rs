@@ -6,11 +6,14 @@ use bytes::Bytes;
 use flume::{Receiver, Sender};
 
 use crate::{
-    common::{hash_immutable, Id, MutableItem, PutResult, ResponseSender},
-    messages::{
-        AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
-        PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-        RequestTypeSpecific,
+    common::{
+        hash_immutable,
+        messages::{
+            AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
+            PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
+            RequestTypeSpecific,
+        },
+        Id, MutableItem, PutResult, ResponseSender,
     },
     rpc::Rpc,
     Result,

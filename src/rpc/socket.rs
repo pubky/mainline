@@ -5,7 +5,9 @@ use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, trace};
 
-use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
+use crate::common::messages::{
+    ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific,
+};
 
 use crate::Result;
 
@@ -237,9 +239,9 @@ fn compare_socket_addr(a: &SocketAddr, b: &SocketAddr) -> bool {
 mod test {
     use std::thread;
 
-    use crate::{
-        common::Id,
+    use crate::common::{
         messages::{PingResponseArguments, RequestTypeSpecific},
+        Id,
     };
 
     use super::*;

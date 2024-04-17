@@ -9,7 +9,6 @@ mod async_dht;
 mod common;
 mod dht;
 mod error;
-mod messages;
 mod rpc;
 
 #[cfg(feature = "async")]

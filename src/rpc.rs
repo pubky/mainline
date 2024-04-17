@@ -15,13 +15,13 @@ use lru::LruCache;
 use tracing::{debug, error};
 
 use crate::common::{
+    messages::{
+        FindNodeRequestArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
+        GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType,
+        NoMoreRecentValueResponseArguments, PutRequestSpecific, RequestSpecific,
+        RequestTypeSpecific, ResponseSpecific,
+    },
     validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
-};
-use crate::messages::{
-    FindNodeRequestArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-    GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType,
-    NoMoreRecentValueResponseArguments, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
-    ResponseSpecific,
 };
 
 use crate::Result;
@@ -172,7 +172,9 @@ impl Rpc {
     /// Advance the inflight queries, receive incoming requests,
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
-    pub fn tick(&mut self) {
+    ///
+    /// Returns the incoming message (if any) after handling it internally.
+    pub fn tick(&mut self) -> Option<Message> {
         // === Tokens ===
         if self.tokens.should_update() {
             self.tokens.rotate()
@@ -212,22 +214,25 @@ impl Rpc {
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
-        if let Some((message, from)) = self.socket.recv_from() {
-            // Add a node to our routing table on any incoming request or response.
-            self.add_node(&message, from);
+        match self.socket.recv_from() {
+            Some((message, from)) => {
+                // Add a node to our routing table on any incoming request or response.
+                self.add_node(&message, from);
 
-            match &message.message_type {
-                MessageType::Request(request_specific) => {
-                    handle_request(self, from, message.transaction_id, request_specific)
-                }
-                MessageType::Response(_) => {
-                    self.handle_response(from, &message);
-                }
-                MessageType::Error(error) => {
-                    debug!(?error, "RPC Error response");
-                }
+                match &message.message_type {
+                    MessageType::Request(request_specific) => {
+                        handle_request(self, from, message.transaction_id, request_specific);
+                    }
+                    MessageType::Response(_) => self.handle_response(from, &message),
+                    MessageType::Error(error) => {
+                        debug!(?error, "RPC Error response");
+                    }
+                };
+
+                Some(message)
             }
-        };
+            None => None,
+        }
     }
 
     /// Store a value in the closest nodes, optionally trigger a lookup query if
@@ -336,7 +341,7 @@ impl Rpc {
     fn handle_response(&mut self, from: SocketAddr, message: &Message) {
         if message.read_only {
             return;
-        }
+        };
 
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
         if let Some(query) = self.put_queries.iter_mut().find_map(|(_, query)| {
@@ -388,13 +393,12 @@ impl Rpc {
                         v, responder_id, ..
                     },
                 )) => {
-                    if !validate_immutable(v, &query.target) {
+                    if validate_immutable(v, &query.target) {
+                        query.response(from, Response::Immutable(v.to_owned().into()));
+                    } else {
                         let target = query.target;
                         debug!(?v, ?target, ?responder_id, ?from, "Invalid immutable value");
-                        return;
                     }
-
-                    query.response(from, Response::Immutable(v.to_owned().into()));
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
                     GetMutableResponseArguments {
@@ -455,8 +459,8 @@ impl Rpc {
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
                 _ => {}
-            }
-        }
+            };
+        };
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {

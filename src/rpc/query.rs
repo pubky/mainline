@@ -7,9 +7,11 @@ use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
 
 use super::socket::KrpcSocket;
-use crate::common::{Id, Node, PutResult, Response, ResponseSender, RoutingTable};
-use crate::messages::{
-    ErrorSpecific, PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
+use crate::common::{
+    messages::{
+        ErrorSpecific, PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
+    },
+    Id, Node, PutResult, Response, ResponseSender, RoutingTable,
 };
 use crate::Error;
 
