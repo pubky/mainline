@@ -172,9 +172,7 @@ impl Rpc {
     /// Advance the inflight queries, receive incoming requests,
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
-    ///
-    /// Returns the incoming message (if any) after handling it internally.
-    pub fn tick(&mut self) -> Option<Message> {
+    pub fn tick(&mut self) {
         // === Tokens ===
         if self.tokens.should_update() {
             self.tokens.rotate()
@@ -214,24 +212,21 @@ impl Rpc {
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
-        match self.socket.recv_from() {
-            Some((message, from)) => {
-                // Add a node to our routing table on any incoming request or response.
-                self.add_node(&message, from);
+        if let Some((message, from)) = self.socket.recv_from() {
+            // Add a node to our routing table on any incoming request or response.
+            self.add_node(&message, from);
 
-                match &message.message_type {
-                    MessageType::Request(request_specific) => {
-                        handle_request(self, from, message.transaction_id, request_specific);
-                    }
-                    MessageType::Response(_) => self.handle_response(from, &message),
-                    MessageType::Error(error) => {
-                        debug!(?error, "RPC Error response");
-                    }
-                };
-
-                Some(message)
-            }
-            None => None,
+            match &message.message_type {
+                MessageType::Request(request_specific) => {
+                    handle_request(self, from, message.transaction_id, request_specific);
+                }
+                MessageType::Response(_) => {
+                    self.handle_response(from, &message);
+                }
+                MessageType::Error(error) => {
+                    debug!(?error, "RPC Error response");
+                }
+            };
         }
     }
 
