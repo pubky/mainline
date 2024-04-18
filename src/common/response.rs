@@ -8,14 +8,14 @@ use super::MutableItem;
 
 #[derive(Clone, Debug)]
 pub enum Response {
-    Peer(SocketAddr),
+    Peers(Vec<SocketAddr>),
     Immutable(Bytes),
     Mutable(MutableItem),
 }
 
 #[derive(Clone, Debug)]
 pub enum ResponseSender {
-    Peer(Sender<SocketAddr>),
+    Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),
 }

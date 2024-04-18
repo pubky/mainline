@@ -10,6 +10,7 @@ use crate::common::{Id, Node, MAX_DISTANCE};
 pub const MAX_BUCKET_SIZE_K: usize = 20;
 
 #[derive(Debug, Clone)]
+/// Simplified Kademlia routing table
 pub struct RoutingTable {
     id: Id,
     buckets: BTreeMap<u8, KBucket>,

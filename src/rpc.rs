@@ -1,7 +1,6 @@
 //! K-RPC implementatioStoreQueryMetdatan
 
 mod query;
-mod server;
 mod socket;
 
 use std::collections::HashMap;
@@ -9,16 +8,15 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
 use flume::Sender;
 use lru::LruCache;
 use tracing::{debug, error};
 
 use crate::common::{
     messages::{
-        FindNodeRequestArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-        GetPeersResponseArguments, GetValueRequestArguments, Message, MessageType,
-        NoMoreRecentValueResponseArguments, PutRequestSpecific, RequestSpecific,
+        ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
+        GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
+        MessageType, NoMoreRecentValueResponseArguments, PutRequestSpecific, RequestSpecific,
         RequestTypeSpecific, ResponseSpecific,
     },
     validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
@@ -26,7 +24,6 @@ use crate::common::{
 
 use crate::{Error, Result};
 use query::{PutQuery, Query};
-use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
 
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
@@ -39,10 +36,6 @@ const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-// Stored data in server mode.
-const MAX_INFO_HASHES: usize = 2000;
-const MAX_PEERS: usize = 500;
-const MAX_VALUES: usize = 1000;
 const MAX_CACHED_BUCKETS: usize = 1000;
 
 #[derive(Debug)]
@@ -69,13 +62,6 @@ pub struct Rpc {
     /// Put queries are special, since they have to wait for a corresponing
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
-
-    tokens: Tokens,
-
-    // server storage
-    peers: PeersStore,
-    immutable_values: LruCache<Id, Bytes>,
-    mutable_values: LruCache<Id, MutableItem>,
 }
 
 impl Rpc {
@@ -96,15 +82,7 @@ impl Rpc {
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
             put_queries: HashMap::new(),
-            tokens: Tokens::new(),
             closest_nodes: LruCache::new(NonZeroUsize::new(MAX_CACHED_BUCKETS).unwrap()),
-
-            peers: PeersStore::new(
-                NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
-                NonZeroUsize::new(MAX_PEERS).unwrap(),
-            ),
-            immutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
-            mutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
 
             last_table_refresh: Instant::now() - REFRESH_TABLE_INTERVAL,
             last_table_ping: Instant::now(),
@@ -147,8 +125,8 @@ impl Rpc {
     // === Getters ===
 
     /// Returns the node's Id
-    pub fn id(&self) -> Id {
-        self.id
+    pub fn id(&self) -> &Id {
+        &self.id
     }
 
     /// Returns the address the server is listening to.
@@ -157,8 +135,8 @@ impl Rpc {
         self.socket.local_addr()
     }
 
-    pub fn routing_table(&self) -> RoutingTable {
-        self.routing_table.clone()
+    pub fn routing_table(&self) -> &RoutingTable {
+        &self.routing_table
     }
 
     // === Public Methods ===
@@ -166,12 +144,7 @@ impl Rpc {
     /// Advance the inflight queries, receive incoming requests,
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
-    pub fn tick(&mut self) -> RpcTickOutcome {
-        // === Tokens ===
-        if self.tokens.should_update() {
-            self.tokens.rotate()
-        }
-
+    pub fn tick(&mut self) -> RpcTickReport {
         // === Tick Queries ===
 
         let mut done_put_queries = Vec::with_capacity(self.queries.len());
@@ -230,28 +203,40 @@ impl Rpc {
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
-        let received_message = match self.socket.recv_from() {
-            Some((message, from)) => {
-                // Add a node to our routing table on any incoming request or response.
-                self.add_node(&message, from);
+        let received_from = self.socket.recv_from().and_then(|(message, from)| {
+            // Add a node to our routing table on any incoming request or response.
+            self.add_node(&message, from);
 
-                match &message.message_type {
-                    MessageType::Request(request_specific) => {
-                        handle_request(self, from, message.transaction_id, request_specific);
-                    }
-                    _ => self.handle_response(from, &message),
-                };
-
-                Some((message, from))
+            match &message.message_type {
+                MessageType::Request(request_specific) => Some(RpcMessage::Request((
+                    message.transaction_id,
+                    request_specific.clone(),
+                ))),
+                _ => self.handle_response(from, &message),
             }
-            None => None,
-        };
+            .map(|message| (message, from))
+        });
 
-        RpcTickOutcome {
+        RpcTickReport {
             done_get_queries,
             done_put_queries,
-            received_message,
+            received_from,
         }
+    }
+
+    /// Send a response to the given address.
+    pub fn response(
+        &mut self,
+        address: SocketAddr,
+        transaction_id: u16,
+        response: ResponseSpecific,
+    ) {
+        self.socket.response(address, transaction_id, response)
+    }
+
+    /// Send an error to the given address.
+    pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
+        self.socket.error(address, transaction_id, error)
     }
 
     /// Store a value in the closest nodes, optionally trigger a lookup query if
@@ -367,9 +352,9 @@ impl Rpc {
 
     // === Private Methods ===
 
-    fn handle_response(&mut self, from: SocketAddr, message: &Message) {
+    fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<RpcMessage> {
         if message.read_only {
-            return;
+            return None;
         };
 
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
@@ -387,7 +372,7 @@ impl Rpc {
                 _ => {}
             };
 
-            return;
+            return None;
         }
 
         // Get corresponing query for message.transaction_id
@@ -406,14 +391,20 @@ impl Rpc {
                 query.add_responding_node(Node::new(responder_id, from).with_token(token.clone()));
             }
 
+            let target = query.target;
+
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     values,
                     ..
                 })) => {
-                    for peer in values.clone() {
-                        query.response(from, Response::Peer(peer));
-                    }
+                    let response = Response::Peers(values.to_owned());
+                    query.response(from, response.to_owned());
+
+                    return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                        target,
+                        payload: RpcQueryResponsePayload::Value(response),
+                    }));
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
                     GetImmutableResponseArguments {
@@ -421,11 +412,18 @@ impl Rpc {
                     },
                 )) => {
                     if validate_immutable(v, &query.target) {
-                        query.response(from, Response::Immutable(v.to_owned().into()));
-                    } else {
-                        let target = query.target;
-                        debug!(?v, ?target, ?responder_id, ?from, "Invalid immutable value");
+                        let response = Response::Immutable(v.to_owned().into());
+
+                        query.response(from, response.to_owned());
+
+                        return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                            target,
+                            payload: RpcQueryResponsePayload::Value(response),
+                        }));
                     }
+
+                    let target = query.target;
+                    debug!(?v, ?target, ?responder_id, ?from, "Invalid immutable value");
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
                     GetMutableResponseArguments {
@@ -452,19 +450,26 @@ impl Rpc {
                         salt.to_owned(),
                         &None,
                     ) {
-                        query.response(from, Response::Mutable(item));
-                    } else {
-                        debug!(
-                            ?v,
-                            ?seq,
-                            ?sig,
-                            ?salt,
-                            ?target,
-                            ?from,
-                            ?responder_id,
-                            "Invalid mutable record"
-                        );
+                        let response = Response::Mutable(item);
+
+                        query.response(from, response.to_owned());
+
+                        return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                            target,
+                            payload: RpcQueryResponsePayload::Value(response),
+                        }));
                     }
+
+                    debug!(
+                        ?v,
+                        ?seq,
+                        ?sig,
+                        ?salt,
+                        ?target,
+                        ?from,
+                        ?responder_id,
+                        "Invalid mutable record"
+                    );
                 }
                 MessageType::Response(ResponseSpecific::NoMoreRecentValue(
                     NoMoreRecentValueResponseArguments {
@@ -485,12 +490,19 @@ impl Rpc {
                 }
                 MessageType::Error(error) => {
                     debug!(?error, ?message, "Get query got error response");
+
+                    return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                        target,
+                        payload: RpcQueryResponsePayload::Error(error.to_owned()),
+                    }));
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
                 _ => {}
             };
         };
+
+        None
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
@@ -546,11 +558,32 @@ impl Rpc {
     }
 }
 
-pub struct RpcTickOutcome {
+/// Any received message and done queries in the [Rpc::tick].
+pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
     pub done_get_queries: Vec<Id>,
     /// All the [Id]s of the done [Rpc::put] queries.
     pub done_put_queries: Vec<Id>,
-    /// Any incoming message in this tick, after handling it.
-    pub received_message: Option<(Message, SocketAddr)>,
+    /// The received message on this tick if any, and the SocketAddr of the sender.
+    pub received_from: Option<(RpcMessage, SocketAddr)>,
+}
+
+/// A request or a query's response reported from [RpcTickReport::received_from]
+pub enum RpcMessage {
+    Request((u16, RequestSpecific)),
+    QueryResponse(RpcQueryResponse),
+}
+
+/// Target and payload of a response to a [Rpc::get] or [Rpc::put] query
+pub struct RpcQueryResponse {
+    pub target: Id,
+    pub payload: RpcQueryResponsePayload,
+}
+
+/// Rpc query resopnse; a value or an error.
+pub enum RpcQueryResponsePayload {
+    /// A set of peers, immutable or mutable value response for a request
+    Value(Response),
+    /// An error response for a sent request
+    Error(ErrorSpecific),
 }

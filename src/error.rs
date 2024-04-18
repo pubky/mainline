@@ -58,6 +58,6 @@ pub enum Error {
     QueryError(ErrorSpecific),
 
     #[error("Put query is already inflight to the same target: {0}")]
-    /// [crate::Rpc::put] query is already inflight to the same target
+    /// [crate::rpc::Rpc::put] query is already inflight to the same target
     PutQueryIsInflight(Id),
 }

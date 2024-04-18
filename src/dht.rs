@@ -15,7 +15,8 @@ use crate::{
         },
         Id, MutableItem, PutResult, ResponseSender,
     },
-    rpc::Rpc,
+    rpc::{Rpc, RpcMessage},
+    server::Server,
     Result,
 };
 
@@ -147,20 +148,20 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(&self, info_hash: Id) -> Result<flume::IntoIter<SocketAddr>> {
+    pub fn get_peers(&self, info_hash: Id) -> Result<flume::IntoIter<Vec<SocketAddr>>> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<SocketAddr>();
+        let (sender, receiver) = flume::unbounded::<Vec<SocketAddr>>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
         self.0.send(ActorMessage::Get(
             info_hash,
             request,
-            ResponseSender::Peer(sender),
+            ResponseSender::Peers(sender),
         ))?;
 
         Ok(receiver.into_iter())
@@ -274,6 +275,8 @@ impl Dht {
 }
 
 fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
+    let mut server = Server::default();
+
     loop {
         if let Ok(actor_message) = receiver.try_recv() {
             match actor_message {
@@ -294,7 +297,14 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
             }
         }
 
-        rpc.tick();
+        let report = rpc.tick();
+
+        // Handle incoming request with the default Server logic.
+        if let Some((RpcMessage::Request((transaction_id, request_specific)), from)) =
+            report.received_from
+        {
+            server.handle_request(&mut rpc, from, transaction_id, &request_specific);
+        };
     }
 }
 
@@ -391,9 +401,9 @@ mod test {
         a.announce_peer(info_hash, Some(45555))
             .expect("failed to announce");
 
-        let peer = b.get_peers(info_hash).unwrap().next().expect("No peers");
+        let peers = b.get_peers(info_hash).unwrap().next().expect("No peers");
 
-        assert_eq!(peer.port(), 45555);
+        assert_eq!(peers.first().unwrap().port(), 45555);
     }
 
     #[test]

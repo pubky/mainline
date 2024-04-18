@@ -135,7 +135,7 @@ impl Query {
 
     fn send_value(&self, sender: &ResponseSender, response: Response) {
         match (sender, response) {
-            (ResponseSender::Peer(s), Response::Peer(r)) => {
+            (ResponseSender::Peers(s), Response::Peers(r)) => {
                 let _ = s.send(r);
             }
             (ResponseSender::Mutable(s), Response::Mutable(r)) => {

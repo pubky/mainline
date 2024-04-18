@@ -1,7 +1,7 @@
 //! Manage tokens for remote client IPs.
 
 use crc::{Crc, CRC_32_ISCSI};
-use rand::{thread_rng, Rng};
+use rand::{rngs::ThreadRng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
@@ -27,10 +27,10 @@ impl Debug for Tokens {
 }
 
 impl Tokens {
-    pub fn new() -> Self {
+    pub fn new(rng: &mut ThreadRng) -> Self {
         Tokens {
-            prev_secret: random_secret(),
-            curr_secret: random_secret(),
+            prev_secret: rng.gen(),
+            curr_secret: rng.gen(),
             last_updated: Instant::now(),
         }
     }
@@ -49,11 +49,11 @@ impl Tokens {
         token == &curr || token == &prev
     }
 
-    pub fn rotate(&mut self) {
+    pub fn rotate(&mut self, rng: &mut ThreadRng) {
         trace!("Rotating secrets");
 
         self.prev_secret = self.curr_secret;
-        self.curr_secret = random_secret();
+        self.curr_secret = rng.gen();
 
         self.last_updated = Instant::now();
     }
@@ -85,20 +85,16 @@ impl Tokens {
     }
 }
 
-fn random_secret() -> [u8; SECRET_SIZE] {
-    let mut rng = thread_rng();
-
-    rng.gen()
-}
-
 #[cfg(test)]
 mod test {
+
+    use rand::thread_rng;
 
     use super::*;
 
     #[test]
     fn valid_tokens() {
-        let mut tokens = Tokens::new();
+        let mut tokens = Tokens::new(&mut thread_rng());
 
         let address = SocketAddr::from(([127, 0, 0, 1], 6881));
         let token = tokens.generate_token(address);

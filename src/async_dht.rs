@@ -18,6 +18,7 @@ use crate::{
 };
 
 impl Dht {
+    /// Return an async version of the Dht client.
     pub fn as_async(self) -> AsyncDht {
         AsyncDht(self)
     }
@@ -61,20 +62,20 @@ impl AsyncDht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(&self, info_hash: Id) -> Result<flume::r#async::RecvStream<SocketAddr>> {
+    pub fn get_peers(&self, info_hash: Id) -> Result<flume::r#async::RecvStream<Vec<SocketAddr>>> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<SocketAddr>();
+        let (sender, receiver) = flume::unbounded::<Vec<SocketAddr>>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
         self.0 .0.send(ActorMessage::Get(
             info_hash,
             request,
-            ResponseSender::Peer(sender),
+            ResponseSender::Peers(sender),
         ))?;
 
         Ok(receiver.into_stream())
@@ -197,7 +198,7 @@ mod test {
     use ed25519_dalek::SigningKey;
     use futures::StreamExt;
 
-    use crate::Testnet;
+    use crate::dht::Testnet;
 
     use super::*;
 
@@ -240,14 +241,14 @@ mod test {
                 .await
                 .expect("failed to announce");
 
-            let peer = b
+            let peers = b
                 .get_peers(info_hash)
                 .unwrap()
                 .next()
                 .await
                 .expect("No peers");
 
-            assert_eq!(peer.port(), 45555);
+            assert_eq!(peers.first().unwrap().port(), 45555);
         }
 
         futures::executor::block_on(test());
