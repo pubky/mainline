@@ -23,8 +23,8 @@ use crate::common::{
     },
     validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
 };
-use crate::{Error, Result};
 
+use crate::{Error, Result};
 use query::{PutQuery, Query};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
@@ -157,14 +157,8 @@ impl Rpc {
         self.socket.local_addr()
     }
 
-    /// Returns a clone of the routing_table.
     pub fn routing_table(&self) -> RoutingTable {
         self.routing_table.clone()
-    }
-
-    /// Returns a clone of the routing_table size.
-    pub fn routing_table_size(&self) -> usize {
-        self.routing_table.size()
     }
 
     // === Public Methods ===
@@ -172,7 +166,7 @@ impl Rpc {
     /// Advance the inflight queries, receive incoming requests,
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> RpcTickOutcome {
         // === Tokens ===
         if self.tokens.should_update() {
             self.tokens.rotate()
@@ -236,16 +230,27 @@ impl Rpc {
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
-        if let Some((message, from)) = self.socket.recv_from() {
-            // Add a node to our routing table on any incoming request or response.
-            self.add_node(&message, from);
+        let received_message = match self.socket.recv_from() {
+            Some((message, from)) => {
+                // Add a node to our routing table on any incoming request or response.
+                self.add_node(&message, from);
 
-            match &message.message_type {
-                MessageType::Request(request_specific) => {
-                    handle_request(self, from, message.transaction_id, request_specific);
-                }
-                _ => self.handle_response(from, &message),
-            };
+                match &message.message_type {
+                    MessageType::Request(request_specific) => {
+                        handle_request(self, from, message.transaction_id, request_specific);
+                    }
+                    _ => self.handle_response(from, &message),
+                };
+
+                Some((message, from))
+            }
+            None => None,
+        };
+
+        RpcTickOutcome {
+            done_get_queries,
+            done_put_queries,
+            received_message,
         }
     }
 
@@ -478,6 +483,9 @@ impl Rpc {
                         "No more recent mutable value"
                     );
                 }
+                MessageType::Error(error) => {
+                    debug!(?error, ?message, "Get query got error response");
+                }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
                 _ => {}
@@ -536,4 +544,13 @@ impl Rpc {
             },
         );
     }
+}
+
+pub struct RpcTickOutcome {
+    /// All the [Id]s of the done [Rpc::get] queries.
+    pub done_get_queries: Vec<Id>,
+    /// All the [Id]s of the done [Rpc::put] queries.
+    pub done_put_queries: Vec<Id>,
+    /// Any incoming message in this tick, after handling it.
+    pub received_message: Option<(Message, SocketAddr)>,
 }
