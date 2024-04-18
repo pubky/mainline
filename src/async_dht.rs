@@ -362,4 +362,24 @@ mod test {
 
         futures::executor::block_on(test());
     }
+
+    #[test]
+    fn repeated_put_query() {
+        async fn test() {
+            let testnet = Testnet::new(10);
+
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let first = a.put_immutable(vec![1, 2, 3].into());
+            let second = a.put_immutable(vec![1, 2, 3].into());
+
+            assert_eq!(first.await.unwrap(), second.await.unwrap());
+        }
+
+        futures::executor::block_on(test());
+    }
 }

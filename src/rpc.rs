@@ -23,8 +23,8 @@ use crate::common::{
     },
     validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
 };
+use crate::{Error, Result};
 
-use crate::Result;
 use query::{PutQuery, Query};
 use server::{handle_request, PeersStore, Tokens};
 use socket::KrpcSocket;
@@ -179,16 +179,28 @@ impl Rpc {
         }
 
         // === Tick Queries ===
-        // Advance queries one step at a time.
-        for (_, query) in self.put_queries.iter_mut() {
-            query.tick(&mut self.socket);
+
+        let mut done_put_queries = Vec::with_capacity(self.queries.len());
+
+        for (id, query) in self.put_queries.iter_mut() {
+            let done = query.tick(&mut self.socket);
+
+            if done {
+                done_put_queries.push(*id);
+            }
         }
 
-        let mut closest_nodes = Vec::with_capacity(self.queries.len());
-        for (id, query) in self.queries.iter_mut() {
-            query.tick(&mut self.socket);
+        let self_id = self.id;
+        let table_size = self.routing_table.size();
 
-            if query.is_done() {
+        let mut closest_nodes = Vec::with_capacity(self.queries.len());
+        let mut done_get_queries = Vec::with_capacity(self.queries.len());
+        // let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+
+        for (id, query) in self.queries.iter_mut() {
+            let is_done = query.tick(&mut self.socket);
+
+            if is_done {
                 let closest = query.closest();
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
@@ -196,6 +208,13 @@ impl Rpc {
                 }
 
                 closest_nodes.push((*id, closest));
+                done_get_queries.push(*id);
+
+                if id == &self_id && table_size == 0 {
+                    error!("Could not bootstrap the routing table");
+                } else {
+                    debug!(table_size, "Populated the routing table");
+                };
             };
         }
         for (id, nodes) in closest_nodes {
@@ -207,7 +226,12 @@ impl Rpc {
         // disconnect response receivers too soon.
         //
         // Has to happen _before_ `self.socket.recv_from()`.
-        self.cleanup_queries();
+        for id in &done_get_queries {
+            self.queries.remove(id);
+        }
+        for id in &done_put_queries {
+            self.put_queries.remove(id);
+        }
 
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
@@ -220,12 +244,7 @@ impl Rpc {
                 MessageType::Request(request_specific) => {
                     handle_request(self, from, message.transaction_id, request_specific);
                 }
-                MessageType::Response(_) => {
-                    self.handle_response(from, &message);
-                }
-                MessageType::Error(error) => {
-                    debug!(?error, "RPC Error response");
-                }
+                _ => self.handle_response(from, &message),
             };
         }
     }
@@ -240,6 +259,16 @@ impl Rpc {
         request: PutRequestSpecific,
         sender: Option<Sender<PutResult>>,
     ) {
+        if self.put_queries.contains_key(&target) {
+            if let Some(sender) = sender {
+                let _ = sender.send(Err(Error::PutQueryIsInflight(target)));
+            };
+
+            debug!(?target, "Put query for the same target is already inflight");
+
+            return;
+        }
+
         let mut query = PutQuery::new(target, request.clone(), sender);
 
         if let Some(closest_nodes) = self
@@ -339,12 +368,11 @@ impl Rpc {
         };
 
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
-        if let Some(query) = self.put_queries.iter_mut().find_map(|(_, query)| {
-            if query.remove_inflight_request(message.transaction_id) {
-                return Some(query);
-            }
-            None
-        }) {
+        if let Some(query) = self
+            .put_queries
+            .values_mut()
+            .find(|query| query.inflight(message.transaction_id))
+        {
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::Ping(_)) => {
                     // Mark storage at that node as a success.
@@ -358,12 +386,11 @@ impl Rpc {
         }
 
         // Get corresponing query for message.transaction_id
-        if let Some(query) = self.queries.iter_mut().find_map(|(_, query)| {
-            if query.remove_inflight_request(message.transaction_id) {
-                return Some(query);
-            }
-            None
-        }) {
+        if let Some(query) = self
+            .queries
+            .values_mut()
+            .find(|query| query.inflight(message.transaction_id))
+        {
             if let Some(nodes) = message.get_closer_nodes() {
                 for node in nodes {
                     query.add_candidate(node);
@@ -466,27 +493,6 @@ impl Rpc {
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
-    }
-
-    fn cleanup_queries(&mut self) {
-        let self_id = self.id;
-        let table_size = self.routing_table.size();
-
-        self.queries.retain(|id, query| {
-            let done = query.is_done();
-
-            if done && id == &self_id {
-                if table_size == 0 {
-                    error!("Could not bootstrap the routing table");
-                } else {
-                    debug!(table_size, "Populated the routing table");
-                }
-            }
-
-            !done
-        });
-
-        self.put_queries.retain(|_, query| !query.is_done());
     }
 
     fn maintain_routing_table(&mut self) {

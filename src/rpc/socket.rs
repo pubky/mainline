@@ -1,6 +1,6 @@
 //! Udp socket layer managine incoming/outgoing requests and responses.
 
-use std::collections::HashMap;
+use std::cmp::Ordering;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, trace};
@@ -22,13 +22,16 @@ const READ_TIMEOUT: Duration = Duration::from_millis(100);
 pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
-    pub read_only: bool,
-    pub request_timeout: Duration,
-    pub inflight_requests: HashMap<u16, InflightRequest>,
+    pub(crate) read_only: bool,
+    pub(crate) request_timeout: Duration,
+    /// We don't need a HashMap, since we know the capacity is [u16::Max] requests.
+    /// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
+    pub inflight_requests: Vec<InflightRequest>,
 }
 
 #[derive(Debug)]
 pub struct InflightRequest {
+    tid: u16,
     to: SocketAddr,
     sent_at: Instant,
 }
@@ -46,7 +49,7 @@ impl KrpcSocket {
             next_tid: 0,
             read_only: false,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            inflight_requests: HashMap::new(),
+            inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
 
@@ -59,7 +62,7 @@ impl KrpcSocket {
             next_tid: 0,
             read_only: false,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            inflight_requests: HashMap::new(),
+            inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
 
@@ -80,17 +83,22 @@ impl KrpcSocket {
 
     // === Public Methods ===
 
+    /// Returns true if this message's transaction_id is still inflight
+    pub fn inflight(&self, transaction_id: &u16) -> bool {
+        self.inflight_requests
+            .binary_search_by(|request| request.tid.cmp(transaction_id))
+            .is_ok()
+    }
+
     /// Send a request to the given address and return a receiver for the response.
     pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
         let message = self.request_message(request);
 
-        self.inflight_requests.insert(
-            message.transaction_id,
-            InflightRequest {
-                to: address,
-                sent_at: Instant::now(),
-            },
-        );
+        self.inflight_requests.push(InflightRequest {
+            tid: message.transaction_id,
+            to: address,
+            sent_at: Instant::now(),
+        });
 
         let tid = message.transaction_id;
         let _ = self.send(address, message).map_err(|e| {
@@ -128,9 +136,21 @@ impl KrpcSocket {
         let mut buf = [0u8; MTU];
 
         // Cleanup timedout transaction_ids.
-        let request_timeout = self.request_timeout;
-        self.inflight_requests
-            .retain(|_, request| request.sent_at.elapsed() < request_timeout);
+        // Find the first timedout request, and delete all earlier requests.
+        match self.inflight_requests.binary_search_by(|request| {
+            if request.sent_at.elapsed() > self.request_timeout {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        }) {
+            Ok(index) => {
+                self.inflight_requests.drain(..index);
+            }
+            Err(index) => {
+                self.inflight_requests.drain(..index);
+            }
+        };
 
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
             let bytes = &buf[..amt];
@@ -148,17 +168,26 @@ impl KrpcSocket {
                         }
                         // Response or an error to an inflight request.
                         _ => {
-                            if let Some(inflight_request) =
-                                self.inflight_requests.get(&message.transaction_id)
-                            {
-                                if compare_socket_addr(&inflight_request.to, &from) {
-                                    // Confirm that it is a response we actually sent.
-                                    self.inflight_requests.remove(&message.transaction_id);
-                                    return Some((message, from));
+                            match self.inflight_requests.binary_search_by(|request| {
+                                request.tid.cmp(&message.transaction_id)
+                            }) {
+                                Ok(index) => {
+                                    match self.inflight_requests.get(index) {
+                                        Some(inflight_request) => {
+                                            if compare_socket_addr(&inflight_request.to, &from) {
+                                                // Confirm that it is a response we actually sent.
+                                                self.inflight_requests.remove(index);
+
+                                                return Some((message, from));
+                                            }
+                                            trace!(?message, "Response from the wrong address");
+                                        }
+                                        _ => panic!("should not return None"),
+                                    };
                                 }
-                                trace!(?message, "Response from the wrong address");
-                            } else {
-                                trace!(?message, "Unexpected response id");
+                                Err(_) => {
+                                    trace!(?message, "Unexpected response id");
+                                }
                             };
                         }
                     }
@@ -305,13 +334,11 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.insert(
-            8,
-            InflightRequest {
-                to: client_address,
-                sent_at: Instant::now(),
-            },
-        );
+        server.inflight_requests.push(InflightRequest {
+            tid: 8,
+            to: client_address,
+            sent_at: Instant::now(),
+        });
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
@@ -379,13 +406,11 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.insert(
-            8,
-            InflightRequest {
-                to: SocketAddr::from(([127, 0, 0, 1], client_address.port() + 1)),
-                sent_at: Instant::now(),
-            },
-        );
+        server.inflight_requests.push(InflightRequest {
+            tid: 8,
+            to: SocketAddr::from(([127, 0, 0, 1], client_address.port() + 1)),
+            sent_at: Instant::now(),
+        });
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),

@@ -1,6 +1,6 @@
 //! Main Crate Error
 
-use crate::{common::messages::ErrorSpecific, dht::ActorMessage};
+use crate::{common::messages::ErrorSpecific, dht::ActorMessage, Id};
 
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
@@ -56,4 +56,8 @@ pub enum Error {
 
     #[error("Query Error")]
     QueryError(ErrorSpecific),
+
+    #[error("Put query is already inflight to the same target: {0}")]
+    /// [crate::Rpc::put] query is already inflight to the same target
+    PutQueryIsInflight(Id),
 }

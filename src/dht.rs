@@ -485,4 +485,18 @@ mod test {
 
         assert!(&response.is_none());
     }
+
+    #[test]
+    fn repeated_put_query() {
+        let testnet = Testnet::new(10);
+
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let id = a.put_immutable(vec![1, 2, 3].into()).unwrap();
+
+        assert_eq!(a.put_immutable(vec![1, 2, 3].into()).unwrap(), id);
+    }
 }
