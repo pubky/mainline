@@ -88,7 +88,7 @@ impl KrpcSocket {
             .is_ok()
     }
 
-    /// Send a request to the given address and return a receiver for the response.
+    /// Send a request to the given address and return the transaction_id
     pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
         let message = self.request_message(request);
 

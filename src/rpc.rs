@@ -231,6 +231,11 @@ impl Rpc {
         }
     }
 
+    /// Send a request to the given address and return the transaction_id
+    pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
+        self.socket.request(address, request)
+    }
+
     /// Send a response to the given address.
     pub fn response(
         &mut self,
