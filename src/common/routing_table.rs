@@ -113,17 +113,6 @@ impl RoutingTable {
             .fold(0, |acc, bucket| acc + bucket.nodes.len())
     }
 
-    pub fn contains(&self, node_id: &Id) -> bool {
-        let distance = self.id.distance(node_id);
-
-        if let Some(bucket) = self.buckets.get(&distance) {
-            if bucket.contains(node_id) {
-                return true;
-            }
-        }
-        false
-    }
-
     /// Returns all nodes in the routing_table.
     pub fn to_vec(&self) -> Vec<Node> {
         let mut nodes: Vec<Node> = vec![];
@@ -137,18 +126,18 @@ impl RoutingTable {
         nodes
     }
 
-    /// Converts the routing_table to a vector of addresses in string format.
-    /// Most useful for exporting the routing table as bootstrapping_nodes for subsequent sessions.
-    pub fn to_bootstrapping_nodes(&self) -> Vec<String> {
-        let mut addresses: Vec<String> = vec![];
+    // === Private Methods ===
 
-        for bucket in self.buckets.values() {
-            for node in &bucket.nodes {
-                addresses.push(format!("{}:{}", &node.address.ip(), &node.address.port()));
+    #[cfg(test)]
+    fn contains(&self, node_id: &Id) -> bool {
+        let distance = self.id.distance(node_id);
+
+        if let Some(bucket) = self.buckets.get(&distance) {
+            if bucket.contains(node_id) {
+                return true;
             }
         }
-
-        addresses
+        false
     }
 }
 
@@ -210,12 +199,13 @@ impl KBucket {
         self.nodes.is_empty()
     }
 
-    pub fn contains(&self, id: &Id) -> bool {
-        self.iter().any(|node| node.id == *id)
-    }
-
     pub fn iter(&self) -> Iter<'_, Node> {
         self.nodes.iter()
+    }
+
+    #[cfg(test)]
+    fn contains(&self, id: &Id) -> bool {
+        self.iter().any(|node| node.id == *id)
     }
 }
 

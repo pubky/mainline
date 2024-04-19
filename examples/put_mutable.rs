@@ -3,8 +3,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 
-use ed25519_dalek::SigningKey;
-use mainline::{Dht, MutableItem};
+use mainline::{Dht, MutableItem, SigningKey};
 
 use clap::Parser;
 

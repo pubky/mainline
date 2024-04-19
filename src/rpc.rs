@@ -8,23 +8,23 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use flume::Sender;
 use lru::LruCache;
 use tracing::{debug, error};
 
 use crate::common::{
-    messages::{
-        ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
-        GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Message,
-        MessageType, NoMoreRecentValueResponseArguments, PutRequestSpecific, RequestSpecific,
-        RequestTypeSpecific, ResponseSpecific,
-    },
-    validate_immutable, Id, MutableItem, Node, PutResult, Response, ResponseSender, RoutingTable,
+    validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
+    GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
+    MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
+    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
 use crate::{Error, Result};
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
+
+pub use crate::common::messages;
 
 const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -135,7 +135,7 @@ impl Rpc {
         self.socket.local_addr()
     }
 
-    pub fn routing_table(&self) -> &RoutingTable {
+    pub(crate) fn routing_table(&self) -> &RoutingTable {
         &self.routing_table
     }
 
@@ -208,13 +208,20 @@ impl Rpc {
             self.add_node(&message, from);
 
             match &message.message_type {
-                MessageType::Request(request_specific) => Some(RpcMessage::Request((
-                    message.transaction_id,
-                    request_specific.clone(),
-                ))),
-                _ => self.handle_response(from, &message),
+                MessageType::Request(request_specific) => Some(ReceivedFrom {
+                    from,
+                    message: ReceivedMessage::Request((
+                        message.transaction_id,
+                        request_specific.clone(),
+                    )),
+                }),
+                _ => self
+                    .handle_response(from, &message)
+                    .map(|response| ReceivedFrom {
+                        message: ReceivedMessage::QueryResponse(response),
+                        from,
+                    }),
             }
-            .map(|message| (message, from))
         });
 
         RpcTickReport {
@@ -303,7 +310,9 @@ impl Rpc {
     ) {
         // If query is still active, add the sender to it.
         if let Some(query) = self.queries.get_mut(&target) {
-            query.add_sender(sender);
+            if let Some(sender) = sender {
+                query.add_sender(sender)
+            };
             return;
         }
 
@@ -315,7 +324,9 @@ impl Rpc {
             },
         );
 
-        query.add_sender(sender);
+        if let Some(sender) = sender {
+            query.add_sender(sender)
+        };
 
         // Seed the query either with the closest nodes from the routing table, or the
         // bootstrapping nodes if the closest nodes are not enough.
@@ -352,7 +363,7 @@ impl Rpc {
 
     // === Private Methods ===
 
-    fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<RpcMessage> {
+    fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<QueryResponse> {
         if message.read_only {
             return None;
         };
@@ -401,10 +412,10 @@ impl Rpc {
                     let response = Response::Peers(values.to_owned());
                     query.response(from, response.to_owned());
 
-                    return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                    return Some(QueryResponse {
                         target,
-                        payload: RpcQueryResponsePayload::Value(response),
-                    }));
+                        response: QueryResponseSpecific::Value(response),
+                    });
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
                     GetImmutableResponseArguments {
@@ -416,14 +427,14 @@ impl Rpc {
 
                         query.response(from, response.to_owned());
 
-                        return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                        return Some(QueryResponse {
                             target,
-                            payload: RpcQueryResponsePayload::Value(response),
-                        }));
+                            response: QueryResponseSpecific::Value(response),
+                        });
                     }
 
                     let target = query.target;
-                    debug!(?v, ?target, ?responder_id, ?from, "Invalid immutable value");
+                    debug!(?v, ?target, ?responder_id, ?from, from_version = ?message.version, "Invalid immutable value");
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
                     GetMutableResponseArguments {
@@ -454,10 +465,10 @@ impl Rpc {
 
                         query.response(from, response.to_owned());
 
-                        return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                        return Some(QueryResponse {
                             target,
-                            payload: RpcQueryResponsePayload::Value(response),
-                        }));
+                            response: QueryResponseSpecific::Value(response),
+                        });
                     }
 
                     debug!(
@@ -468,6 +479,7 @@ impl Rpc {
                         ?target,
                         ?from,
                         ?responder_id,
+                        from_version = ?message.version,
                         "Invalid mutable record"
                     );
                 }
@@ -485,16 +497,33 @@ impl Rpc {
                         ?seq,
                         ?from,
                         ?responder_id,
-                        "No more recent mutable value"
+                        from_version = ?message.version,
+                        "No more recent value"
+                    );
+                }
+                MessageType::Response(ResponseSpecific::NoValues(NoValuesResponseArguments {
+                    responder_id,
+                    ..
+                })) => {
+                    debug!(
+                        target= ?query.target,
+                        salt= ?match query.request.request_type.clone() {
+                            RequestTypeSpecific::GetValue(args) => args.salt,
+                            _ => None,
+                        },
+                        ?from,
+                        ?responder_id,
+                        from_version = ?message.version,
+                        "No values"
                     );
                 }
                 MessageType::Error(error) => {
-                    debug!(?error, ?message, "Get query got error response");
+                    debug!(?error, ?message, from_version = ?message.version, "Get query got error response");
 
-                    return Some(RpcMessage::QueryResponse(RpcQueryResponse {
+                    return Some(QueryResponse {
                         target,
-                        payload: RpcQueryResponsePayload::Error(error.to_owned()),
-                    }));
+                        response: QueryResponseSpecific::Error(error.to_owned()),
+                    });
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
@@ -565,25 +594,52 @@ pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::put] queries.
     pub done_put_queries: Vec<Id>,
     /// The received message on this tick if any, and the SocketAddr of the sender.
-    pub received_from: Option<(RpcMessage, SocketAddr)>,
+    pub received_from: Option<ReceivedFrom>,
 }
 
-/// A request or a query's response reported from [RpcTickReport::received_from]
-pub enum RpcMessage {
+/// An incoming request or a query's response reported from [RpcTickReport::received_from]
+pub struct ReceivedFrom {
+    /// The socket address of the sender.
+    /// Useful to send a response for an incoming query using [Rpc::response]
+    pub from: SocketAddr,
+    pub message: ReceivedMessage,
+}
+
+pub enum ReceivedMessage {
+    /// An incoming request, as a tuple of the `transaction_id` and the RequestSpecific
     Request((u16, RequestSpecific)),
-    QueryResponse(RpcQueryResponse),
+    /// A query response.
+    QueryResponse(QueryResponse),
 }
 
 /// Target and payload of a response to a [Rpc::get] or [Rpc::put] query
-pub struct RpcQueryResponse {
+pub struct QueryResponse {
     pub target: Id,
-    pub payload: RpcQueryResponsePayload,
+    pub response: QueryResponseSpecific,
 }
 
 /// Rpc query resopnse; a value or an error.
-pub enum RpcQueryResponsePayload {
+pub enum QueryResponseSpecific {
     /// A set of peers, immutable or mutable value response for a request
     Value(Response),
     /// An error response for a sent request
     Error(ErrorSpecific),
 }
+
+#[derive(Clone, Debug)]
+pub enum Response {
+    Peers(Vec<SocketAddr>),
+    Immutable(Bytes),
+    Mutable(MutableItem),
+}
+
+#[derive(Clone, Debug)]
+pub enum ResponseSender {
+    Peers(Sender<Vec<SocketAddr>>),
+    Mutable(Sender<MutableItem>),
+    Immutable(Sender<Bytes>),
+}
+
+/// Returns the info_hash or target of the operation.
+/// Useful for put_immutable.
+pub type PutResult = Result<Id>;

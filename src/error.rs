@@ -1,6 +1,6 @@
 //! Main Crate Error
 
-use crate::{common::messages::ErrorSpecific, dht::ActorMessage, Id};
+use crate::{common::ErrorSpecific, dht::ActorMessage, Id};
 
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.

@@ -5,15 +5,12 @@ use std::net::SocketAddr;
 
 use crate::{
     common::{
-        hash_immutable,
-        messages::{
-            AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
-            PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-            RequestTypeSpecific,
-        },
-        Id, MutableItem, PutResult, ResponseSender,
+        hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
+        GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
+        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
     dht::{ActorMessage, Dht},
+    rpc::{PutResult, ResponseSender},
     Result,
 };
 
@@ -32,12 +29,8 @@ impl AsyncDht {
     // === Getters ===
 
     /// Returns the local address of the udp socket this node is listening on.
-    pub async fn local_addr(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = flume::bounded::<SocketAddr>(1);
-
-        self.0 .0.send(ActorMessage::LocalAddress(sender))?;
-
-        Ok(receiver.recv_async().await?)
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.0.local_addr()
     }
 
     // === Public Methods ===
@@ -46,7 +39,7 @@ impl AsyncDht {
     pub async fn shutdown(&self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
-        self.0 .0.send(ActorMessage::Shutdown(sender))?;
+        self.0.sender.send(ActorMessage::Shutdown(sender))?;
 
         Ok(receiver.recv_async().await?)
     }
@@ -72,7 +65,7 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.0 .0.send(ActorMessage::Get(
+        self.0.sender.send(ActorMessage::Get(
             info_hash,
             request,
             ResponseSender::Peers(sender),
@@ -101,7 +94,7 @@ impl AsyncDht {
         });
 
         self.0
-             .0
+            .sender
             .send(ActorMessage::Put(info_hash, request, sender))?;
 
         receiver.recv_async().await?
@@ -119,7 +112,7 @@ impl AsyncDht {
             salt: None,
         });
 
-        self.0 .0.send(ActorMessage::Get(
+        self.0.sender.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Immutable(sender),
@@ -139,7 +132,9 @@ impl AsyncDht {
             v: value.clone().into(),
         });
 
-        self.0 .0.send(ActorMessage::Put(target, request, sender))?;
+        self.0
+            .sender
+            .send(ActorMessage::Put(target, request, sender))?;
 
         receiver.recv_async().await?
     }
@@ -159,7 +154,7 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.0 .0.send(ActorMessage::Get(
+        let _ = self.0.sender.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Mutable(sender),
@@ -184,7 +179,7 @@ impl AsyncDht {
 
         let _ = self
             .0
-             .0
+            .sender
             .send(ActorMessage::Put(*item.target(), request, sender));
 
         receiver.recv_async().await?
@@ -201,20 +196,22 @@ mod test {
     use crate::dht::Testnet;
 
     use super::*;
+    use crate::Error;
 
     #[test]
     fn shutdown() {
         async fn test() {
             let dht = Dht::client().unwrap().as_async();
 
-            dht.local_addr().await.unwrap();
+            dht.local_addr();
 
             let a = dht.clone();
 
-            dht.shutdown().await.unwrap();
+            let _ = dht.shutdown().await;
 
-            let local_addr = a.local_addr().await;
-            assert!(local_addr.is_err());
+            let result = a.get_immutable(Id::random()).await;
+
+            assert!(matches!(result, Err(Error::DhtIsShutdown(_))))
         }
         futures::executor::block_on(test());
     }

@@ -7,13 +7,14 @@ use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
 
 use super::socket::KrpcSocket;
-use crate::common::{
-    messages::{
-        ErrorSpecific, PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific,
-    },
-    Id, Node, PutResult, Response, ResponseSender, RoutingTable,
-};
 use crate::Error;
+use crate::{
+    common::{
+        ErrorSpecific, Id, Node, PutRequest, PutRequestSpecific, RequestSpecific,
+        RequestTypeSpecific, RoutingTable,
+    },
+    rpc::{PutResult, Response, ResponseSender},
+};
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and
@@ -59,15 +60,12 @@ impl Query {
     // === Public Methods ===
 
     /// Add a sender to the query and send all replies we found so far to it.
-    pub fn add_sender(&mut self, sender: Option<ResponseSender>) {
-        if let Some(sender) = sender {
-            self.senders.push(sender);
-            let sender = self.senders.last().unwrap();
+    pub fn add_sender(&mut self, sender: ResponseSender) {
+        for response in &self.responses {
+            self.send_value(&sender, response.clone())
+        }
 
-            for response in &self.responses {
-                self.send_value(sender, response.clone())
-            }
-        };
+        self.senders.push(sender);
     }
 
     /// Force start query traversal by visiting closest nodes.

@@ -7,22 +7,21 @@ use flume::{Receiver, Sender};
 
 use crate::{
     common::{
-        hash_immutable,
-        messages::{
-            AnnouncePeerRequestArguments, GetPeersRequestArguments, GetValueRequestArguments,
-            PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-            RequestTypeSpecific,
-        },
-        Id, MutableItem, PutResult, ResponseSender,
+        hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
+        GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
+        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
-    rpc::{Rpc, RpcMessage},
+    rpc::{PutResult, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
     server::Server,
     Result,
 };
 
 #[derive(Debug, Clone)]
 /// Mainlin eDht node.
-pub struct Dht(pub(crate) Sender<ActorMessage>);
+pub struct Dht {
+    pub(crate) sender: Sender<ActorMessage>,
+    pub(crate) address: Option<SocketAddr>,
+}
 
 pub struct Builder {
     settings: DhtSettings,
@@ -110,29 +109,38 @@ impl Dht {
             rpc = rpc.with_port(port)?;
         }
 
+        let address = rpc.local_addr();
+
         thread::spawn(move || run(rpc, receiver));
 
-        Ok(Dht(sender))
+        Ok(Dht {
+            sender,
+            address: Some(address),
+        })
     }
 
     // === Getters ===
 
     /// Returns the local address of the udp socket this node is listening on.
-    pub fn local_addr(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = flume::bounded::<SocketAddr>(1);
-
-        self.0.send(ActorMessage::LocalAddress(sender))?;
-
-        Ok(receiver.recv()?)
+    ///
+    /// Returns `None` if the node is shutdown
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.address
     }
 
     // === Public Methods ===
 
     /// Shutdown the actor thread loop.
-    pub fn shutdown(&self) -> Result<()> {
+    pub fn shutdown(&mut self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
-        self.0.send(ActorMessage::Shutdown(sender))?;
+        self.sender
+            .send(ActorMessage::Shutdown(sender))
+            .map_err(|err| {
+                self.address = None;
+
+                err
+            })?;
 
         Ok(receiver.recv()?)
     }
@@ -158,7 +166,7 @@ impl Dht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.0.send(ActorMessage::Get(
+        self.sender.send(ActorMessage::Get(
             info_hash,
             request,
             ResponseSender::Peers(sender),
@@ -186,7 +194,8 @@ impl Dht {
             implied_port,
         });
 
-        self.0.send(ActorMessage::Put(info_hash, request, sender))?;
+        self.sender
+            .send(ActorMessage::Put(info_hash, request, sender))?;
 
         receiver.recv()?
     }
@@ -203,7 +212,7 @@ impl Dht {
             salt: None,
         });
 
-        self.0.send(ActorMessage::Get(
+        self.sender.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Immutable(sender),
@@ -223,7 +232,8 @@ impl Dht {
             v: value.clone().into(),
         });
 
-        self.0.send(ActorMessage::Put(target, request, sender))?;
+        self.sender
+            .send(ActorMessage::Put(target, request, sender))?;
 
         receiver.recv()?
     }
@@ -243,7 +253,7 @@ impl Dht {
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.0.send(ActorMessage::Get(
+        let _ = self.sender.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Mutable(sender),
@@ -267,7 +277,7 @@ impl Dht {
         });
 
         let _ = self
-            .0
+            .sender
             .send(ActorMessage::Put(*item.target(), request, sender));
 
         receiver.recv()?
@@ -285,9 +295,6 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
                     drop(receiver);
                     break;
                 }
-                ActorMessage::LocalAddress(sender) => {
-                    let _ = sender.send(rpc.local_addr());
-                }
                 ActorMessage::Put(target, request, sender) => {
                     rpc.put(target, request, Some(sender));
                 }
@@ -300,8 +307,10 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
         let report = rpc.tick();
 
         // Handle incoming request with the default Server logic.
-        if let Some((RpcMessage::Request((transaction_id, request_specific)), from)) =
-            report.received_from
+        if let Some(ReceivedFrom {
+            from,
+            message: ReceivedMessage::Request((transaction_id, request_specific)),
+        }) = report.received_from
         {
             server.handle_request(&mut rpc, from, transaction_id, &request_specific);
         };
@@ -309,8 +318,6 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
 }
 
 pub enum ActorMessage {
-    LocalAddress(Sender<SocketAddr>),
-
     Put(Id, PutRequestSpecific, Sender<PutResult>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
@@ -357,19 +364,21 @@ mod test {
     use ed25519_dalek::SigningKey;
 
     use super::*;
+    use crate::Error;
 
     #[test]
     fn shutdown() {
-        let dht = Dht::client().unwrap();
+        let mut dht = Dht::client().unwrap();
 
-        dht.local_addr().unwrap();
+        dht.local_addr();
 
         let a = dht.clone();
 
         dht.shutdown().unwrap();
 
-        let local_addr = a.local_addr();
-        assert!(local_addr.is_err());
+        let result = a.get_immutable(Id::random());
+
+        assert!(matches!(result, Err(Error::DhtIsShutdown(_))))
     }
 
     #[test]

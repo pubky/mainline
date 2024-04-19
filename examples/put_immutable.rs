@@ -1,7 +1,6 @@
 use std::time::Instant;
 
-use bytes::Bytes;
-use mainline::Dht;
+use mainline::{Bytes, Dht};
 
 use clap::Parser;
 
