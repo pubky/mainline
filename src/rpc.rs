@@ -505,6 +505,11 @@ impl Rpc {
                         from_version = ?message.version,
                         "No more recent value"
                     );
+
+                    return Some(QueryResponse {
+                        target,
+                        response: QueryResponseSpecific::Value(Response::NoMoreRecentValue(*seq)),
+                    });
                 }
                 MessageType::Response(ResponseSpecific::NoValues(NoValuesResponseArguments {
                     responder_id,
@@ -636,6 +641,7 @@ pub enum Response {
     Peers(Vec<SocketAddr>),
     Immutable(Bytes),
     Mutable(MutableItem),
+    NoMoreRecentValue(i64),
 }
 
 #[derive(Clone, Debug)]

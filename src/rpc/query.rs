@@ -218,6 +218,7 @@ impl PutQuery {
     }
 
     pub fn success(&mut self) {
+        debug!(target = ?self.target, "PutQuery got success response");
         self.stored_at += 1
     }
 
