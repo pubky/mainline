@@ -36,12 +36,16 @@ impl AsyncDht {
     // === Public Methods ===
 
     /// Shutdown the actor thread loop.
-    pub async fn shutdown(&self) -> Result<()> {
+    pub async fn shutdown(&mut self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
         self.0.sender.send(ActorMessage::Shutdown(sender))?;
 
-        Ok(receiver.recv_async().await?)
+        receiver.recv_async().await?;
+
+        self.0.address = None;
+
+        Ok(())
     }
 
     // === Peers ===
@@ -201,7 +205,7 @@ mod test {
     #[test]
     fn shutdown() {
         async fn test() {
-            let dht = Dht::client().unwrap().as_async();
+            let mut dht = Dht::client().unwrap().as_async();
 
             dht.local_addr();
 

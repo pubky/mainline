@@ -134,15 +134,13 @@ impl Dht {
     pub fn shutdown(&mut self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
-        self.sender
-            .send(ActorMessage::Shutdown(sender))
-            .map_err(|err| {
-                self.address = None;
+        self.sender.send(ActorMessage::Shutdown(sender))?;
 
-                err
-            })?;
+        receiver.recv()?;
 
-        Ok(receiver.recv()?)
+        self.address = None;
+
+        Ok(())
     }
 
     // === Peers ===
@@ -291,8 +289,8 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
         if let Ok(actor_message) = receiver.try_recv() {
             match actor_message {
                 ActorMessage::Shutdown(sender) => {
-                    let _ = sender.send(());
                     drop(receiver);
+                    let _ = sender.send(());
                     break;
                 }
                 ActorMessage::Put(target, request, sender) => {
