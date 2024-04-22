@@ -233,7 +233,6 @@ impl PutQuery {
 
     /// Check if the query is done, and if so send the query target to the receiver if any.
     pub fn tick(&mut self, socket: &mut KrpcSocket) -> bool {
-        // If all flight requests are not inflight in the socket, then the query is done.
         if
         // Already started
         self.inflight_requests.capacity() > 0

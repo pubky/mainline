@@ -13,7 +13,7 @@ const DEFAULT_PORT: u16 = 6881;
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
-const READ_TIMEOUT: Duration = Duration::from_millis(100);
+const READ_TIMEOUT: Duration = Duration::from_millis(10);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
