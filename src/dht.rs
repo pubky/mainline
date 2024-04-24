@@ -297,7 +297,7 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
                     rpc.put(target, request, Some(sender));
                 }
                 ActorMessage::Get(target, request, sender) => {
-                    rpc.get(target, request, Some(sender))
+                    rpc.get(target, request, Some(sender), None)
                 }
             }
         }

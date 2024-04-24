@@ -293,6 +293,7 @@ impl Rpc {
                     salt: salt.map(|s| s.into()),
                 }),
                 None,
+                None,
             );
         };
 
@@ -307,11 +308,15 @@ impl Rpc {
     ///
     /// Effectively, we are caching responses and backing off the network for the duration it takes
     /// to traverse it.
+    ///
+    /// `extra_nodes` option allows the query to visit specific nodes, that won't necessesarily be visited
+    /// through the query otherwise.
     pub fn get(
         &mut self,
         target: Id,
         request: RequestTypeSpecific,
         sender: Option<ResponseSender>,
+        extra_nodes: Option<Vec<SocketAddr>>,
     ) {
         // If query is still active, add the sender to it.
         if let Some(query) = self.queries.get_mut(&target) {
@@ -346,6 +351,12 @@ impl Rpc {
                         query.visit(&mut self.socket, address);
                     }
                 }
+            }
+        }
+
+        if let Some(extra_nodes) = extra_nodes {
+            for address in extra_nodes {
+                query.visit(&mut self.socket, address)
             }
         }
 
@@ -583,6 +594,7 @@ impl Rpc {
             self.id,
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: self.id }),
             None,
+            None,
         );
     }
 
@@ -598,6 +610,7 @@ impl Rpc {
 }
 
 /// Any received message and done queries in the [Rpc::tick].
+#[derive(Debug, Clone)]
 pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
     pub done_get_queries: Vec<Id>,
@@ -608,6 +621,7 @@ pub struct RpcTickReport {
 }
 
 /// An incoming request or a query's response reported from [RpcTickReport::received_from]
+#[derive(Debug, Clone)]
 pub struct ReceivedFrom {
     /// The socket address of the sender.
     /// Useful to send a response for an incoming query using [Rpc::response]
@@ -615,6 +629,7 @@ pub struct ReceivedFrom {
     pub message: ReceivedMessage,
 }
 
+#[derive(Debug, Clone)]
 pub enum ReceivedMessage {
     /// An incoming request, as a tuple of the `transaction_id` and the RequestSpecific
     Request((u16, RequestSpecific)),
@@ -623,12 +638,14 @@ pub enum ReceivedMessage {
 }
 
 /// Target and payload of a response to a [Rpc::get] or [Rpc::put] query
+#[derive(Debug, Clone)]
 pub struct QueryResponse {
     pub target: Id,
     pub response: QueryResponseSpecific,
 }
 
 /// Rpc query resopnse; a value or an error.
+#[derive(Debug, Clone)]
 pub enum QueryResponseSpecific {
     /// A set of peers, immutable or mutable value response for a request
     Value(Response),
@@ -636,7 +653,7 @@ pub enum QueryResponseSpecific {
     Error(ErrorSpecific),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum Response {
     Peers(Vec<SocketAddr>),
     Immutable(Bytes),
@@ -644,7 +661,7 @@ pub enum Response {
     NoMoreRecentValue(i64),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub enum ResponseSender {
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
