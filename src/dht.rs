@@ -12,7 +12,7 @@ use crate::{
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
     rpc::{PutResult, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
-    server::Server,
+    server::{Server, ServerSettings},
     Result,
 };
 
@@ -35,7 +35,7 @@ impl Builder {
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
-        self.settings.read_only = false;
+        self.settings.server = true;
         self
     }
 
@@ -52,22 +52,15 @@ impl Builder {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 /// Dht settings
 pub struct DhtSettings {
+    pub server_settings: ServerSettings,
+    /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Option<Vec<String>>,
-    pub read_only: bool,
+    pub server: bool,
+    /// Defaults to [crate::rpc::DEFAULT_PORT]
     pub port: Option<u16>,
-}
-
-impl Default for DhtSettings {
-    fn default() -> Self {
-        DhtSettings {
-            bootstrap: None,
-            read_only: true,
-            port: None,
-        }
-    }
 }
 
 impl Dht {
@@ -99,15 +92,7 @@ impl Dht {
     pub fn new(settings: DhtSettings) -> Result<Self> {
         let (sender, receiver) = flume::bounded(32);
 
-        let mut rpc = Rpc::new()?.with_read_only(settings.read_only);
-
-        if let Some(bootstrap) = settings.bootstrap {
-            rpc = rpc.with_bootstrap(bootstrap);
-        }
-
-        if let Some(port) = settings.port {
-            rpc = rpc.with_port(port)?;
-        }
+        let rpc = Rpc::new(settings)?;
 
         let address = rpc.local_addr();
 

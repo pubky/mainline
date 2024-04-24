@@ -27,10 +27,11 @@ use peers::PeersStore;
 use tokens::Tokens;
 
 // Stored data in server mode.
-const MAX_INFO_HASHES: usize = 2000;
-const MAX_PEERS: usize = 500;
-const MAX_VALUES: usize = 1000;
+pub const MAX_INFO_HASHES: usize = 2000;
+pub const MAX_PEERS: usize = 500;
+pub const MAX_VALUES: usize = 1000;
 
+#[derive(Debug)]
 pub struct Server {
     rng: ThreadRng,
 
@@ -44,6 +45,32 @@ pub struct Server {
 
 impl Default for Server {
     fn default() -> Self {
+        Server::new(&ServerSettings::default())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ServerSettings {
+    /// The maximum info_hashes for which to store peers.
+    ///
+    /// Defaults to [MAX_INFO_HASHES]
+    pub max_info_hashes: usize,
+    /// The maximum peers to store per info_hash.
+    ///
+    /// Defaults to [MAX_PEERS]
+    pub max_peers_per_info_hash: usize,
+    /// Maximum number of immutable values to store.
+    ///
+    /// Defaults to [MAX_VALUES]
+    pub max_immutable_values: usize,
+    /// Maximum number of mutable values to store.
+    ///
+    /// Defaults to [MAX_VALUES]
+    pub max_mutable_values: usize,
+}
+
+impl Server {
+    pub fn new(settings: &ServerSettings) -> Self {
         let mut rng = thread_rng();
         let tokens = Tokens::new(&mut rng);
 
@@ -51,17 +78,23 @@ impl Default for Server {
             rng: thread_rng(),
             tokens,
             peers: PeersStore::new(
-                NonZeroUsize::new(MAX_INFO_HASHES).unwrap(),
-                NonZeroUsize::new(MAX_PEERS).unwrap(),
+                NonZeroUsize::new(settings.max_info_hashes)
+                    .unwrap_or(NonZeroUsize::new(MAX_INFO_HASHES).unwrap()),
+                NonZeroUsize::new(settings.max_peers_per_info_hash)
+                    .unwrap_or(NonZeroUsize::new(MAX_PEERS).unwrap()),
             ),
 
-            immutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
-            mutable_values: LruCache::new(NonZeroUsize::new(MAX_VALUES).unwrap()),
+            immutable_values: LruCache::new(
+                NonZeroUsize::new(settings.max_immutable_values)
+                    .unwrap_or(NonZeroUsize::new(MAX_VALUES).unwrap()),
+            ),
+            mutable_values: LruCache::new(
+                NonZeroUsize::new(settings.max_mutable_values)
+                    .unwrap_or(NonZeroUsize::new(MAX_VALUES).unwrap()),
+            ),
         }
     }
-}
 
-impl Server {
     /// Handle incoming request.
     pub fn handle_request(
         &mut self,

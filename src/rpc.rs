@@ -20,13 +20,14 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
-use crate::{Error, Result};
+use crate::{dht::DhtSettings, Error, Result};
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
+pub use socket::DEFAULT_PORT;
 
-const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
+pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
     "dht.libtorrent.org:25401",
@@ -66,18 +67,20 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new() -> Result<Self> {
+    pub fn new(settings: DhtSettings) -> Result<Self> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
-        let socket = KrpcSocket::new()?;
+        let socket = KrpcSocket::new(&settings)?;
 
         Ok(Rpc {
             id,
-            bootstrap: DEFAULT_BOOTSTRAP_NODES
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            bootstrap: settings.bootstrap.unwrap_or(
+                DEFAULT_BOOTSTRAP_NODES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
@@ -94,31 +97,6 @@ impl Rpc {
     /// Override the Rpc's Id which is set randomly be default.
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
-        self
-    }
-
-    /// Set the Rpc to read_only, so it won't handle incoming request,
-    /// and will tell other nodes that so, so they don't bother calling.
-    pub fn with_read_only(mut self, read_only: bool) -> Self {
-        self.socket.read_only = read_only;
-        self
-    }
-
-    /// Override bootstraping nodes.
-    pub fn with_bootstrap(mut self, bootstrap: Vec<String>) -> Self {
-        self.bootstrap = bootstrap;
-        self
-    }
-
-    /// Override the port (will make new Udp socket).
-    pub fn with_port(mut self, port: u16) -> Result<Self> {
-        self.socket = KrpcSocket::bind(port)?;
-        Ok(self)
-    }
-
-    /// Sets requests timeout in milliseconds
-    pub fn with_request_timeout(mut self, timeout: u64) -> Self {
-        self.socket.request_timeout = Duration::from_millis(timeout);
         self
     }
 
