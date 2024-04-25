@@ -5,6 +5,8 @@ use std::{net::SocketAddr, thread};
 use bytes::Bytes;
 use flume::{Receiver, Sender};
 
+use tracing::info;
+
 use crate::{
     common::{
         hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
@@ -41,7 +43,7 @@ impl Builder {
 
     /// Set bootstrapping nodes
     pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
-        self.settings.bootstrap = Some(bootstrap.to_owned());
+        self.settings.bootstrap = Some(bootstrap.to_vec());
         self
     }
 
@@ -95,6 +97,8 @@ impl Dht {
         let rpc = Rpc::new(settings)?;
 
         let address = rpc.local_addr();
+
+        info!(?address, "Mainline DHT listening");
 
         thread::spawn(move || run(rpc, receiver));
 

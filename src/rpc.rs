@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use flume::Sender;
 use lru::LruCache;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::common::{
     validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
@@ -44,7 +44,7 @@ const MAX_CACHED_BUCKETS: usize = 1000;
 pub struct Rpc {
     // Options
     id: Id,
-    bootstrap: Vec<String>,
+    bootstrap: Vec<SocketAddr>,
 
     socket: KrpcSocket,
 
@@ -73,14 +73,22 @@ impl Rpc {
 
         let socket = KrpcSocket::new(&settings)?;
 
+        info!(?settings, "Sarting Mainline Rpc");
+
         Ok(Rpc {
             id,
-            bootstrap: settings.bootstrap.unwrap_or(
-                DEFAULT_BOOTSTRAP_NODES
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            ),
+            bootstrap: settings
+                .bootstrap
+                .unwrap_or(
+                    DEFAULT_BOOTSTRAP_NODES
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                )
+                .iter()
+                .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
+                .flatten()
+                .collect::<Vec<_>>(),
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
@@ -324,17 +332,13 @@ impl Rpc {
         // If we don't have enough or any closest nodes, call the bootstraping nodes.
         if routing_table_closest.is_empty() || routing_table_closest.len() < self.bootstrap.len() {
             for bootstrapping_node in self.bootstrap.clone() {
-                if let Ok(addresses) = bootstrapping_node.to_socket_addrs() {
-                    for address in addresses {
-                        query.visit(&mut self.socket, address);
-                    }
-                }
+                query.visit(&mut self.socket, bootstrapping_node);
             }
         }
 
         if let Some(extra_nodes) = extra_nodes {
-            for address in extra_nodes {
-                query.visit(&mut self.socket, address)
+            for extra_node in extra_nodes {
+                query.visit(&mut self.socket, extra_node)
             }
         }
 
