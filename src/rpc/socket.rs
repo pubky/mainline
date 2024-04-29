@@ -1,74 +1,63 @@
 //! Udp socket layer managine incoming/outgoing requests and responses.
 
-use std::collections::HashMap;
+use std::cmp::Ordering;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, trace};
 
-use crate::messages::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
+use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-use crate::Result;
+use crate::{dht::DhtSettings, Result};
 
-const DEFAULT_PORT: u16 = 6881;
-const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
-const READ_TIMEOUT: Duration = Duration::from_millis(100);
+
+pub const DEFAULT_PORT: u16 = 6881;
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
+pub const READ_TIMEOUT: Duration = Duration::from_millis(10);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
-    pub read_only: bool,
-    pub request_timeout: Duration,
-    pub inflight_requests: HashMap<u16, InflightRequest>,
+    read_only: bool,
+    request_timeout: Duration,
+    /// We don't need a HashMap, since we know the capacity is `65536` requests.
+    /// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
+    inflight_requests: Vec<InflightRequest>,
 }
 
 #[derive(Debug)]
 pub struct InflightRequest {
+    tid: u16,
     to: SocketAddr,
     sent_at: Instant,
 }
 
 impl KrpcSocket {
-    pub fn new() -> Result<Self> {
-        let socket = match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
-            Ok(socket) => Ok(socket),
-            Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
-        }?;
+    pub fn new(settings: &DhtSettings) -> Result<Self> {
+        let socket = if let Some(port) = settings.port {
+            UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
+        } else {
+            match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
+                Ok(socket) => Ok(socket),
+                Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
+            }?
+        };
+
         socket.set_read_timeout(Some(READ_TIMEOUT))?;
 
         Ok(Self {
             socket,
             next_tid: 0,
-            read_only: false,
+            read_only: !settings.server,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            inflight_requests: HashMap::new(),
-        })
-    }
-
-    pub fn bind(port: u16) -> Result<Self> {
-        let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?;
-        socket.set_read_timeout(Some(READ_TIMEOUT))?;
-
-        Ok(Self {
-            socket,
-            next_tid: 0,
-            read_only: false,
-            request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            inflight_requests: HashMap::new(),
+            inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
 
     // === Options ===
-
-    /// Set read-only mode
-    #[cfg(test)]
-    pub fn with_read_only(mut self, read_only: bool) -> Self {
-        self.read_only = read_only;
-        self
-    }
 
     /// Returns the address the server is listening to.
     #[inline]
@@ -78,17 +67,22 @@ impl KrpcSocket {
 
     // === Public Methods ===
 
-    /// Send a request to the given address and return a receiver for the response.
+    /// Returns true if this message's transaction_id is still inflight
+    pub fn inflight(&self, transaction_id: &u16) -> bool {
+        self.inflight_requests
+            .binary_search_by(|request| request.tid.cmp(transaction_id))
+            .is_ok()
+    }
+
+    /// Send a request to the given address and return the transaction_id
     pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
         let message = self.request_message(request);
 
-        self.inflight_requests.insert(
-            message.transaction_id,
-            InflightRequest {
-                to: address,
-                sent_at: Instant::now(),
-            },
-        );
+        self.inflight_requests.push(InflightRequest {
+            tid: message.transaction_id,
+            to: address,
+            sent_at: Instant::now(),
+        });
 
         let tid = message.transaction_id;
         let _ = self.send(address, message).map_err(|e| {
@@ -116,7 +110,7 @@ impl KrpcSocket {
     pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
         let _ = self.send(address, message).map_err(|e| {
-            debug!(?e, "Error sending error");
+            debug!(?e, "Error sending error message");
         });
     }
 
@@ -126,9 +120,21 @@ impl KrpcSocket {
         let mut buf = [0u8; MTU];
 
         // Cleanup timedout transaction_ids.
-        let request_timeout = self.request_timeout;
-        self.inflight_requests
-            .retain(|_, request| request.sent_at.elapsed() < request_timeout);
+        // Find the first timedout request, and delete all earlier requests.
+        match self.inflight_requests.binary_search_by(|request| {
+            if request.sent_at.elapsed() > self.request_timeout {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        }) {
+            Ok(index) => {
+                self.inflight_requests.drain(..index);
+            }
+            Err(index) => {
+                self.inflight_requests.drain(..index);
+            }
+        };
 
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
             let bytes = &buf[..amt];
@@ -146,24 +152,32 @@ impl KrpcSocket {
                         }
                         // Response or an error to an inflight request.
                         _ => {
-                            if let Some(inflight_request) =
-                                self.inflight_requests.get(&message.transaction_id)
-                            {
-                                if compare_socket_addr(&inflight_request.to, &from) {
-                                    // Confirm that it is a response we actually sent.
-                                    self.inflight_requests.remove(&message.transaction_id);
-                                    return Some((message, from));
-                                } else {
-                                    debug!("Response from the wrong address");
+                            match self.inflight_requests.binary_search_by(|request| {
+                                request.tid.cmp(&message.transaction_id)
+                            }) {
+                                Ok(index) => {
+                                    match self.inflight_requests.get(index) {
+                                        Some(inflight_request) => {
+                                            if compare_socket_addr(&inflight_request.to, &from) {
+                                                // Confirm that it is a response we actually sent.
+                                                self.inflight_requests.remove(index);
+
+                                                return Some((message, from));
+                                            }
+                                            trace!(?message, "Response from the wrong address");
+                                        }
+                                        _ => panic!("should not return None"),
+                                    };
                                 }
-                            } else {
-                                debug!("Unexpected response id");
+                                Err(_) => {
+                                    trace!(?message, "Unexpected response id");
+                                }
                             };
                         }
                     }
                 }
                 Err(error) => {
-                    debug!(?error, ?bytes, "Received invalid message");
+                    trace!(?error, ?bytes, "Received invalid message");
                 }
             };
         };
@@ -239,15 +253,15 @@ mod test {
     use std::thread;
 
     use crate::{
-        common::Id,
-        messages::{PingRequestArguments, PingResponseArguments},
+        common::{Id, PingResponseArguments, RequestTypeSpecific},
+        server::ServerSettings,
     };
 
     use super::*;
 
     #[test]
     fn tid() {
-        let mut socket = KrpcSocket::new().unwrap();
+        let mut socket = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
         assert_eq!(socket.tid(), 0);
         assert_eq!(socket.tid(), 1);
@@ -261,16 +275,23 @@ mod test {
 
     #[test]
     fn recv_request() {
-        let mut server = KrpcSocket::new().unwrap();
+        let mut server = KrpcSocket::new(&DhtSettings {
+            server_settings: ServerSettings::default(),
+            bootstrap: None,
+            server: true,
+            port: None,
+        })
+        .unwrap();
         let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
         client.next_tid = 120;
 
         let client_address = client.local_addr();
-        let request = RequestSpecific::Ping(PingRequestArguments {
+        let request = RequestSpecific {
             requester_id: Id::random(),
-        });
+            request_type: RequestTypeSpecific::Ping,
+        };
 
         let expected_request = request.clone();
 
@@ -278,7 +299,7 @@ mod test {
             if let Some((message, from)) = server.recv_from() {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 120);
-                assert_eq!(message.read_only, true, "Read-only should be true");
+                assert!(message.read_only, "Read-only should be true");
                 assert_eq!(
                     message.version,
                     Some(VERSION.to_vec()),
@@ -296,20 +317,18 @@ mod test {
 
     #[test]
     fn recv_response() {
-        let mut server = KrpcSocket::new().unwrap();
+        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
         let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.insert(
-            8,
-            InflightRequest {
-                to: client_address,
-                sent_at: Instant::now(),
-            },
-        );
+        server.inflight_requests.push(InflightRequest {
+            tid: 8,
+            to: client_address,
+            sent_at: Instant::now(),
+        });
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
@@ -321,7 +340,7 @@ mod test {
             if let Some((message, from)) = server.recv_from() {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 8);
-                assert_eq!(message.read_only, true, "Read-only should be true");
+                assert!(message.read_only, "Read-only should be true");
                 assert_eq!(
                     message.version,
                     Some(VERSION.to_vec()),
@@ -342,10 +361,10 @@ mod test {
 
     #[test]
     fn ignore_unexcpected_response() {
-        let mut server = KrpcSocket::new().unwrap();
+        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
         let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
         let _ = client.local_addr();
 
@@ -370,20 +389,18 @@ mod test {
 
     #[test]
     fn ignore_response_from_wrong_address() {
-        let mut server = KrpcSocket::new().unwrap();
+        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
         let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::new().unwrap().with_read_only(true);
+        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.insert(
-            8,
-            InflightRequest {
-                to: SocketAddr::from(([127, 0, 0, 1], client_address.port() + 1)),
-                sent_at: Instant::now(),
-            },
-        );
+        server.inflight_requests.push(InflightRequest {
+            tid: 8,
+            to: SocketAddr::from(([127, 0, 0, 1], client_address.port() + 1)),
+            sent_at: Instant::now(),
+        });
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
@@ -406,16 +423,17 @@ mod test {
 
     #[test]
     fn ignore_request_in_read_only() {
-        let mut server = KrpcSocket::new().unwrap().with_read_only(true);
+        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
         let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::new().unwrap();
+        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
         client.next_tid = 120;
 
         let _ = client.local_addr();
-        let request = RequestSpecific::Ping(PingRequestArguments {
+        let request = RequestSpecific {
             requester_id: Id::random(),
-        });
+            request_type: RequestTypeSpecific::Ping,
+        };
 
         let _ = request.clone();
 

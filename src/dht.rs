@@ -1,58 +1,28 @@
 //! Dht node.
 
-use std::{
-    net::SocketAddr,
-    thread::{self, JoinHandle},
-};
+use std::{net::SocketAddr, thread};
 
 use bytes::Bytes;
 use flume::{Receiver, Sender};
 
+use tracing::info;
+
 use crate::{
-    common::{hash_immutable, target_from_key, Id, MutableItem, Node, RoutingTable},
-    rpc::{
-        GetImmutableResponse, GetMutableResponse, GetPeerResponse, Response, ResponseMessage,
-        ResponseSender, Rpc, StoreQueryMetdata,
+    common::{
+        hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
+        GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
+        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
+    rpc::{PutResult, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
+    server::{Server, ServerSettings},
     Result,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+/// Mainlin eDht node.
 pub struct Dht {
-    handle: Option<JoinHandle<()>>,
     pub(crate) sender: Sender<ActorMessage>,
-}
-
-impl Clone for Dht {
-    /// Cloning a Dht node returns an actor that can be used to send
-    /// commands to the main Dht actor that contains the active thread.
-    ///
-    /// This is useful for moving an actor to another thread.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use mainline::{Dht, Id, Testnet};
-    /// use std::thread;
-    ///
-    /// // Create a testnet for this example to avoid spamming the mainnet.
-    /// let testnet = Testnet::new(10);
-    ///
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
-    ///
-    /// let actor = dht.clone();
-    /// thread::spawn(move || {
-    ///     let info_hash: Id = [0;20].into();
-    ///
-    ///     actor.announce_peer(info_hash, Some(9090));
-    /// });
-    /// ```
-    fn clone(&self) -> Self {
-        Dht {
-            handle: None,
-            sender: self.sender.clone(),
-        }
-    }
+    pub(crate) address: Option<SocketAddr>,
 }
 
 pub struct Builder {
@@ -60,19 +30,20 @@ pub struct Builder {
 }
 
 impl Builder {
-    pub fn build(&self) -> Dht {
+    /// Create a Dht node.
+    pub fn build(&self) -> Result<Dht> {
         Dht::new(self.settings.clone())
     }
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
-    pub fn as_server(mut self) -> Self {
-        self.settings.read_only = false;
+    pub fn server(mut self) -> Self {
+        self.settings.server = true;
         self
     }
 
     /// Set bootstrapping nodes
     pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
-        self.settings.bootstrap = Some(bootstrap.to_owned());
+        self.settings.bootstrap = Some(bootstrap.to_vec());
         self
     }
 
@@ -83,24 +54,19 @@ impl Builder {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+/// Dht settings
 pub struct DhtSettings {
+    pub server_settings: ServerSettings,
+    /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Option<Vec<String>>,
-    pub read_only: bool,
+    pub server: bool,
+    /// Defaults to [crate::rpc::DEFAULT_PORT]
     pub port: Option<u16>,
 }
 
-impl Default for DhtSettings {
-    fn default() -> Self {
-        DhtSettings {
-            bootstrap: None,
-            read_only: true,
-            port: None,
-        }
-    }
-}
-
 impl Dht {
+    /// Returns a builder to edit settings before creating a Dht node.
     pub fn builder() -> Builder {
         Builder {
             settings: DhtSettings::default(),
@@ -108,8 +74,8 @@ impl Dht {
     }
 
     /// Create a new DHT client with default bootstrap nodes.
-    pub fn client() -> Self {
-        Dht::default()
+    pub fn client() -> Result<Self> {
+        Dht::builder().build()
     }
 
     /// Create a new DHT server that serves as a routing node and accepts storage requests
@@ -117,67 +83,58 @@ impl Dht {
     ///
     /// Note: this is only useful if the node has a public IP address and is able to receive
     /// incoming udp packets.
-    pub fn server() -> Self {
-        Dht::builder().as_server().build()
+    pub fn server() -> Result<Self> {
+        Dht::builder().server().build()
     }
 
-    pub fn new(settings: DhtSettings) -> Self {
+    /// Create a new Dht node.
+    ///
+    /// Could return an error if it failed to bind to the specified
+    /// port or other io errors while binding the udp socket.
+    pub fn new(settings: DhtSettings) -> Result<Self> {
         let (sender, receiver) = flume::bounded(32);
 
-        let mut dht = Dht {
+        let rpc = Rpc::new(settings)?;
+
+        let address = rpc.local_addr();
+
+        info!(?address, "Mainline DHT listening");
+
+        thread::spawn(move || run(rpc, receiver));
+
+        Ok(Dht {
             sender,
-            handle: None,
-        };
-
-        let mut clone = dht.clone();
-
-        let handle = thread::spawn(move || dht.run(settings, receiver));
-
-        clone.handle = Some(handle);
-
-        clone
+            address: Some(address),
+        })
     }
 
     // === Getters ===
 
     /// Returns the local address of the udp socket this node is listening on.
-    pub fn local_addr(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = flume::bounded::<SocketAddr>(1);
-
-        let _ = self.sender.send(ActorMessage::LocalAddress(sender));
-
-        receiver.recv().map_err(|e| e.into())
-    }
-
-    /// Returns a clone of the [RoutingTable] table of this node.
-    pub fn routing_table(&self) -> Result<RoutingTable> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
-
-        let _ = self.sender.send(ActorMessage::RoutingTable(sender));
-
-        receiver.recv().map_err(|e| e.into())
-    }
-
-    /// Returns the size of the [RoutingTable] without cloning the entire table.
-    pub fn routing_table_size(&self) -> Result<usize> {
-        let (sender, receiver) = flume::bounded::<usize>(1);
-
-        let _ = self.sender.send(ActorMessage::RoutingTableSize(sender));
-
-        receiver.recv().map_err(|e| e.into())
+    ///
+    /// Returns `None` if the node is shutdown
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.address
     }
 
     // === Public Methods ===
 
-    pub fn shutdown(&self) {
-        let _ = self.sender.send(ActorMessage::Shutdown).ok();
+    /// Shutdown the actor thread loop.
+    pub fn shutdown(&mut self) -> Result<()> {
+        let (sender, receiver) = flume::bounded::<()>(1);
+
+        self.sender.send(ActorMessage::Shutdown(sender))?;
+
+        receiver.recv()?;
+
+        self.address = None;
+
+        Ok(())
     }
 
     // === Peers ===
 
     /// Get peers for a given infohash.
-    ///
-    /// Returns a blocking iterator over responses as they are received.
     ///
     /// Note: each node of the network will only return a _random_ subset (usually 20)
     /// of the total peers it has for a given infohash, so if you are getting responses
@@ -186,41 +143,23 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    ///
-    /// # Eaxmples
-    ///
-    /// ```
-    /// use mainline::{Dht, Id, Testnet};
-    ///
-    /// // Create a testnet for this example to avoid spamming the mainnet.
-    /// let testnet = Testnet::new(10);
-    ///
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build();
-    ///
-    /// let info_hash: Id = [0; 20].into();
-    ///
-    /// let mut response = dht.get_peers(info_hash);
-    /// for res in &mut response {
-    ///     println!("Got peer: {:?} | from: {:?}", res.peer, res.from)
-    /// }
-    ///
-    /// println!(
-    ///     "Visited {:?} nodes, found {:?} closest nodes",
-    ///     response.visited,
-    ///     &response.closest_nodes.len()
-    /// );
-    /// ```
-    pub fn get_peers(&self, info_hash: Id) -> Response<GetPeerResponse> {
+    pub fn get_peers(&self, info_hash: Id) -> Result<flume::IntoIter<Vec<SocketAddr>>> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
-        // Other requests like put_to and getters don't need that and is ok with
+        // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
+        let (sender, receiver) = flume::unbounded::<Vec<SocketAddr>>();
 
-        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+        let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        Response::new(receiver)
+        self.sender.send(ActorMessage::Get(
+            info_hash,
+            request,
+            ResponseSender::Peers(sender),
+        ))?;
+
+        Ok(receiver.into_iter())
     }
 
     /// Announce a peer for a given infohash.
@@ -228,80 +167,62 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetPeerResponse>>();
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id> {
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
-        let _ = self.sender.send(ActorMessage::GetPeers(info_hash, sender));
+        let (port, implied_port) = match port {
+            Some(port) => (port, None),
+            None => (0, Some(true)),
+        };
 
-        let mut response = Response::new(receiver);
+        let request = PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+            info_hash,
+            port,
+            implied_port,
+        });
 
-        // Block until we got a Done response!
-        for _ in &mut response {}
+        self.sender
+            .send(ActorMessage::Put(info_hash, request, sender))?;
 
-        self.announce_peer_to(info_hash, response.closest_nodes, port)
-    }
-
-    /// Announce a peer for a given infhoash to a specific set of nodes.
-    ///
-    /// Useful if you already have the list of closest_nodes from previous queries.
-    /// Note that tokens are only valid within a window of 5-10 minutes, so if your
-    /// list of nodes are older than 5 minutes, you should use [announce_peer](Dht::announce_peer) instead.
-    pub fn announce_peer_to(
-        &self,
-        info_hash: Id,
-        nodes: Vec<Node>,
-        port: Option<u16>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
-
-        let _ = self
-            .sender
-            .send(ActorMessage::AnnouncePeer(info_hash, nodes, port, sender));
-
-        receiver.recv().map_err(|e| e.into())
+        receiver.recv()?
     }
 
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Response<GetImmutableResponse> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
+    pub fn get_immutable(&self, target: Id) -> Result<Bytes> {
+        let (sender, receiver) = flume::unbounded::<Bytes>();
 
-        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+            target,
+            seq: None,
+            salt: None,
+        });
 
-        Response::new(receiver)
+        self.sender.send(ActorMessage::Get(
+            target,
+            request,
+            ResponseSender::Immutable(sender),
+        ))?;
+
+        Ok(receiver.recv()?)
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Bytes) -> Result<StoreQueryMetdata> {
+    pub fn put_immutable(&self, value: Bytes) -> Result<Id> {
         let target = Id::from_bytes(hash_immutable(&value)).unwrap();
 
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetImmutableResponse>>();
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
-        let _ = self.sender.send(ActorMessage::GetImmutable(target, sender));
+        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
+            target,
+            v: value.clone().into(),
+        });
 
-        let mut response = Response::new(receiver);
+        self.sender
+            .send(ActorMessage::Put(target, request, sender))?;
 
-        // Block until we got a Done response!
-        for _ in &mut response {}
-
-        self.put_immutable_to(target, value, response.closest_nodes)
-    }
-
-    /// Put an immutable data to specific nodes.
-    pub fn put_immutable_to(
-        &self,
-        target: Id,
-        value: Bytes,
-        nodes: Vec<Node>,
-    ) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
-
-        let _ = self
-            .sender
-            .send(ActorMessage::PutImmutable(target, value, nodes, sender));
-
-        receiver.recv().map_err(|e| e.into())
+        receiver.recv()?
     }
 
     // === Mutable data ===
@@ -311,133 +232,82 @@ impl Dht {
         &self,
         public_key: &[u8; 32],
         salt: Option<Bytes>,
-    ) -> Response<GetMutableResponse> {
-        let target = target_from_key(public_key, &salt);
+        seq: Option<i64>,
+    ) -> Result<flume::IntoIter<MutableItem>> {
+        let target = MutableItem::target_from_key(public_key, &salt);
 
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
+        let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let _ = self
-            .sender
-            .send(ActorMessage::GetMutable(target, salt, sender));
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        Response::new(receiver)
+        let _ = self.sender.send(ActorMessage::Get(
+            target,
+            request,
+            ResponseSender::Mutable(sender),
+        ));
+
+        Ok(receiver.into_iter())
     }
 
     /// Put a mutable data to the DHT.
-    pub fn put_mutable(&self, item: MutableItem) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::unbounded::<ResponseMessage<GetMutableResponse>>();
+    pub fn put_mutable(&self, item: MutableItem) -> Result<Id> {
+        let (sender, receiver) = flume::bounded::<PutResult>(1);
 
-        let _ = self.sender.send(ActorMessage::GetMutable(
-            *item.target(),
-            item.salt().clone(),
-            sender,
-        ));
-
-        let mut response = Response::new(receiver);
-
-        // Block until we got a Done response!
-        for _ in &mut response {}
-
-        self.put_mutable_to(item, response.closest_nodes)
-    }
-
-    /// Put a mutable data to specific nodes.
-    pub fn put_mutable_to(&self, item: MutableItem, nodes: Vec<Node>) -> Result<StoreQueryMetdata> {
-        let (sender, receiver) = flume::bounded::<StoreQueryMetdata>(1);
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
+            target: *item.target(),
+            v: item.value().clone().into(),
+            k: item.key().to_vec(),
+            seq: *item.seq(),
+            sig: item.signature().to_vec(),
+            salt: item.salt().clone().map(|s| s.to_vec()),
+            cas: *item.cas(),
+        });
 
         let _ = self
             .sender
-            .send(ActorMessage::PutMutable(item, nodes, sender));
+            .send(ActorMessage::Put(*item.target(), request, sender));
 
-        receiver.recv().map_err(|e| e.into())
+        receiver.recv()?
     }
+}
 
-    // === Private Methods ===
+fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
+    let mut server = Server::default();
 
-    #[cfg(test)]
-    fn block_until_shutdown(self) {
-        if let Some(handle) = self.handle {
-            let _ = handle.join();
-        }
-    }
-
-    fn run(&mut self, settings: DhtSettings, receiver: Receiver<ActorMessage>) {
-        let mut rpc = Rpc::new().unwrap().with_read_only(settings.read_only);
-
-        if let Some(bootstrap) = settings.bootstrap {
-            rpc = rpc.with_bootstrap(bootstrap);
-        }
-
-        if let Some(port) = settings.port {
-            rpc = rpc.with_port(port).unwrap();
-        }
-
-        loop {
-            if let Ok(actor_message) = receiver.try_recv() {
-                match actor_message {
-                    ActorMessage::Shutdown => {
-                        break;
-                    }
-                    ActorMessage::LocalAddress(sender) => {
-                        let _ = sender.send(rpc.local_addr());
-                    }
-                    ActorMessage::RoutingTable(sender) => {
-                        let _ = sender.send(rpc.routing_table());
-                    }
-                    ActorMessage::RoutingTableSize(sender) => {
-                        let _ = sender.send(rpc.routing_table_size());
-                    }
-                    ActorMessage::GetPeers(info_hash, sender) => {
-                        rpc.get_peers(info_hash, ResponseSender::GetPeer(sender))
-                    }
-                    ActorMessage::AnnouncePeer(info_hash, nodes, port, sender) => {
-                        rpc.announce_peer(info_hash, nodes, port, ResponseSender::StoreItem(sender))
-                    }
-                    ActorMessage::GetImmutable(target, sender) => {
-                        rpc.get_immutable(target, ResponseSender::GetImmutable(sender))
-                    }
-                    ActorMessage::PutImmutable(target, value, nodes, sender) => {
-                        rpc.put_immutable(target, value, nodes, ResponseSender::StoreItem(sender))
-                    }
-                    ActorMessage::GetMutable(target, salt, sender) => {
-                        rpc.get_mutable(target, salt, ResponseSender::GetMutable(sender))
-                    }
-                    ActorMessage::PutMutable(item, nodes, sender) => {
-                        rpc.put_mutable(item, nodes, ResponseSender::StoreItem(sender))
-                    }
+    loop {
+        if let Ok(actor_message) = receiver.try_recv() {
+            match actor_message {
+                ActorMessage::Shutdown(sender) => {
+                    drop(receiver);
+                    let _ = sender.send(());
+                    break;
+                }
+                ActorMessage::Put(target, request, sender) => {
+                    rpc.put(target, request, Some(sender));
+                }
+                ActorMessage::Get(target, request, sender) => {
+                    rpc.get(target, request, Some(sender), None)
                 }
             }
-
-            rpc.tick();
         }
+
+        let report = rpc.tick();
+
+        // Handle incoming request with the default Server logic.
+        if let Some(ReceivedFrom {
+            from,
+            message: ReceivedMessage::Request((transaction_id, request_specific)),
+        }) = report.received_from
+        {
+            server.handle_request(&mut rpc, from, transaction_id, &request_specific);
+        };
     }
 }
 
-impl Default for Dht {
-    /// Create a new DHT client with default bootstrap nodes.
-    fn default() -> Self {
-        Dht::builder().build()
-    }
-}
-
-pub(crate) enum ActorMessage {
-    Shutdown,
-    LocalAddress(Sender<SocketAddr>),
-    RoutingTable(Sender<RoutingTable>),
-    RoutingTableSize(Sender<usize>),
-
-    GetPeers(Id, Sender<ResponseMessage<GetPeerResponse>>),
-    AnnouncePeer(Id, Vec<Node>, Option<u16>, Sender<StoreQueryMetdata>),
-
-    GetImmutable(Id, Sender<ResponseMessage<GetImmutableResponse>>),
-    PutImmutable(Id, Bytes, Vec<Node>, Sender<StoreQueryMetdata>),
-
-    GetMutable(
-        Id,
-        Option<Bytes>,
-        Sender<ResponseMessage<GetMutableResponse>>,
-    ),
-    PutMutable(MutableItem, Vec<Node>, Sender<StoreQueryMetdata>),
+pub enum ActorMessage {
+    Put(Id, PutRequestSpecific, Sender<PutResult>),
+    Get(Id, RequestTypeSpecific, ResponseSender),
+    Shutdown(Sender<()>),
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
@@ -454,14 +324,18 @@ impl Testnet {
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().as_server().bootstrap(&[]).build();
+                let node = Dht::builder().server().bootstrap(&[]).build().unwrap();
 
                 let addr = node.local_addr().unwrap();
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
                 nodes.push(node)
             } else {
-                let node = Dht::builder().as_server().bootstrap(&bootstrap).build();
+                let node = Dht::builder()
+                    .server()
+                    .bootstrap(&bootstrap)
+                    .build()
+                    .unwrap();
                 nodes.push(node)
             }
         }
@@ -473,35 +347,35 @@ impl Testnet {
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
-    use std::time::Duration;
 
     use ed25519_dalek::SigningKey;
 
     use super::*;
+    use crate::Error;
 
     #[test]
     fn shutdown() {
-        let dht = Dht::default();
+        let mut dht = Dht::client().unwrap();
 
-        let clone = dht.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
+        dht.local_addr();
 
-            clone.shutdown();
-        });
+        let a = dht.clone();
 
-        dht.block_until_shutdown();
+        dht.shutdown().unwrap();
+
+        let result = a.get_immutable(Id::random());
+
+        assert!(matches!(result, Err(Error::DhtIsShutdown(_))))
     }
 
     #[test]
     fn bind_twice() {
-        let a = Dht::default();
-        let b = Dht::builder()
+        let a = Dht::client().unwrap();
+        let result = Dht::builder()
             .port(a.local_addr().unwrap().port())
-            .as_server()
+            .server()
             .build();
 
-        let result = b.handle.unwrap().join();
         assert!(result.is_err());
     }
 
@@ -509,66 +383,60 @@ mod test {
     fn announce_get_peer() {
         let testnet = Testnet::new(10);
 
-        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
-        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+        let b = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
 
         let info_hash = Id::random();
 
-        match a.announce_peer(info_hash, Some(45555)) {
-            Ok(_) => {
-                let responses: Vec<_> = b.get_peers(info_hash).collect();
+        a.announce_peer(info_hash, Some(45555))
+            .expect("failed to announce");
 
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(r.peer.port(), 45555);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
-            }
-            Err(_) => {}
-        };
+        let peers = b.get_peers(info_hash).unwrap().next().expect("No peers");
+
+        assert_eq!(peers.first().unwrap().port(), 45555);
     }
 
     #[test]
     fn put_get_immutable() {
         let testnet = Testnet::new(10);
 
-        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
-        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+        let b = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
 
         let value: Bytes = "Hello World!".into();
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        match a.put_immutable(value.clone()) {
-            Ok(result) => {
-                assert_ne!(result.stored_at().len(), 0);
-                assert_eq!(result.target(), expected_target);
+        let target = a.put_immutable(value.clone()).unwrap();
+        assert_eq!(target, expected_target);
 
-                let responses: Vec<_> = b.get_immutable(result.target()).collect();
-
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(r.value, value);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
-            }
-            Err(_) => {
-                panic!("Expected put_immutable to succeeed")
-            }
-        };
+        let response = b.get_immutable(target).unwrap();
+        assert_eq!(response, value);
     }
 
     #[test]
     fn put_get_mutable() {
         let testnet = Testnet::new(10);
 
-        let a = Dht::builder().bootstrap(&testnet.bootstrap).build();
-        let b = Dht::builder().bootstrap(&testnet.bootstrap).build();
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+        let b = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -580,26 +448,61 @@ mod test {
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        match a.put_mutable(item.clone()) {
-            Ok(result) => {
-                assert_ne!(result.stored_at().len(), 0);
+        a.put_mutable(item.clone()).unwrap();
 
-                let responses: Vec<_> = b
-                    .get_mutable(signer.verifying_key().as_bytes(), None)
-                    .collect();
+        let response = b
+            .get_mutable(signer.verifying_key().as_bytes(), None, None)
+            .unwrap()
+            .next()
+            .expect("No mutable values");
 
-                match responses.first() {
-                    Some(r) => {
-                        assert_eq!(&r.item, &item);
-                    }
-                    None => {
-                        panic!("No respnoses")
-                    }
-                }
-            }
-            Err(_) => {
-                panic!("Expected put_immutable to succeeed")
-            }
-        };
+        assert_eq!(&response, &item);
+    }
+
+    #[test]
+    fn put_get_mutable_no_more_recent_value() {
+        let testnet = Testnet::new(10);
+
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+        let b = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+        let value: Bytes = "Hello World!".into();
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        a.put_mutable(item.clone()).unwrap();
+
+        let response = b
+            .get_mutable(signer.verifying_key().as_bytes(), None, Some(seq))
+            .unwrap()
+            .next();
+
+        assert!(&response.is_none());
+    }
+
+    #[test]
+    fn repeated_put_query() {
+        let testnet = Testnet::new(10);
+
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let id = a.put_immutable(vec![1, 2, 3].into()).unwrap();
+
+        assert_eq!(a.put_immutable(vec![1, 2, 3].into()).unwrap(), id);
     }
 }

@@ -8,6 +8,7 @@ use std::convert::TryFrom;
 use crate::{Error, Id, Result};
 
 #[derive(Clone, Debug, PartialEq)]
+/// [Bep_0044](https://www.bittorrent.org/beps/bep_0044.html)'s Mutable item.
 pub struct MutableItem {
     /// hash of the key and optional salt
     target: Id,
@@ -40,6 +41,23 @@ impl MutableItem {
         )
     }
 
+    /// Return the target of a [MutableItem] by hashing its `public_key` and an optional `salt`
+    pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Bytes>) -> Id {
+        let mut encoded = vec![];
+
+        encoded.extend(public_key);
+
+        if let Some(salt) = salt {
+            encoded.extend(salt);
+        }
+
+        let mut hasher = Sha1::new();
+        hasher.update(&encoded);
+        let hash = hasher.digest().bytes();
+
+        Id::from_bytes(hash).unwrap()
+    }
+
     /// Set the cas number if needed.
     pub fn with_cas(mut self, cas: i64) -> Self {
         self.cas = Some(cas);
@@ -55,7 +73,7 @@ impl MutableItem {
         salt: Option<Bytes>,
     ) -> Self {
         Self {
-            target: target_from_key(&key, &salt),
+            target: MutableItem::target_from_key(&key, &salt),
             key,
             value,
             seq,
@@ -71,7 +89,7 @@ impl MutableItem {
         v: Bytes,
         seq: &i64,
         signature: &[u8],
-        salt: &Option<Bytes>,
+        salt: Option<Bytes>,
         cas: &Option<i64>,
     ) -> Result<Self> {
         let key = VerifyingKey::try_from(key).map_err(|_| Error::InvalidMutablePublicKey)?;
@@ -79,7 +97,7 @@ impl MutableItem {
         let signature =
             Signature::from_slice(signature).map_err(|_| Error::InvalidMutableSignature)?;
 
-        key.verify(&encode_signable(seq, &v, salt), &signature)
+        key.verify(&encode_signable(seq, &v, &salt), &signature)
             .map_err(|_| Error::InvalidMutableSignature)?;
 
         Ok(Self {
@@ -122,22 +140,6 @@ impl MutableItem {
     pub fn cas(&self) -> &Option<i64> {
         &self.cas
     }
-}
-
-pub fn target_from_key(public_key: &[u8; 32], salt: &Option<Bytes>) -> Id {
-    let mut encoded = vec![];
-
-    encoded.extend(public_key);
-
-    if let Some(salt) = salt {
-        encoded.extend(salt);
-    }
-
-    let mut hasher = Sha1::new();
-    hasher.update(&encoded);
-    let hash = hasher.digest().bytes();
-
-    Id::from_bytes(hash).unwrap()
 }
 
 pub fn encode_signable(seq: &i64, value: &Bytes, salt: &Option<Bytes>) -> Bytes {

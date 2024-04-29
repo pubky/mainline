@@ -32,7 +32,7 @@ mod test {
             75, 173,
         ];
 
-        let target = Id::from_bytes(&[
+        let target = Id::from_bytes([
             2, 23, 113, 43, 67, 11, 185, 26, 26, 30, 204, 238, 204, 1, 13, 84, 52, 40, 86, 231,
         ])
         .unwrap();

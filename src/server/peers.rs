@@ -2,7 +2,7 @@
 
 use std::{net::SocketAddr, num::NonZeroUsize};
 
-use rand::{rngs::ThreadRng, thread_rng, Rng};
+use rand::{rngs::ThreadRng, Rng};
 
 use crate::common::Id;
 
@@ -10,7 +10,6 @@ use lru::LruCache;
 
 #[derive(Debug)]
 pub struct PeersStore {
-    rng: ThreadRng,
     info_hashes: LruCache<Id, LruCache<Id, SocketAddr>>,
     max_peers: NonZeroUsize,
 }
@@ -18,7 +17,6 @@ pub struct PeersStore {
 impl PeersStore {
     pub fn new(max_info_hashes: NonZeroUsize, max_peers: NonZeroUsize) -> Self {
         Self {
-            rng: thread_rng(),
             info_hashes: LruCache::new(max_info_hashes),
             max_peers,
         }
@@ -34,14 +32,19 @@ impl PeersStore {
         };
     }
 
-    pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddr>> {
+    pub fn get_random_peers(
+        &mut self,
+        info_hash: &Id,
+        rng: &mut ThreadRng,
+    ) -> Option<Vec<SocketAddr>> {
         if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
             let size = info_hash_lru.len();
             let target_size = 20;
 
             if size == 0 {
                 return None;
-            } else if size < target_size {
+            }
+            if size < target_size {
                 return Some(
                     info_hash_lru
                         .iter()
@@ -59,7 +62,7 @@ impl PeersStore {
                 let current_chance = remaining_slots as f64 / remaining_items as f64;
 
                 // Randomly decide to add the item based on the current chance
-                if self.rng.gen_bool(current_chance) {
+                if rng.gen_bool(current_chance) {
                     results.push(addr.to_owned());
                     if results.len() == target_size {
                         break;
@@ -76,6 +79,8 @@ impl PeersStore {
 
 #[cfg(test)]
 mod test {
+    use rand::thread_rng;
+
     use super::*;
 
     #[test]
@@ -99,7 +104,7 @@ mod test {
 
         assert_eq!(store.info_hashes.len(), 1);
         assert_eq!(
-            store.get_random_peers(&info_hash_b),
+            store.get_random_peers(&info_hash_b, &mut thread_rng()),
             Some(vec![SocketAddr::from(([127, 0, 1, 1], 0))])
         );
     }
@@ -127,7 +132,7 @@ mod test {
         );
 
         assert_eq!(
-            store.get_random_peers(&info_hash_a),
+            store.get_random_peers(&info_hash_a, &mut thread_rng()),
             Some(vec![
                 SocketAddr::from(([127, 0, 1, 3], 0)),
                 SocketAddr::from(([127, 0, 1, 2], 0)),
@@ -153,7 +158,9 @@ mod test {
 
         assert_eq!(store.info_hashes.get(&info_hash).unwrap().len(), 200);
 
-        let sample = store.get_random_peers(&info_hash).unwrap();
+        let sample = store
+            .get_random_peers(&info_hash, &mut thread_rng())
+            .unwrap();
 
         assert_eq!(sample.len(), 20);
     }

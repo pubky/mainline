@@ -30,8 +30,7 @@ impl Id {
 
         Id { bytes }
     }
-    /// Create a new Id from some bytes. Returns Err if `bytes` is not of length
-    /// [ID_SIZE](crate::common::ID_SIZE).
+    /// Create a new Id from some bytes. Returns Err if the input is not 20 bytes long.
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
         let bytes = bytes.as_ref();
         if bytes.len() != ID_SIZE {
@@ -242,7 +241,7 @@ mod test {
 
     #[test]
     fn from_u8_20() {
-        let bytes = [0_08; 20];
+        let bytes = [8; 20];
 
         let id: Id = bytes.into();
 

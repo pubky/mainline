@@ -10,6 +10,7 @@ use crate::common::{Id, Node, MAX_DISTANCE};
 pub const MAX_BUCKET_SIZE_K: usize = 20;
 
 #[derive(Debug, Clone)]
+/// Simplified Kademlia routing table
 pub struct RoutingTable {
     id: Id,
     buckets: BTreeMap<u8, KBucket>,
@@ -112,17 +113,6 @@ impl RoutingTable {
             .fold(0, |acc, bucket| acc + bucket.nodes.len())
     }
 
-    pub fn contains(&self, node_id: &Id) -> bool {
-        let distance = self.id.distance(node_id);
-
-        if let Some(bucket) = self.buckets.get(&distance) {
-            if bucket.contains(node_id) {
-                return true;
-            }
-        }
-        false
-    }
-
     /// Returns all nodes in the routing_table.
     pub fn to_vec(&self) -> Vec<Node> {
         let mut nodes: Vec<Node> = vec![];
@@ -136,18 +126,18 @@ impl RoutingTable {
         nodes
     }
 
-    /// Converts the routing_table to a vector of addresses in string format.
-    /// Most useful for exporting the routing table as bootstrapping_nodes for subsequent sessions.
-    pub fn to_bootstrapping_nodes(&self) -> Vec<String> {
-        let mut addresses: Vec<String> = vec![];
+    // === Private Methods ===
 
-        for bucket in self.buckets.values() {
-            for node in &bucket.nodes {
-                addresses.push(format!("{}:{}", &node.address.ip(), &node.address.port()));
+    #[cfg(test)]
+    fn contains(&self, node_id: &Id) -> bool {
+        let distance = self.id.distance(node_id);
+
+        if let Some(bucket) = self.buckets.get(&distance) {
+            if bucket.contains(node_id) {
+                return true;
             }
         }
-
-        addresses
+        false
     }
 }
 
@@ -209,12 +199,13 @@ impl KBucket {
         self.nodes.is_empty()
     }
 
-    pub fn contains(&self, id: &Id) -> bool {
-        self.iter().any(|node| node.id == *id)
-    }
-
     pub fn iter(&self) -> Iter<'_, Node> {
         self.nodes.iter()
+    }
+
+    #[cfg(test)]
+    fn contains(&self, id: &Id) -> bool {
+        self.iter().any(|node| node.id == *id)
     }
 }
 
@@ -234,10 +225,10 @@ mod test {
     #[test]
     fn table_is_empty() {
         let mut table = RoutingTable::new();
-        assert_eq!(table.is_empty(), true);
+        assert!(table.is_empty());
 
         table.add(Node::random());
-        assert_eq!(table.is_empty(), false);
+        assert!(!table.is_empty());
     }
 
     #[test]
@@ -254,10 +245,13 @@ mod test {
             table.add(node.clone());
         }
 
-        assert_eq!(
-            table.to_vec().sort_by(|a, b| a.id.cmp(&b.id)),
-            expected_nodes.to_vec().sort_by(|a, b| a.id.cmp(&b.id)),
-        );
+        let mut sorted_table = table.to_vec();
+        sorted_table.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let mut sorted_expected = expected_nodes.to_vec();
+        sorted_expected.sort_by(|a, b| a.id.cmp(&b.id));
+
+        assert_eq!(sorted_table, sorted_expected);
     }
 
     #[test]
@@ -305,8 +299,8 @@ mod test {
 
         table.add(node.clone());
 
-        assert_eq!(table.add(node), false);
-        assert_eq!(table.is_empty(), true)
+        assert!(!table.add(node));
+        assert!(table.is_empty())
     }
 
     #[test]
@@ -471,7 +465,7 @@ mod test {
         let nodes: Vec<Node> = ids
             .iter()
             .map(|str| {
-                let id = Id::from_str(*str).unwrap();
+                let id = Id::from_str(str).unwrap();
                 Node::random().with_id(id)
             })
             .collect();
@@ -508,7 +502,7 @@ mod test {
                 "b61fbd992a13af05feba939f597b5f6ee61188e3",
             ]
             .iter()
-            .map(|id| Id::from_str(*id).unwrap())
+            .map(|id| Id::from_str(id).unwrap())
             .collect();
 
             let target = local_id;
@@ -544,7 +538,7 @@ mod test {
                 "fd042ff1404b495720ad8345404ff5f25acd02a8",
             ]
             .iter()
-            .map(|str| Id::from_str(*str).unwrap())
+            .map(|str| Id::from_str(str).unwrap())
             .collect();
 
             let target = Id::from_str("d1406a3d3a8354d566f21dba8bd06c537cde2a20").unwrap();

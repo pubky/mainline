@@ -5,18 +5,16 @@ use rand::{rngs::ThreadRng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use tracing::trace;
 
 const SECRET_SIZE: usize = 20;
 const TOKEN_SIZE: usize = 4;
-pub const ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 pub struct Tokens {
-    rng: ThreadRng,
     prev_secret: [u8; SECRET_SIZE],
     curr_secret: [u8; SECRET_SIZE],
     last_updated: Instant,
@@ -29,16 +27,10 @@ impl Debug for Tokens {
 }
 
 impl Tokens {
-    pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
-
-        let prev_secret = rng.gen();
-        let curr_secret = rng.gen();
-
+    pub fn new(rng: &mut ThreadRng) -> Self {
         Tokens {
-            rng,
-            prev_secret,
-            curr_secret,
+            prev_secret: rng.gen(),
+            curr_secret: rng.gen(),
             last_updated: Instant::now(),
         }
     }
@@ -46,7 +38,7 @@ impl Tokens {
     // === Public Methods ===
 
     pub fn should_update(&self) -> bool {
-        self.last_updated.elapsed() > ROTATE_INTERVAL
+        self.last_updated.elapsed() > crate::common::TOKEN_ROTATE_INTERVAL
     }
 
     /// Validate that the token was generated within the past 10 minutes
@@ -57,11 +49,11 @@ impl Tokens {
         token == &curr || token == &prev
     }
 
-    pub fn rotate(&mut self) {
+    pub fn rotate(&mut self, rng: &mut ThreadRng) {
         trace!("Rotating secrets");
 
         self.prev_secret = self.curr_secret;
-        self.curr_secret = self.rng.gen();
+        self.curr_secret = rng.gen();
 
         self.last_updated = Instant::now();
     }
@@ -96,11 +88,13 @@ impl Tokens {
 #[cfg(test)]
 mod test {
 
+    use rand::thread_rng;
+
     use super::*;
 
     #[test]
     fn valid_tokens() {
-        let mut tokens = Tokens::new();
+        let mut tokens = Tokens::new(&mut thread_rng());
 
         let address = SocketAddr::from(([127, 0, 0, 1], 6881));
         let token = tokens.generate_token(address);

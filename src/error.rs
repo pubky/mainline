@@ -1,5 +1,7 @@
 //! Main Crate Error
 
+use crate::{common::ErrorSpecific, dht::ActorMessage, Id};
+
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
 pub enum Error {
@@ -33,12 +35,29 @@ pub enum Error {
     InvalidTransactionId(Vec<u8>),
 
     #[error(transparent)]
-    /// Transparent [std::io::Error]
+    /// Transparent [flume::RecvError]
     Receive(#[from] flume::RecvError),
+
+    #[error(transparent)]
+    /// The dht was shutdown.
+    DhtIsShutdown(#[from] flume::SendError<ActorMessage>),
 
     #[error("Invalid mutable item signature")]
     InvalidMutableSignature,
 
     #[error("Invalid mutable item public key")]
     InvalidMutablePublicKey,
+
+    /// Failed to find any nodes close, usually means dht node failed to bootstrap,
+    /// so the routing table is empty. Check the machine's access to UDP socket,
+    /// or find better bootstrapping nodes.
+    #[error("Failed to find any nodes close to store value at")]
+    NoClosestNodes,
+
+    #[error("Query Error")]
+    QueryError(ErrorSpecific),
+
+    #[error("Put query is already inflight to the same target: {0}")]
+    /// [crate::rpc::Rpc::put] query is already inflight to the same target
+    PutQueryIsInflight(Id),
 }
