@@ -1,7 +1,7 @@
 //! Modules needed only for nodes running in server mode (not read-only).
 
-mod peers;
-mod tokens;
+pub mod peers;
+pub mod tokens;
 
 use std::{net::SocketAddr, num::NonZeroUsize};
 
@@ -21,8 +21,6 @@ use crate::{
     rpc::Rpc,
 };
 
-use rand::{rngs::ThreadRng, thread_rng};
-
 use peers::PeersStore;
 use tokens::Tokens;
 
@@ -31,10 +29,22 @@ pub const MAX_INFO_HASHES: usize = 2000;
 pub const MAX_PEERS: usize = 500;
 pub const MAX_VALUES: usize = 1000;
 
-#[derive(Debug)]
-pub struct Server {
-    rng: ThreadRng,
+pub trait Server: std::fmt::Debug + Send + Sync {
+    /// Handle incoming requests.
+    ///
+    /// This function will block the main loop where the [Rpc]
+    /// is running, thus it needs to be very fast and lightweight.
+    fn handle_request(
+        &mut self,
+        rpc: &mut Rpc,
+        from: SocketAddr,
+        transaction_id: u16,
+        request: &RequestSpecific,
+    );
+}
 
+#[derive(Debug)]
+pub struct DhtServer {
     tokens: Tokens,
     // server storage
     peers: PeersStore,
@@ -43,14 +53,14 @@ pub struct Server {
     mutable_values: LruCache<Id, MutableItem>,
 }
 
-impl Default for Server {
+impl Default for DhtServer {
     fn default() -> Self {
-        Server::new(&ServerSettings::default())
+        DhtServer::new(&DhtServerSettings::default())
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ServerSettings {
+pub struct DhtServerSettings {
     /// The maximum info_hashes for which to store peers.
     ///
     /// Defaults to [MAX_INFO_HASHES]
@@ -69,13 +79,11 @@ pub struct ServerSettings {
     pub max_mutable_values: usize,
 }
 
-impl Server {
-    pub fn new(settings: &ServerSettings) -> Self {
-        let mut rng = thread_rng();
-        let tokens = Tokens::new(&mut rng);
+impl DhtServer {
+    pub fn new(settings: &DhtServerSettings) -> Self {
+        let tokens = Tokens::new();
 
-        Server {
-            rng: thread_rng(),
+        Self {
             tokens,
             peers: PeersStore::new(
                 NonZeroUsize::new(settings.max_info_hashes)
@@ -95,8 +103,57 @@ impl Server {
         }
     }
 
+    // === Private Methods ===
+
+    /// Handle get mutable request
+    fn handle_get_mutable(
+        &mut self,
+        rpc: &mut Rpc,
+        from: SocketAddr,
+        transaction_id: u16,
+        target: &Id,
+        seq: &Option<i64>,
+    ) {
+        rpc.response(
+            from,
+            transaction_id,
+            match self.mutable_values.get(target) {
+                Some(item) => {
+                    let no_more_recent_values = seq.map(|request_seq| item.seq() <= &request_seq);
+
+                    match no_more_recent_values {
+                        Some(true) => ResponseSpecific::NoMoreRecentValue(
+                            NoMoreRecentValueResponseArguments {
+                                responder_id: *rpc.id(),
+                                token: self.tokens.generate_token(from).into(),
+                                nodes: Some(rpc.routing_table().closest(target)),
+                                seq: *item.seq(),
+                            },
+                        ),
+                        _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
+                            responder_id: *rpc.id(),
+                            token: self.tokens.generate_token(from).into(),
+                            nodes: Some(rpc.routing_table().closest(target)),
+                            v: item.value().to_vec(),
+                            k: item.key().to_vec(),
+                            seq: *item.seq(),
+                            sig: item.signature().to_vec(),
+                        }),
+                    }
+                }
+                None => ResponseSpecific::NoValues(NoValuesResponseArguments {
+                    responder_id: *rpc.id(),
+                    token: self.tokens.generate_token(from).into(),
+                    nodes: Some(rpc.routing_table().closest(target)),
+                }),
+            },
+        )
+    }
+}
+
+impl Server for DhtServer {
     /// Handle incoming request.
-    pub fn handle_request(
+    fn handle_request(
         &mut self,
         rpc: &mut Rpc,
         from: SocketAddr,
@@ -104,7 +161,9 @@ impl Server {
         request: &RequestSpecific,
     ) {
         // Lazily rotate secrets before handling a request
-        self.rotate_secrets();
+        if self.tokens.should_update() {
+            self.tokens.rotate()
+        }
 
         let requester_id = request.requester_id;
 
@@ -132,7 +191,7 @@ impl Server {
                 rpc.response(
                     from,
                     transaction_id,
-                    match self.peers.get_random_peers(info_hash, &mut self.rng) {
+                    match self.peers.get_random_peers(info_hash) {
                         Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
                             responder_id: *rpc.id(),
                             token: self.tokens.generate_token(from).into(),
@@ -406,60 +465,5 @@ impl Server {
                 }
             },
         }
-    }
-
-    // === Private Methods ===
-
-    /// Rotate server's secret if necessary, it should be called in a loop.
-    fn rotate_secrets(&mut self) {
-        // === Tokens ===
-        if self.tokens.should_update() {
-            self.tokens.rotate(&mut self.rng)
-        }
-    }
-
-    /// Handle get mutable request
-    fn handle_get_mutable(
-        &mut self,
-        rpc: &mut Rpc,
-        from: SocketAddr,
-        transaction_id: u16,
-        target: &Id,
-        seq: &Option<i64>,
-    ) {
-        rpc.response(
-            from,
-            transaction_id,
-            match self.mutable_values.get(target) {
-                Some(item) => {
-                    let no_more_recent_values = seq.map(|request_seq| item.seq() <= &request_seq);
-
-                    match no_more_recent_values {
-                        Some(true) => ResponseSpecific::NoMoreRecentValue(
-                            NoMoreRecentValueResponseArguments {
-                                responder_id: *rpc.id(),
-                                token: self.tokens.generate_token(from).into(),
-                                nodes: Some(rpc.routing_table().closest(target)),
-                                seq: *item.seq(),
-                            },
-                        ),
-                        _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
-                            responder_id: *rpc.id(),
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(rpc.routing_table().closest(target)),
-                            v: item.value().to_vec(),
-                            k: item.key().to_vec(),
-                            seq: *item.seq(),
-                            sig: item.signature().to_vec(),
-                        }),
-                    }
-                }
-                None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                    responder_id: *rpc.id(),
-                    token: self.tokens.generate_token(from).into(),
-                    nodes: Some(rpc.routing_table().closest(target)),
-                }),
-            },
-        )
     }
 }

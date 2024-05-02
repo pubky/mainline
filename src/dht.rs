@@ -14,7 +14,7 @@ use crate::{
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
     rpc::{PutResult, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
-    server::{Server, ServerSettings},
+    server::{DhtServer, Server},
     Result,
 };
 
@@ -31,13 +31,18 @@ pub struct Builder {
 
 impl Builder {
     /// Create a Dht node.
-    pub fn build(&self) -> Result<Dht> {
-        Dht::new(self.settings.clone())
+    pub fn build(self) -> Result<Dht> {
+        Dht::new(self.settings)
     }
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
-        self.settings.server = true;
+        self.settings.server = Some(Box::<DhtServer>::default());
+        self
+    }
+
+    pub fn custom_server(mut self, custom_server: Box<dyn Server>) -> Self {
+        self.settings.server = Some(custom_server);
         self
     }
 
@@ -54,13 +59,13 @@ impl Builder {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 /// Dht settings
 pub struct DhtSettings {
-    pub server_settings: ServerSettings,
     /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Option<Vec<String>>,
-    pub server: bool,
+    /// Defaults to None
+    pub server: Option<Box<dyn Server>>,
     /// Defaults to [crate::rpc::DEFAULT_PORT]
     pub port: Option<u16>,
 }
@@ -94,13 +99,15 @@ impl Dht {
     pub fn new(settings: DhtSettings) -> Result<Self> {
         let (sender, receiver) = flume::bounded(32);
 
-        let rpc = Rpc::new(settings)?;
+        let rpc = Rpc::new(&settings)?;
 
         let address = rpc.local_addr();
 
         info!(?address, "Mainline DHT listening");
 
-        thread::spawn(move || run(rpc, receiver));
+        let mut server = settings.server;
+
+        thread::spawn(move || run(rpc, &mut server, receiver));
 
         Ok(Dht {
             sender,
@@ -271,9 +278,7 @@ impl Dht {
     }
 }
 
-fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
-    let mut server = Server::default();
-
+fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<ActorMessage>) {
     loop {
         if let Ok(actor_message) = receiver.try_recv() {
             match actor_message {
@@ -299,7 +304,9 @@ fn run(mut rpc: Rpc, receiver: Receiver<ActorMessage>) {
             message: ReceivedMessage::Request((transaction_id, request_specific)),
         }) = report.received_from
         {
-            server.handle_request(&mut rpc, from, transaction_id, &request_specific);
+            if let Some(server) = server.as_mut() {
+                server.handle_request(&mut rpc, from, transaction_id, &request_specific);
+            }
         };
     }
 }

@@ -1,8 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-//! # Mainline
-//! Rust implementation of read-only BitTorrent Mainline DHT client.
-
 // Public modules
 mod common;
 mod error;
