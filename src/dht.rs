@@ -1,6 +1,6 @@
 //! Dht node.
 
-use std::{net::SocketAddr, thread};
+use std::{net::SocketAddr, thread, time::Duration};
 
 use bytes::Bytes;
 use flume::{Receiver, Sender};
@@ -57,6 +57,18 @@ impl Builder {
         self.settings.port = Some(port);
         self
     }
+
+    /// Set the the duration a request awaits for a response.
+    ///
+    /// The longer this duration is, the longer queries take until they are deemeed "done".
+    /// The shortet this duration is, the more responses from busy nodes we miss out on,
+    /// which affects the accuracy of queries trying to find closest nodes to a target.
+    ///
+    /// Defaults to 2 seconds.
+    pub fn request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.settings.request_timeout = Some(request_timeout);
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -68,6 +80,8 @@ pub struct DhtSettings {
     pub server: Option<Box<dyn Server>>,
     /// Defaults to [crate::rpc::DEFAULT_PORT]
     pub port: Option<u16>,
+    /// Defaults to [crate::rpc::DEFAULT_REQUEST_TIMEOUT]
+    pub request_timeout: Option<Duration>,
 }
 
 impl Dht {

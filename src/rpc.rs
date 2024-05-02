@@ -26,6 +26,7 @@ use socket::KrpcSocket;
 
 pub use crate::common::messages;
 pub use socket::DEFAULT_PORT;
+pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
