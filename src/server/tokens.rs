@@ -1,7 +1,7 @@
 //! Manage tokens for remote client IPs.
 
 use crc::{Crc, CRC_32_ISCSI};
-use rand::{rngs::ThreadRng, Rng};
+use rand::{thread_rng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
@@ -14,6 +14,9 @@ const SECRET_SIZE: usize = 20;
 const TOKEN_SIZE: usize = 4;
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
+/// Tokens generator.
+///
+/// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.
 pub struct Tokens {
     prev_secret: [u8; SECRET_SIZE],
     curr_secret: [u8; SECRET_SIZE],
@@ -27,7 +30,9 @@ impl Debug for Tokens {
 }
 
 impl Tokens {
-    pub fn new(rng: &mut ThreadRng) -> Self {
+    pub fn new() -> Self {
+        let mut rng = thread_rng();
+
         Tokens {
             prev_secret: rng.gen(),
             curr_secret: rng.gen(),
@@ -49,8 +54,9 @@ impl Tokens {
         token == &curr || token == &prev
     }
 
-    pub fn rotate(&mut self, rng: &mut ThreadRng) {
+    pub fn rotate(&mut self) {
         trace!("Rotating secrets");
+        let mut rng = thread_rng();
 
         self.prev_secret = self.curr_secret;
         self.curr_secret = rng.gen();
@@ -85,16 +91,20 @@ impl Tokens {
     }
 }
 
+impl Default for Tokens {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod test {
-
-    use rand::thread_rng;
 
     use super::*;
 
     #[test]
     fn valid_tokens() {
-        let mut tokens = Tokens::new(&mut thread_rng());
+        let mut tokens = Tokens::new();
 
         let address = SocketAddr::from(([127, 0, 0, 1], 6881));
         let token = tokens.generate_token(address);

@@ -26,6 +26,7 @@ use socket::KrpcSocket;
 
 pub use crate::common::messages;
 pub use socket::DEFAULT_PORT;
+pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -67,11 +68,11 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(settings: DhtSettings) -> Result<Self> {
+    pub fn new(settings: &DhtSettings) -> Result<Self> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
-        let socket = KrpcSocket::new(&settings)?;
+        let socket = KrpcSocket::new(settings)?;
 
         info!(?settings, "Sarting Mainline Rpc");
 
@@ -79,6 +80,7 @@ impl Rpc {
             id,
             bootstrap: settings
                 .bootstrap
+                .to_owned()
                 .unwrap_or(
                     DEFAULT_BOOTSTRAP_NODES
                         .iter()

@@ -34,3 +34,10 @@ cargo run --example put_mutable <64 bytes hex secret_key> <string>
 
 ```sh
 cargo run --example get_mutable <40 bytes hex target from put_mutable>
+```
+
+## Custom Server
+
+```sh
+cargo run --example custom_server
+````

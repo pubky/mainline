@@ -51,8 +51,8 @@ impl KrpcSocket {
         Ok(Self {
             socket,
             next_tid: 0,
-            read_only: !settings.server,
-            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            read_only: settings.server.is_none(),
+            request_timeout: settings.request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
             inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
@@ -254,7 +254,7 @@ mod test {
 
     use crate::{
         common::{Id, PingResponseArguments, RequestTypeSpecific},
-        server::ServerSettings,
+        server::DhtServer,
     };
 
     use super::*;
@@ -276,9 +276,9 @@ mod test {
     #[test]
     fn recv_request() {
         let mut server = KrpcSocket::new(&DhtSettings {
-            server_settings: ServerSettings::default(),
+            server: Some(Box::<DhtServer>::default()),
             bootstrap: None,
-            server: true,
+            request_timeout: None,
             port: None,
         })
         .unwrap();

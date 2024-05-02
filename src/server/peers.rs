@@ -2,13 +2,16 @@
 
 use std::{net::SocketAddr, num::NonZeroUsize};
 
-use rand::{rngs::ThreadRng, Rng};
+use rand::{thread_rng, Rng};
 
 use crate::common::Id;
 
 use lru::LruCache;
 
 #[derive(Debug)]
+/// An LRU cache of "Peers" per info hashes.
+///
+/// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.
 pub struct PeersStore {
     info_hashes: LruCache<Id, LruCache<Id, SocketAddr>>,
     max_peers: NonZeroUsize,
@@ -32,11 +35,7 @@ impl PeersStore {
         };
     }
 
-    pub fn get_random_peers(
-        &mut self,
-        info_hash: &Id,
-        rng: &mut ThreadRng,
-    ) -> Option<Vec<SocketAddr>> {
+    pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddr>> {
         if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
             let size = info_hash_lru.len();
             let target_size = 20;
@@ -54,6 +53,8 @@ impl PeersStore {
             }
 
             let mut results = Vec::with_capacity(20);
+
+            let mut rng = thread_rng();
 
             for (index, (_, addr)) in info_hash_lru.iter().enumerate() {
                 // Calculate the chance of adding the current item based on remaining items and slots
@@ -79,8 +80,6 @@ impl PeersStore {
 
 #[cfg(test)]
 mod test {
-    use rand::thread_rng;
-
     use super::*;
 
     #[test]
@@ -104,7 +103,7 @@ mod test {
 
         assert_eq!(store.info_hashes.len(), 1);
         assert_eq!(
-            store.get_random_peers(&info_hash_b, &mut thread_rng()),
+            store.get_random_peers(&info_hash_b),
             Some(vec![SocketAddr::from(([127, 0, 1, 1], 0))])
         );
     }
@@ -132,7 +131,7 @@ mod test {
         );
 
         assert_eq!(
-            store.get_random_peers(&info_hash_a, &mut thread_rng()),
+            store.get_random_peers(&info_hash_a),
             Some(vec![
                 SocketAddr::from(([127, 0, 1, 3], 0)),
                 SocketAddr::from(([127, 0, 1, 2], 0)),
@@ -158,9 +157,7 @@ mod test {
 
         assert_eq!(store.info_hashes.get(&info_hash).unwrap().len(), 200);
 
-        let sample = store
-            .get_random_peers(&info_hash, &mut thread_rng())
-            .unwrap();
+        let sample = store.get_random_peers(&info_hash).unwrap();
 
         assert_eq!(sample.len(), 20);
     }
