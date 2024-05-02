@@ -47,7 +47,8 @@ Supported BEPs:
 - [x] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
 
 #### Rate limiting
-Note that the default server implementation has no rate-limiting, and while you can run your own [custom server](./examples/custom_server.rs) and apply your custom rate-limiting. However, that limit/block will only apply _after_ parsing incoming messages, and it won't be applied to responses.
+
+The default server implementation has no rate-limiting, you can run your own [custom server](./examples/custom_server.rs) and apply your custom rate-limiting. However, that limit/block will only apply _after_ parsing incoming messages, and it won't affect handling incoming responses.
 
 ## Acknowledgment
 

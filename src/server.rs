@@ -29,6 +29,7 @@ pub const MAX_INFO_HASHES: usize = 2000;
 pub const MAX_PEERS: usize = 500;
 pub const MAX_VALUES: usize = 1000;
 
+///
 pub trait Server: std::fmt::Debug + Send + Sync {
     /// Handle incoming requests.
     ///
@@ -44,6 +45,11 @@ pub trait Server: std::fmt::Debug + Send + Sync {
 }
 
 #[derive(Debug)]
+/// Default implementation of [Server] trait.
+///
+/// Supports [BEP0005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
+///
+/// But it doesn't implement any rate-limiting or blocking.
 pub struct DhtServer {
     tokens: Tokens,
     // server storage

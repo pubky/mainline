@@ -1,21 +1,33 @@
 use std::{thread::sleep, time::Duration};
 
-use mainline::{server::Server, Dht};
-use tracing::{info, Level};
+use mainline::{
+    server::{DhtServer, Server},
+    Dht,
+};
+use tracing::{info, instrument, Level};
 
 #[derive(Debug, Default)]
-struct MyCustomServer;
+struct MyCustomServer {
+    inner: DhtServer,
+}
 
 impl Server for MyCustomServer {
+    #[instrument]
     fn handle_request(
         &mut self,
-        _rpc: &mut mainline::rpc::Rpc,
+        rpc: &mut mainline::rpc::Rpc,
         from: std::net::SocketAddr,
         transaction_id: u16,
         request: &mainline::rpc::messages::RequestSpecific,
     ) {
-        info!(?request, ?from, ?transaction_id, "INCOMING REQUEST");
-        // Do something
+        info!(?request, ?from, "Request from");
+
+        // Do something ...
+        // For example, rate limiting:
+        // if self.rate_limiter.check() { return };
+
+        self.inner
+            .handle_request(rpc, from, transaction_id, request)
     }
 }
 

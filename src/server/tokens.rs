@@ -14,6 +14,9 @@ const SECRET_SIZE: usize = 20;
 const TOKEN_SIZE: usize = 4;
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
+/// Tokens generator.
+///
+/// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.
 pub struct Tokens {
     prev_secret: [u8; SECRET_SIZE],
     curr_secret: [u8; SECRET_SIZE],
@@ -85,6 +88,12 @@ impl Tokens {
         let checksum = digest.finalize();
 
         checksum.to_be_bytes()
+    }
+}
+
+impl Default for Tokens {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
