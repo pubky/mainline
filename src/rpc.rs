@@ -97,7 +97,9 @@ impl Rpc {
             put_queries: HashMap::new(),
             closest_nodes: LruCache::new(NonZeroUsize::new(MAX_CACHED_BUCKETS).unwrap()),
 
-            last_table_refresh: Instant::now().checked_sub(REFRESH_TABLE_INTERVAL).unwrap_or_else(Instant::now),
+            last_table_refresh: Instant::now()
+                .checked_sub(REFRESH_TABLE_INTERVAL)
+                .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
         })
     }
