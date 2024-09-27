@@ -2,7 +2,7 @@
 
 All notable changes to mainline dht will be documented in this file.
 
-## [Unreleased]
+##  [3.0.0](https://github.com/pubky/mainline/compare/3a4c3312410e69201a287e40cb7b6dbb30c663f2..v3.0.0) - 2024-09-27
 
 ### Changed
 
