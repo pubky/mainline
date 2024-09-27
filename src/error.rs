@@ -1,11 +1,17 @@
 //! Main Crate Error
 
+use std::net::SocketAddr;
+
 use crate::{common::ErrorSpecific, dht::ActorMessage, Id};
+
+// Alias Result to be the crate Result.
+pub type Result<T, E = Error> = core::result::Result<T, E>;
+
+pub type SocketAddrResult = core::result::Result<SocketAddr, std::io::Error>;
 
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
 pub enum Error {
-    /// For starter, to remove as code matures.
     #[error("Generic error: {0}")]
     Generic(String),
     /// For starter, to remove as code matures.

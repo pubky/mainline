@@ -10,6 +10,7 @@ use crate::{
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
     dht::{ActorMessage, Dht},
+    error::SocketAddrResult,
     rpc::{PutResult, ResponseSender},
     Result,
 };
@@ -29,8 +30,15 @@ impl AsyncDht {
     // === Getters ===
 
     /// Returns the local address of the udp socket this node is listening on.
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.0.local_addr()
+    ///
+    /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
+    /// returned an IO error.
+    pub async fn local_addr(&self) -> Result<SocketAddr> {
+        let (sender, receiver) = flume::bounded::<SocketAddrResult>(1);
+
+        self.0 .0.send(ActorMessage::LocalAddr(sender))?;
+
+        Ok(receiver.recv_async().await??)
     }
 
     // === Public Methods ===
@@ -39,11 +47,9 @@ impl AsyncDht {
     pub async fn shutdown(&mut self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
-        self.0.sender.send(ActorMessage::Shutdown(sender))?;
+        self.0 .0.send(ActorMessage::Shutdown(sender))?;
 
         receiver.recv_async().await?;
-
-        self.0.address = None;
 
         Ok(())
     }
@@ -69,7 +75,7 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.0.sender.send(ActorMessage::Get(
+        self.0 .0.send(ActorMessage::Get(
             info_hash,
             request,
             ResponseSender::Peers(sender),
@@ -98,7 +104,7 @@ impl AsyncDht {
         });
 
         self.0
-            .sender
+             .0
             .send(ActorMessage::Put(info_hash, request, sender))?;
 
         receiver.recv_async().await?
@@ -116,7 +122,7 @@ impl AsyncDht {
             salt: None,
         });
 
-        self.0.sender.send(ActorMessage::Get(
+        self.0 .0.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Immutable(sender),
@@ -127,7 +133,7 @@ impl AsyncDht {
 
     /// Put an immutable data to the DHT.
     pub async fn put_immutable(&self, value: Bytes) -> Result<Id> {
-        let target = Id::from_bytes(hash_immutable(&value)).unwrap();
+        let target: Id = hash_immutable(&value).into();
 
         let (sender, receiver) = flume::bounded::<PutResult>(1);
 
@@ -136,9 +142,7 @@ impl AsyncDht {
             v: value.clone().into(),
         });
 
-        self.0
-            .sender
-            .send(ActorMessage::Put(target, request, sender))?;
+        self.0 .0.send(ActorMessage::Put(target, request, sender))?;
 
         receiver.recv_async().await?
     }
@@ -158,7 +162,7 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.0.sender.send(ActorMessage::Get(
+        let _ = self.0 .0.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Mutable(sender),
@@ -183,7 +187,7 @@ impl AsyncDht {
 
         let _ = self
             .0
-            .sender
+             .0
             .send(ActorMessage::Put(*item.target(), request, sender));
 
         receiver.recv_async().await?
@@ -207,7 +211,7 @@ mod test {
         async fn test() {
             let mut dht = Dht::client().unwrap().as_async();
 
-            dht.local_addr();
+            dht.local_addr().await.unwrap();
 
             let a = dht.clone();
 
@@ -223,7 +227,7 @@ mod test {
     #[test]
     fn announce_get_peer() {
         async fn test() {
-            let testnet = Testnet::new(10);
+            let testnet = Testnet::new(10).unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -258,7 +262,7 @@ mod test {
     #[test]
     fn put_get_immutable() {
         async fn test() {
-            let testnet = Testnet::new(10);
+            let testnet = Testnet::new(10).unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -287,7 +291,7 @@ mod test {
     #[test]
     fn put_get_mutable() {
         async fn test() {
-            let testnet = Testnet::new(10);
+            let testnet = Testnet::new(10).unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -328,7 +332,7 @@ mod test {
     #[test]
     fn put_get_mutable_no_more_recent_value() {
         async fn test() {
-            let testnet = Testnet::new(10);
+            let testnet = Testnet::new(10).unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -368,7 +372,7 @@ mod test {
     #[test]
     fn repeated_put_query() {
         async fn test() {
-            let testnet = Testnet::new(10);
+            let testnet = Testnet::new(10).unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)

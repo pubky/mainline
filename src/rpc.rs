@@ -20,6 +20,7 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
+use crate::error::SocketAddrResult;
 use crate::{dht::DhtSettings, Error, Result};
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
@@ -95,7 +96,9 @@ impl Rpc {
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
             put_queries: HashMap::new(),
-            closest_nodes: LruCache::new(NonZeroUsize::new(MAX_CACHED_BUCKETS).unwrap()),
+            closest_nodes: LruCache::new(
+                NonZeroUsize::new(MAX_CACHED_BUCKETS).expect("MAX_CACHED_BUCKETS is NonZeroUsize"),
+            ),
 
             last_table_refresh: Instant::now()
                 .checked_sub(REFRESH_TABLE_INTERVAL)
@@ -121,7 +124,7 @@ impl Rpc {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddr {
+    pub fn local_addr(&self) -> SocketAddrResult {
         self.socket.local_addr()
     }
 

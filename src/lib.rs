@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![deny(clippy::unwrap_used)]
 
 // Public modules
 mod common;
@@ -15,7 +16,4 @@ pub use bytes::Bytes;
 pub use dht::{Dht, Testnet};
 
 pub use ed25519_dalek::SigningKey;
-pub use error::Error;
-
-// Alias Result to be the crate Result.
-pub type Result<T, E = error::Error> = core::result::Result<T, E>;
+pub use error::{Error, Result};

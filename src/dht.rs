@@ -13,6 +13,7 @@ use crate::{
         GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
+    error::SocketAddrResult,
     rpc::{PutResult, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
     server::{DhtServer, Server},
     Result,
@@ -20,10 +21,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 /// Mainlin eDht node.
-pub struct Dht {
-    pub(crate) sender: Sender<ActorMessage>,
-    pub(crate) address: Option<SocketAddr>,
-}
+pub struct Dht(pub(crate) Sender<ActorMessage>);
 
 pub struct Builder {
     settings: DhtSettings,
@@ -115,7 +113,7 @@ impl Dht {
 
         let rpc = Rpc::new(&settings)?;
 
-        let address = rpc.local_addr();
+        let address = rpc.local_addr()?;
 
         info!(?address, "Mainline DHT listening");
 
@@ -123,19 +121,21 @@ impl Dht {
 
         thread::spawn(move || run(rpc, &mut server, receiver));
 
-        Ok(Dht {
-            sender,
-            address: Some(address),
-        })
+        Ok(Dht(sender))
     }
 
     // === Getters ===
 
     /// Returns the local address of the udp socket this node is listening on.
     ///
-    /// Returns `None` if the node is shutdown
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.address
+    /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
+    /// returned an IO error.
+    pub fn local_addr(&self) -> Result<SocketAddr> {
+        let (sender, receiver) = flume::bounded::<SocketAddrResult>(1);
+
+        self.0.send(ActorMessage::LocalAddr(sender))?;
+
+        Ok(receiver.recv()??)
     }
 
     // === Public Methods ===
@@ -144,11 +144,9 @@ impl Dht {
     pub fn shutdown(&mut self) -> Result<()> {
         let (sender, receiver) = flume::bounded::<()>(1);
 
-        self.sender.send(ActorMessage::Shutdown(sender))?;
+        self.0.send(ActorMessage::Shutdown(sender))?;
 
         receiver.recv()?;
-
-        self.address = None;
 
         Ok(())
     }
@@ -174,7 +172,7 @@ impl Dht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.sender.send(ActorMessage::Get(
+        self.0.send(ActorMessage::Get(
             info_hash,
             request,
             ResponseSender::Peers(sender),
@@ -202,8 +200,7 @@ impl Dht {
             implied_port,
         });
 
-        self.sender
-            .send(ActorMessage::Put(info_hash, request, sender))?;
+        self.0.send(ActorMessage::Put(info_hash, request, sender))?;
 
         receiver.recv()?
     }
@@ -220,7 +217,7 @@ impl Dht {
             salt: None,
         });
 
-        self.sender.send(ActorMessage::Get(
+        self.0.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Immutable(sender),
@@ -231,7 +228,7 @@ impl Dht {
 
     /// Put an immutable data to the DHT.
     pub fn put_immutable(&self, value: Bytes) -> Result<Id> {
-        let target = Id::from_bytes(hash_immutable(&value)).unwrap();
+        let target: Id = hash_immutable(&value).into();
 
         let (sender, receiver) = flume::bounded::<PutResult>(1);
 
@@ -240,8 +237,7 @@ impl Dht {
             v: value.clone().into(),
         });
 
-        self.sender
-            .send(ActorMessage::Put(target, request, sender))?;
+        self.0.send(ActorMessage::Put(target, request, sender))?;
 
         receiver.recv()?
     }
@@ -261,7 +257,7 @@ impl Dht {
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.sender.send(ActorMessage::Get(
+        let _ = self.0.send(ActorMessage::Get(
             target,
             request,
             ResponseSender::Mutable(sender),
@@ -285,7 +281,7 @@ impl Dht {
         });
 
         let _ = self
-            .sender
+            .0
             .send(ActorMessage::Put(*item.target(), request, sender));
 
         receiver.recv()?
@@ -300,6 +296,9 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
                     drop(receiver);
                     let _ = sender.send(());
                     break;
+                }
+                ActorMessage::LocalAddr(sender) => {
+                    let _ = sender.send(rpc.local_addr());
                 }
                 ActorMessage::Put(target, request, sender) => {
                     rpc.put(target, request, Some(sender));
@@ -328,6 +327,7 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
 pub enum ActorMessage {
     Put(Id, PutRequestSpecific, Sender<PutResult>),
     Get(Id, RequestTypeSpecific, ResponseSender),
+    LocalAddr(Sender<SocketAddrResult>),
     Shutdown(Sender<()>),
 }
 
@@ -339,29 +339,25 @@ pub struct Testnet {
 }
 
 impl Testnet {
-    pub fn new(count: usize) -> Self {
+    pub fn new(count: usize) -> Result<Testnet> {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().server().bootstrap(&[]).build().unwrap();
+                let node = Dht::builder().server().bootstrap(&[]).build()?;
 
-                let addr = node.local_addr().unwrap();
+                let addr = node.local_addr()?;
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
                 nodes.push(node)
             } else {
-                let node = Dht::builder()
-                    .server()
-                    .bootstrap(&bootstrap)
-                    .build()
-                    .unwrap();
+                let node = Dht::builder().server().bootstrap(&bootstrap).build()?;
                 nodes.push(node)
             }
         }
 
-        Self { bootstrap, nodes }
+        Ok(Self { bootstrap, nodes })
     }
 }
 
@@ -378,7 +374,7 @@ mod test {
     fn shutdown() {
         let mut dht = Dht::client().unwrap();
 
-        dht.local_addr();
+        dht.local_addr().unwrap();
 
         let a = dht.clone();
 
@@ -402,7 +398,7 @@ mod test {
 
     #[test]
     fn announce_get_peer() {
-        let testnet = Testnet::new(10);
+        let testnet = Testnet::new(10).unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -425,7 +421,7 @@ mod test {
 
     #[test]
     fn put_get_immutable() {
-        let testnet = Testnet::new(10);
+        let testnet = Testnet::new(10).unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -448,7 +444,7 @@ mod test {
 
     #[test]
     fn put_get_mutable() {
-        let testnet = Testnet::new(10);
+        let testnet = Testnet::new(10).unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -482,7 +478,7 @@ mod test {
 
     #[test]
     fn put_get_mutable_no_more_recent_value() {
-        let testnet = Testnet::new(10);
+        let testnet = Testnet::new(10).unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -515,7 +511,7 @@ mod test {
 
     #[test]
     fn repeated_put_query() {
-        let testnet = Testnet::new(10);
+        let testnet = Testnet::new(10).unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
