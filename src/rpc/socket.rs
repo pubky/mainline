@@ -7,6 +7,7 @@ use tracing::{debug, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
+use crate::error::SocketAddrResult;
 use crate::{dht::DhtSettings, Result};
 
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
@@ -61,8 +62,8 @@ impl KrpcSocket {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddr {
-        self.socket.local_addr().unwrap()
+    pub fn local_addr(&self) -> SocketAddrResult {
+        self.socket.local_addr()
     }
 
     // === Public Methods ===
@@ -267,7 +268,7 @@ mod test {
         assert_eq!(socket.tid(), 1);
         assert_eq!(socket.tid(), 2);
 
-        socket.next_tid = u16::max_value();
+        socket.next_tid = u16::MAX;
 
         assert_eq!(socket.tid(), 65535);
         assert_eq!(socket.tid(), 0);
@@ -282,12 +283,12 @@ mod test {
             port: None,
         })
         .unwrap();
-        let server_address = server.local_addr();
+        let server_address = server.local_addr().unwrap();
 
         let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
         client.next_tid = 120;
 
-        let client_address = client.local_addr();
+        let client_address = client.local_addr().unwrap();
         let request = RequestSpecific {
             requester_id: Id::random(),
             request_type: RequestTypeSpecific::Ping,
@@ -318,11 +319,11 @@ mod test {
     #[test]
     fn recv_response() {
         let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        let server_address = server.local_addr();
+        let server_address = server.local_addr().unwrap();
 
         let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
-        let client_address = client.local_addr();
+        let client_address = client.local_addr().unwrap();
 
         server.inflight_requests.push(InflightRequest {
             tid: 8,
@@ -362,7 +363,7 @@ mod test {
     #[test]
     fn ignore_unexcpected_response() {
         let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        let server_address = server.local_addr();
+        let server_address = server.local_addr().unwrap();
 
         let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
@@ -390,11 +391,11 @@ mod test {
     #[test]
     fn ignore_response_from_wrong_address() {
         let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        let server_address = server.local_addr();
+        let server_address = server.local_addr().unwrap();
 
         let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
 
-        let client_address = client.local_addr();
+        let client_address = client.local_addr().unwrap();
 
         server.inflight_requests.push(InflightRequest {
             tid: 8,
@@ -424,7 +425,7 @@ mod test {
     #[test]
     fn ignore_request_in_read_only() {
         let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        let server_address = server.local_addr();
+        let server_address = server.local_addr().unwrap();
 
         let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
         client.next_tid = 120;

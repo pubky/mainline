@@ -437,13 +437,9 @@ impl Message {
                                     token: arguments.token,
                                     put_request_type: PutRequestSpecific::AnnouncePeer(
                                         AnnouncePeerRequestArguments {
-                                            implied_port: if arguments.implied_port.is_none() {
-                                                None
-                                            } else if arguments.implied_port.unwrap() != 0 {
-                                                Some(true)
-                                            } else {
-                                                Some(false)
-                                            },
+                                            implied_port: arguments
+                                                .implied_port
+                                                .map(|implied_port| implied_port != 0),
                                             info_hash: Id::from_bytes(&arguments.info_hash)?,
                                             port: arguments.port,
                                         },
@@ -452,7 +448,7 @@ impl Message {
                             }
                         }
                         internal::DHTRequestSpecific::PutValue { arguments } => {
-                            if arguments.k.is_some() {
+                            if let Some(k) = arguments.k {
                                 RequestSpecific {
                                     requester_id: Id::from_bytes(arguments.id)?,
 
@@ -462,10 +458,14 @@ impl Message {
                                             PutMutableRequestArguments {
                                                 target: Id::from_bytes(arguments.target)?,
                                                 v: arguments.v,
-                                                k: arguments.k.unwrap(),
+                                                k,
                                                 // Should panic if missing.
-                                                seq: arguments.seq.unwrap(),
-                                                sig: arguments.sig.unwrap(),
+                                                seq: arguments.seq.expect(
+                                                    "Put mutable message to have sequence number",
+                                                ),
+                                                sig: arguments.sig.expect(
+                                                    "Put mutable message to have a signature",
+                                                ),
                                                 salt: arguments.salt,
                                                 cas: arguments.cas,
                                             },

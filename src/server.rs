@@ -29,7 +29,7 @@ pub const MAX_INFO_HASHES: usize = 2000;
 pub const MAX_PEERS: usize = 500;
 pub const MAX_VALUES: usize = 1000;
 
-///
+/// Dht server that can handle incoming rpc requests
 pub trait Server: std::fmt::Debug + Send + Sync {
     /// Handle incoming requests.
     ///
@@ -92,19 +92,20 @@ impl DhtServer {
         Self {
             tokens,
             peers: PeersStore::new(
-                NonZeroUsize::new(settings.max_info_hashes)
-                    .unwrap_or(NonZeroUsize::new(MAX_INFO_HASHES).unwrap()),
+                NonZeroUsize::new(settings.max_info_hashes).unwrap_or(
+                    NonZeroUsize::new(MAX_INFO_HASHES).expect("MAX_PEERS is NonZeroUsize"),
+                ),
                 NonZeroUsize::new(settings.max_peers_per_info_hash)
-                    .unwrap_or(NonZeroUsize::new(MAX_PEERS).unwrap()),
+                    .unwrap_or(NonZeroUsize::new(MAX_PEERS).expect("MAX_PEERS is NonZeroUsize")),
             ),
 
             immutable_values: LruCache::new(
                 NonZeroUsize::new(settings.max_immutable_values)
-                    .unwrap_or(NonZeroUsize::new(MAX_VALUES).unwrap()),
+                    .unwrap_or(NonZeroUsize::new(MAX_VALUES).expect("MAX_VALUES is NonZeroUsize")),
             ),
             mutable_values: LruCache::new(
                 NonZeroUsize::new(settings.max_mutable_values)
-                    .unwrap_or(NonZeroUsize::new(MAX_VALUES).unwrap()),
+                    .unwrap_or(NonZeroUsize::new(MAX_VALUES).expect("MAX_VALUES is NonZeroUsize")),
             ),
         }
     }

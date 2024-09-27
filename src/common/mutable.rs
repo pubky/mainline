@@ -53,9 +53,9 @@ impl MutableItem {
 
         let mut hasher = Sha1::new();
         hasher.update(&encoded);
-        let hash = hasher.digest().bytes();
+        let bytes = hasher.digest().bytes();
 
-        Id::from_bytes(hash).unwrap()
+        Id { bytes }
     }
 
     /// Set the cas number if needed.

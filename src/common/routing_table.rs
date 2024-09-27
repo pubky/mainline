@@ -43,9 +43,7 @@ impl RoutingTable {
             return false;
         }
 
-        self.buckets.entry(distance).or_default();
-
-        let bucket = self.buckets.get_mut(&distance).unwrap();
+        let bucket = self.buckets.entry(distance).or_default();
 
         bucket.add(node)
     }
