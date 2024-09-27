@@ -4,11 +4,11 @@ version = "2.0.1"
 authors = ["nuh.dev"]
 edition = "2018"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
-homepage = "https://github.com/nuhvi/mainline"
+homepage = "https://github.com/pubky/mainline"
 license = "MIT"
 keywords = ["bittorrent", "torrent", "dht", "kademlia", "mainline"]
 categories = ["network-programming"]
-repository = "https://github.com/nuhvi/mainline"
+repository = "https://github.com/pubky/mainline"
 
 [dependencies]
 rand = "0.8.5"
