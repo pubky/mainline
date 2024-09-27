@@ -268,7 +268,7 @@ mod test {
         assert_eq!(socket.tid(), 1);
         assert_eq!(socket.tid(), 2);
 
-        socket.next_tid = u16::max_value();
+        socket.next_tid = u16::MAX;
 
         assert_eq!(socket.tid(), 65535);
         assert_eq!(socket.tid(), 0);

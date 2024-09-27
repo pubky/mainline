@@ -35,3 +35,6 @@ default = []
 
 [package.metadata.docs.rs]
 all-features = true
+
+[lints.clippy]
+unwrap_used = "deny"
