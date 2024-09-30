@@ -141,14 +141,11 @@ impl Dht {
     // === Public Methods ===
 
     /// Shutdown the actor thread loop.
-    pub fn shutdown(&mut self) -> Result<()> {
+    pub fn shutdown(&mut self) {
         let (sender, receiver) = flume::bounded::<()>(1);
 
-        self.0.send(ActorMessage::Shutdown(sender))?;
-
-        receiver.recv()?;
-
-        Ok(())
+        let _ = self.0.send(ActorMessage::Shutdown(sender));
+        let _ = receiver.recv();
     }
 
     // === Peers ===
@@ -378,7 +375,7 @@ mod test {
 
         let a = dht.clone();
 
-        dht.shutdown().unwrap();
+        dht.shutdown();
 
         let result = a.get_immutable(Id::random());
 
