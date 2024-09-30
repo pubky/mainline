@@ -598,6 +598,12 @@ impl Rpc {
     }
 }
 
+impl Drop for Rpc {
+    fn drop(&mut self) {
+        debug!("Dropped Mainline::Rpc");
+    }
+}
+
 /// Any received message and done queries in the [Rpc::tick].
 #[derive(Debug, Clone)]
 pub struct RpcTickReport {
