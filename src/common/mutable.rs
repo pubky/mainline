@@ -55,7 +55,7 @@ impl MutableItem {
         hasher.update(&encoded);
         let bytes = hasher.digest().bytes();
 
-        Id { bytes }
+        bytes.into()
     }
 
     /// Set the cas number if needed.
