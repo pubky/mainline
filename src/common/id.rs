@@ -8,8 +8,6 @@ use std::{
     str::FromStr,
 };
 
-use crate::{Error, Result};
-
 /// The size of node IDs in bits.
 pub const ID_SIZE: usize = 20;
 pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
@@ -29,10 +27,10 @@ impl Id {
         Id(bytes)
     }
     /// Create a new Id from some bytes. Returns Err if the input is not 20 bytes long.
-    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
+    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id, InvalidIdSize> {
         let bytes = bytes.as_ref();
         if bytes.len() != ID_SIZE {
-            return Err(Error::InvalidIdSize(bytes.len()));
+            return Err(InvalidIdSize(bytes.len()));
         }
 
         let mut tmp: [u8; ID_SIZE] = [0; ID_SIZE];
@@ -120,7 +118,7 @@ fn from_ipv4_and_r(bytes: [u8; 20], ip: Ipv4Addr, r: u8) -> Id {
     // Set first 21 bits to the prefix
     bytes[0] = prefix[0];
     bytes[1] = prefix[1];
-    // set the first 5 bits of the 3 byte to the remaining 5 bits of the prefix
+    // set the first 5 bits of the 3rd byte to the remaining 5 bits of the prefix
     bytes[2] = (prefix[2] & 0xf8) | (bytes[2] & 0x7);
 
     // Set the last byte to the random r
@@ -132,10 +130,10 @@ fn from_ipv4_and_r(bytes: [u8; 20], ip: Ipv4Addr, r: u8) -> Id {
 fn id_prefix_ipv4(ip: &Ipv4Addr, r: u8) -> [u8; 3] {
     let r32: u32 = r.into();
     let ip_int: u32 = u32::from_be_bytes(ip.octets());
-    let nonsense: u32 = (ip_int & IPV4_MASK) | (r32 << 29);
+    let masked_ip: u32 = (ip_int & IPV4_MASK) | (r32 << 29);
 
     let mut digest = CASTAGNOLI.digest();
-    digest.update(&nonsense.to_be_bytes());
+    digest.update(&masked_ip.to_be_bytes());
 
     let crc = digest.finalize();
 
@@ -172,13 +170,11 @@ impl From<Id> for [u8; ID_SIZE] {
 }
 
 impl FromStr for Id {
-    type Err = Error;
+    type Err = DecodeIdError;
 
-    fn from_str(s: &str) -> Result<Id> {
+    fn from_str(s: &str) -> Result<Id, DecodeIdError> {
         if s.len() % 2 != 0 {
-            return Err(Error::InvalidIdEncoding(
-                "Number of Hex characters should be even".into(),
-            ));
+            return Err(DecodeIdError::OddNumberOfCharacters);
         }
 
         let mut bytes = Vec::with_capacity(s.len() / 2);
@@ -188,11 +184,11 @@ impl FromStr for Id {
             if let Ok(byte) = u8::from_str_radix(byte_str, 16) {
                 bytes.push(byte);
             } else {
-                return Err(Error::Static("Invalid hex character")); // Invalid hex character
+                return Err(DecodeIdError::InvalidHexCharacter(byte_str.into()));
             }
         }
 
-        Id::from_bytes(bytes)
+        Ok(Id::from_bytes(bytes)?)
     }
 }
 
@@ -200,6 +196,32 @@ impl Debug for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Id({})", self)
     }
+}
+
+#[derive(Debug)]
+pub struct InvalidIdSize(usize);
+
+impl std::error::Error for InvalidIdSize {}
+
+impl std::fmt::Display for InvalidIdSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Invalid Id size, expected 20, got {0}", self.0)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Mainline crate error enum.
+pub enum DecodeIdError {
+    /// Id is expected to by 20 bytes.
+    #[error(transparent)]
+    InvalidIdSize(#[from] InvalidIdSize),
+
+    #[error("Hex encoding should contain an even number of hex characters")]
+    OddNumberOfCharacters,
+
+    /// Invalid hex character
+    #[error("Invalid Id encoding: {0}")]
+    InvalidHexCharacter(String),
 }
 
 #[cfg(test)]

@@ -7,8 +7,7 @@ use tracing::{debug, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-use crate::error::SocketAddrResult;
-use crate::{dht::DhtSettings, Result};
+use crate::dht::DhtSettings;
 
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
@@ -37,7 +36,7 @@ pub struct InflightRequest {
 }
 
 impl KrpcSocket {
-    pub fn new(settings: &DhtSettings) -> Result<Self> {
+    pub fn new(settings: &DhtSettings) -> Result<Self, std::io::Error> {
         let socket = if let Some(port) = settings.port {
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
@@ -62,7 +61,7 @@ impl KrpcSocket {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddrResult {
+    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
         self.socket.local_addr()
     }
 
@@ -229,11 +228,23 @@ impl KrpcSocket {
     }
 
     /// Send a raw dht message
-    fn send(&mut self, address: SocketAddr, message: Message) -> Result<()> {
+    fn send(&mut self, address: SocketAddr, message: Message) -> Result<(), SendMessageError> {
         trace!(?message, "Sending a message");
         self.socket.send_to(&message.to_bytes()?, address)?;
         Ok(())
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Mainline crate error enum.
+pub enum SendMessageError {
+    /// Errors related to parsing DHT messages.
+    #[error("Failed to parse packet bytes: {0}")]
+    BencodeError(#[from] serde_bencode::Error),
+
+    #[error(transparent)]
+    /// Transparent [std::io::Error]
+    IO(#[from] std::io::Error),
 }
 
 // Same as SocketAddr::eq but ingores the ip if it is unspecified for testing reasons.

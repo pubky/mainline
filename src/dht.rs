@@ -1,6 +1,6 @@
 //! Dht node.
 
-use std::{net::SocketAddr, thread, time::Duration};
+use std::{fmt::Formatter, net::SocketAddr, thread, time::Duration};
 
 use bytes::Bytes;
 use flume::{Receiver, Sender};
@@ -13,10 +13,8 @@ use crate::{
         GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
-    error::SocketAddrResult,
-    rpc::{PutResult, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
+    rpc::{PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
     server::{DhtServer, Server},
-    Result,
 };
 
 #[derive(Debug, Clone)]
@@ -29,7 +27,7 @@ pub struct Builder {
 
 impl Builder {
     /// Create a Dht node.
-    pub fn build(self) -> Result<Dht> {
+    pub fn build(self) -> Result<Dht, std::io::Error> {
         Dht::new(self.settings)
     }
 
@@ -91,7 +89,7 @@ impl Dht {
     }
 
     /// Create a new DHT client with default bootstrap nodes.
-    pub fn client() -> Result<Self> {
+    pub fn client() -> Result<Self, std::io::Error> {
         Dht::builder().build()
     }
 
@@ -100,7 +98,7 @@ impl Dht {
     ///
     /// Note: this is only useful if the node has a public IP address and is able to receive
     /// incoming udp packets.
-    pub fn server() -> Result<Self> {
+    pub fn server() -> Result<Self, std::io::Error> {
         Dht::builder().server().build()
     }
 
@@ -108,7 +106,7 @@ impl Dht {
     ///
     /// Could return an error if it failed to bind to the specified
     /// port or other io errors while binding the udp socket.
-    pub fn new(settings: DhtSettings) -> Result<Self> {
+    pub fn new(settings: DhtSettings) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::bounded(32);
 
         let rpc = Rpc::new(&settings)?;
@@ -130,12 +128,16 @@ impl Dht {
     ///
     /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
     /// returned an IO error.
-    pub fn local_addr(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = flume::bounded::<SocketAddrResult>(1);
+    pub fn local_addr(&self) -> Result<SocketAddr, DhtLocalAddrError> {
+        let (sender, receiver) = flume::bounded::<Result<SocketAddr, std::io::Error>>(1);
 
-        self.0.send(ActorMessage::LocalAddr(sender))?;
+        self.0
+            .send(ActorMessage::LocalAddr(sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        Ok(receiver.recv()??)
+        Ok(receiver
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 
     // === Public Methods ===
@@ -159,7 +161,10 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(&self, info_hash: Id) -> Result<flume::IntoIter<Vec<SocketAddr>>> {
+    pub fn get_peers(
+        &self,
+        info_hash: Id,
+    ) -> Result<flume::IntoIter<Vec<SocketAddr>>, DhtIsShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
@@ -169,11 +174,13 @@ impl Dht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.0.send(ActorMessage::Get(
-            info_hash,
-            request,
-            ResponseSender::Peers(sender),
-        ))?;
+        self.0
+            .send(ActorMessage::Get(
+                info_hash,
+                request,
+                ResponseSender::Peers(sender),
+            ))
+            .map_err(|_| DhtIsShutdown)?;
 
         Ok(receiver.into_iter())
     }
@@ -183,8 +190,8 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id> {
-        let (sender, receiver) = flume::bounded::<PutResult>(1);
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, DhtPutError> {
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let (port, implied_port) = match port {
             Some(port) => (port, None),
@@ -197,15 +204,19 @@ impl Dht {
             implied_port,
         });
 
-        self.0.send(ActorMessage::Put(info_hash, request, sender))?;
+        self.0
+            .send(ActorMessage::Put(info_hash, request, sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        receiver.recv()?
+        Ok(receiver
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Result<Bytes> {
+    pub fn get_immutable(&self, target: Id) -> Result<Bytes, DhtIsShutdown> {
         let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -214,29 +225,37 @@ impl Dht {
             salt: None,
         });
 
-        self.0.send(ActorMessage::Get(
-            target,
-            request,
-            ResponseSender::Immutable(sender),
-        ))?;
+        self.0
+            .send(ActorMessage::Get(
+                target,
+                request,
+                ResponseSender::Immutable(sender),
+            ))
+            .map_err(|_| DhtIsShutdown)?;
 
-        Ok(receiver.recv()?)
+        Ok(receiver
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue."))
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Bytes) -> Result<Id> {
+    pub fn put_immutable(&self, value: Bytes) -> Result<Id, DhtPutError> {
         let target: Id = hash_immutable(&value).into();
 
-        let (sender, receiver) = flume::bounded::<PutResult>(1);
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
             target,
             v: value.clone().into(),
         });
 
-        self.0.send(ActorMessage::Put(target, request, sender))?;
+        self.0
+            .send(ActorMessage::Put(target, request, sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        receiver.recv()?
+        Ok(receiver
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 
     // === Mutable data ===
@@ -247,25 +266,27 @@ impl Dht {
         public_key: &[u8; 32],
         salt: Option<Bytes>,
         seq: Option<i64>,
-    ) -> Result<flume::IntoIter<MutableItem>> {
+    ) -> Result<flume::IntoIter<MutableItem>, DhtIsShutdown> {
         let target = MutableItem::target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.0.send(ActorMessage::Get(
-            target,
-            request,
-            ResponseSender::Mutable(sender),
-        ));
+        self.0
+            .send(ActorMessage::Get(
+                target,
+                request,
+                ResponseSender::Mutable(sender),
+            ))
+            .map_err(|_| DhtIsShutdown)?;
 
         Ok(receiver.into_iter())
     }
 
     /// Put a mutable data to the DHT.
-    pub fn put_mutable(&self, item: MutableItem) -> Result<Id> {
-        let (sender, receiver) = flume::bounded::<PutResult>(1);
+    pub fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
             target: *item.target(),
@@ -277,11 +298,13 @@ impl Dht {
             cas: *item.cas(),
         });
 
-        let _ = self
-            .0
-            .send(ActorMessage::Put(*item.target(), request, sender));
+        self.0
+            .send(ActorMessage::Put(*item.target(), request, sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        receiver.recv()?
+        Ok(receiver
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 }
 
@@ -322,9 +345,9 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
 }
 
 pub enum ActorMessage {
-    Put(Id, PutRequestSpecific, Sender<PutResult>),
+    Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
-    LocalAddr(Sender<SocketAddrResult>),
+    LocalAddr(Sender<Result<SocketAddr, std::io::Error>>),
     Shutdown(Sender<()>),
 }
 
@@ -336,7 +359,7 @@ pub struct Testnet {
 }
 
 impl Testnet {
-    pub fn new(count: usize) -> Result<Testnet> {
+    pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
 
@@ -344,7 +367,9 @@ impl Testnet {
             if i == 0 {
                 let node = Dht::builder().server().bootstrap(&[]).build()?;
 
-                let addr = node.local_addr()?;
+                let addr = node
+                    .local_addr()
+                    .expect("node should not be shutdown in Testnet");
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
                 nodes.push(node)
@@ -358,6 +383,37 @@ impl Testnet {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+/// Dht Actor errors
+pub enum DhtPutError {
+    #[error(transparent)]
+    PutError(#[from] PutError),
+
+    #[error(transparent)]
+    DhtIsShutdown(#[from] DhtIsShutdown),
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Dht Actor errors
+pub enum DhtLocalAddrError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    DhtIsShutdown(#[from] DhtIsShutdown),
+}
+
+#[derive(Debug)]
+pub struct DhtIsShutdown;
+
+impl std::error::Error for DhtIsShutdown {}
+
+impl std::fmt::Display for DhtIsShutdown {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The Dht was shutdown")
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -365,7 +421,6 @@ mod test {
     use ed25519_dalek::SigningKey;
 
     use super::*;
-    use crate::Error;
 
     #[test]
     fn shutdown() {
@@ -379,7 +434,7 @@ mod test {
 
         let result = a.get_immutable(Id::random());
 
-        assert!(matches!(result, Err(Error::DhtIsShutdown(_))))
+        assert!(matches!(result, Err(DhtIsShutdown)))
     }
 
     #[test]

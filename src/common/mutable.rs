@@ -5,7 +5,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha1_smol::Sha1;
 use std::convert::TryFrom;
 
-use crate::{Error, Id, Result};
+use crate::Id;
 
 #[derive(Clone, Debug, PartialEq)]
 /// [Bep_0044](https://www.bittorrent.org/beps/bep_0044.html)'s Mutable item.
@@ -91,14 +91,14 @@ impl MutableItem {
         signature: &[u8],
         salt: Option<Bytes>,
         cas: &Option<i64>,
-    ) -> Result<Self> {
-        let key = VerifyingKey::try_from(key).map_err(|_| Error::InvalidMutablePublicKey)?;
+    ) -> Result<Self, MutableError> {
+        let key = VerifyingKey::try_from(key).map_err(|_| MutableError::InvalidMutablePublicKey)?;
 
         let signature =
-            Signature::from_slice(signature).map_err(|_| Error::InvalidMutableSignature)?;
+            Signature::from_slice(signature).map_err(|_| MutableError::InvalidMutableSignature)?;
 
         key.verify(&encode_signable(seq, &v, &salt), &signature)
-            .map_err(|_| Error::InvalidMutableSignature)?;
+            .map_err(|_| MutableError::InvalidMutableSignature)?;
 
         Ok(Self {
             target: *target,
@@ -154,6 +154,16 @@ pub fn encode_signable(seq: &i64, value: &Bytes, salt: &Option<Bytes>) -> Bytes 
     signable.extend(value);
 
     signable.into()
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Mainline crate error enum.
+pub enum MutableError {
+    #[error("Invalid mutable item signature")]
+    InvalidMutableSignature,
+
+    #[error("Invalid mutable item public key")]
+    InvalidMutablePublicKey,
 }
 
 #[cfg(test)]

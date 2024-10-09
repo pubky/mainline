@@ -9,10 +9,8 @@ use crate::{
         GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
-    dht::{ActorMessage, Dht},
-    error::SocketAddrResult,
-    rpc::{PutResult, ResponseSender},
-    Result,
+    dht::{ActorMessage, Dht, DhtIsShutdown, DhtLocalAddrError, DhtPutError},
+    rpc::{PutError, ResponseSender},
 };
 
 impl Dht {
@@ -33,12 +31,18 @@ impl AsyncDht {
     ///
     /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
     /// returned an IO error.
-    pub async fn local_addr(&self) -> Result<SocketAddr> {
-        let (sender, receiver) = flume::bounded::<SocketAddrResult>(1);
+    pub async fn local_addr(&self) -> Result<SocketAddr, DhtLocalAddrError> {
+        let (sender, receiver) = flume::bounded::<Result<SocketAddr, std::io::Error>>(1);
 
-        self.0 .0.send(ActorMessage::LocalAddr(sender))?;
+        self.0
+             .0
+            .send(ActorMessage::LocalAddr(sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        Ok(receiver.recv_async().await??)
+        Ok(receiver
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 
     // === Public Methods ===
@@ -62,7 +66,10 @@ impl AsyncDht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(&self, info_hash: Id) -> Result<flume::r#async::RecvStream<Vec<SocketAddr>>> {
+    pub fn get_peers(
+        &self,
+        info_hash: Id,
+    ) -> Result<flume::r#async::RecvStream<Vec<SocketAddr>>, DhtIsShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
@@ -72,11 +79,14 @@ impl AsyncDht {
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
-        self.0 .0.send(ActorMessage::Get(
-            info_hash,
-            request,
-            ResponseSender::Peers(sender),
-        ))?;
+        self.0
+             .0
+            .send(ActorMessage::Get(
+                info_hash,
+                request,
+                ResponseSender::Peers(sender),
+            ))
+            .map_err(|_| DhtIsShutdown)?;
 
         Ok(receiver.into_stream())
     }
@@ -86,8 +96,8 @@ impl AsyncDht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub async fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id> {
-        let (sender, receiver) = flume::bounded::<PutResult>(1);
+    pub async fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, DhtPutError> {
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let (port, implied_port) = match port {
             Some(port) => (port, None),
@@ -102,15 +112,19 @@ impl AsyncDht {
 
         self.0
              .0
-            .send(ActorMessage::Put(info_hash, request, sender))?;
+            .send(ActorMessage::Put(info_hash, request, sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        receiver.recv_async().await?
+        Ok(receiver
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub async fn get_immutable(&self, target: Id) -> Result<Bytes> {
+    pub async fn get_immutable(&self, target: Id) -> Result<Bytes, DhtIsShutdown> {
         let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -119,29 +133,41 @@ impl AsyncDht {
             salt: None,
         });
 
-        self.0 .0.send(ActorMessage::Get(
-            target,
-            request,
-            ResponseSender::Immutable(sender),
-        ))?;
+        self.0
+             .0
+            .send(ActorMessage::Get(
+                target,
+                request,
+                ResponseSender::Immutable(sender),
+            ))
+            .map_err(|_| DhtIsShutdown)?;
 
-        Ok(receiver.recv_async().await?)
+        Ok(receiver
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue."))
     }
 
     /// Put an immutable data to the DHT.
-    pub async fn put_immutable(&self, value: Bytes) -> Result<Id> {
+    pub async fn put_immutable(&self, value: Bytes) -> Result<Id, DhtPutError> {
         let target: Id = hash_immutable(&value).into();
 
-        let (sender, receiver) = flume::bounded::<PutResult>(1);
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
             target,
             v: value.clone().into(),
         });
 
-        self.0 .0.send(ActorMessage::Put(target, request, sender))?;
+        self.0
+             .0
+            .send(ActorMessage::Put(target, request, sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        receiver.recv_async().await?
+        Ok(receiver
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 
     // === Mutable data ===
@@ -152,25 +178,28 @@ impl AsyncDht {
         public_key: &[u8; 32],
         salt: Option<Bytes>,
         seq: Option<i64>,
-    ) -> Result<flume::r#async::RecvStream<MutableItem>> {
+    ) -> Result<flume::r#async::RecvStream<MutableItem>, DhtIsShutdown> {
         let target = MutableItem::target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
-        let _ = self.0 .0.send(ActorMessage::Get(
-            target,
-            request,
-            ResponseSender::Mutable(sender),
-        ));
+        self.0
+             .0
+            .send(ActorMessage::Get(
+                target,
+                request,
+                ResponseSender::Mutable(sender),
+            ))
+            .map_err(|_| DhtIsShutdown)?;
 
         Ok(receiver.into_stream())
     }
 
     /// Put a mutable data to the DHT.
-    pub async fn put_mutable(&self, item: MutableItem) -> Result<Id> {
-        let (sender, receiver) = flume::bounded::<PutResult>(1);
+    pub async fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
             target: *item.target(),
@@ -182,12 +211,15 @@ impl AsyncDht {
             cas: *item.cas(),
         });
 
-        let _ = self
-            .0
+        self.0
              .0
-            .send(ActorMessage::Put(*item.target(), request, sender));
+            .send(ActorMessage::Put(*item.target(), request, sender))
+            .map_err(|_| DhtIsShutdown)?;
 
-        receiver.recv_async().await?
+        Ok(receiver
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue.")?)
     }
 }
 
@@ -201,7 +233,6 @@ mod test {
     use crate::dht::Testnet;
 
     use super::*;
-    use crate::Error;
 
     #[test]
     fn shutdown() {
@@ -216,7 +247,7 @@ mod test {
 
             let result = a.get_immutable(Id::random()).await;
 
-            assert!(matches!(result, Err(Error::DhtIsShutdown(_))))
+            assert!(matches!(result, Err(DhtIsShutdown)))
         }
         futures::executor::block_on(test());
     }

@@ -20,12 +20,12 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
-use crate::error::SocketAddrResult;
-use crate::{dht::DhtSettings, Error, Result};
+use crate::dht::DhtSettings;
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
+pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
@@ -69,7 +69,7 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(settings: &DhtSettings) -> Result<Self> {
+    pub fn new(settings: &DhtSettings) -> Result<Self, std::io::Error> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
@@ -124,7 +124,7 @@ impl Rpc {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddrResult {
+    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
         self.socket.local_addr()
     }
 
@@ -252,11 +252,11 @@ impl Rpc {
         &mut self,
         target: Id,
         request: PutRequestSpecific,
-        sender: Option<Sender<PutResult>>,
+        sender: Option<Sender<Result<Id, PutError>>>,
     ) {
         if self.put_queries.contains_key(&target) {
             if let Some(sender) = sender {
-                let _ = sender.send(Err(Error::PutQueryIsInflight(target)));
+                let _ = sender.send(Err(PutError::PutQueryIsInflight(target)));
             };
 
             debug!(?target, "Put query for the same target is already inflight");
@@ -662,7 +662,3 @@ pub enum ResponseSender {
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),
 }
-
-/// Returns the info_hash or target of the operation.
-/// Useful for put_immutable.
-pub type PutResult = Result<Id>;

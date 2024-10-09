@@ -10,7 +10,8 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use bytes::Bytes;
 
 use crate::common::{Id, Node, ID_SIZE};
-use crate::{Error, Result};
+
+use super::InvalidIdSize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Message {
@@ -389,7 +390,7 @@ impl Message {
         }
     }
 
-    fn from_serde_message(msg: internal::DHTMessage) -> Result<Message> {
+    fn from_serde_message(msg: internal::DHTMessage) -> Result<Message, DecodeMessageError> {
         Ok(Message {
             transaction_id: transaction_id(msg.transaction_id)?,
             version: msg.version,
@@ -568,32 +569,26 @@ impl Message {
 
                 internal::DHTMessageVariant::Error(err) => {
                     if err.error_info.len() < 2 {
-                        return Err(Error::Static(
-                            "Error packet should have at least 2 elements",
-                        ));
+                        return Err(DecodeMessageError::InvalidErrorDescription);
                     }
                     MessageType::Error(ErrorSpecific {
                         code: match err.error_info[0] {
                             serde_bencode::value::Value::Int(code) => match code.try_into() {
                                 Ok(code) => code,
-                                Err(_) => return Err(Error::Static("error parsing error code")),
+                                Err(_) => return Err(DecodeMessageError::InvalidErrorCode),
                             },
-                            _ => return Err(Error::Static("Expected error code as first element")),
+                            _ => return Err(DecodeMessageError::InvalidErrorCode),
                         },
                         description: match &err.error_info[1] {
                             serde_bencode::value::Value::Bytes(desc) => {
                                 match std::str::from_utf8(desc) {
                                     Ok(desc) => desc.to_string(),
                                     Err(_) => {
-                                        return Err(Error::Static(
-                                            "error parsing error description",
-                                        ))
+                                        return Err(DecodeMessageError::InvalidErrorDescription)
                                     }
                                 }
                             }
-                            _ => {
-                                return Err(Error::Static("Expected description as second element"))
-                            }
+                            _ => return Err(DecodeMessageError::InvalidErrorDescription),
                         },
                     })
                 }
@@ -601,11 +596,11 @@ impl Message {
         })
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_bencode::Error> {
         self.clone().into_serde_message().to_bytes()
     }
 
-    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Message> {
+    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Message, DecodeMessageError> {
         Message::from_serde_message(internal::DHTMessage::from_bytes(bytes)?)
     }
 
@@ -679,17 +674,17 @@ impl Message {
 }
 
 // Return the transaction Id as a u16
-pub fn transaction_id(bytes: Vec<u8>) -> Result<u16> {
+fn transaction_id(bytes: Vec<u8>) -> Result<u16, DecodeMessageError> {
     if bytes.len() == 2 {
         return Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16));
     } else if bytes.len() == 1 {
         return Ok(bytes[0] as u16);
     }
 
-    Err(Error::InvalidTransactionId(bytes))
+    Err(DecodeMessageError::InvalidTransactionId(bytes))
 }
 
-fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr> {
+fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr, DecodeMessageError> {
     let bytes = bytes.as_ref();
     match bytes.len() {
         6 => {
@@ -697,16 +692,16 @@ fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr> {
 
             let port_bytes_as_array: [u8; 2] = bytes[4..6]
                 .try_into()
-                .map_err(|_| Error::Static("wrong number of bytes for port"))?;
+                .map_err(|_| DecodeMessageError::InvalidPortEncoding)?;
 
             let port: u16 = u16::from_be_bytes(port_bytes_as_array);
 
             Ok(SocketAddr::new(IpAddr::V4(ip), port))
         }
 
-        18 => Err(Error::Static("IPv6 is not yet implemented")),
+        18 => Err(DecodeMessageError::Ipv6Unsupported),
 
-        _ => Err(Error::Static("Wrong number of bytes for sockaddr")),
+        _ => Err(DecodeMessageError::InvalidSocketAddrEncodingLength),
     }
 }
 
@@ -745,14 +740,11 @@ fn nodes4_to_bytes(nodes: &[Node]) -> Vec<u8> {
     vec
 }
 
-fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>> {
+fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>, DecodeMessageError> {
     let bytes = bytes.as_ref();
     let node4_byte_size: usize = ID_SIZE + 6;
     if bytes.len() % node4_byte_size != 0 {
-        return Err(Error::Generic(format!(
-            "Wrong number of bytes for nodes message ({})",
-            bytes.len()
-        )));
+        return Err(DecodeMessageError::InvalidNodes4);
     }
 
     let expected_num = bytes.len() / node4_byte_size;
@@ -775,9 +767,46 @@ fn peers_to_bytes(peers: Vec<SocketAddr>) -> Vec<serde_bytes::ByteBuf> {
         .collect()
 }
 
-fn bytes_to_peers<T: AsRef<[serde_bytes::ByteBuf]>>(bytes: T) -> Result<Vec<SocketAddr>> {
+fn bytes_to_peers<T: AsRef<[serde_bytes::ByteBuf]>>(
+    bytes: T,
+) -> Result<Vec<SocketAddr>, DecodeMessageError> {
     let bytes = bytes.as_ref();
     bytes.iter().map(bytes_to_sockaddr).collect()
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Mainline crate error enum.
+pub enum DecodeMessageError {
+    #[error("Wrong number of bytes for nodes")]
+    InvalidNodes4,
+
+    /// Message transaction_id is not two bytes.
+    #[error("Invalid transaction_id: {0:?}")]
+    InvalidTransactionId(Vec<u8>),
+
+    #[error("wrong number of bytes for port")]
+    InvalidPortEncoding,
+
+    #[error("IPv6 is not yet implemented")]
+    Ipv6Unsupported,
+
+    #[error("Wrong number of bytes for sockaddr")]
+    InvalidSocketAddrEncodingLength,
+
+    #[error("Failed to parse packet bytes: {0}")]
+    BencodeError(#[from] serde_bencode::Error),
+
+    #[error(transparent)]
+    InvalidIdSize(#[from] InvalidIdSize),
+
+    #[error("Error packet should have at least 2 elements")]
+    InvalidErrorPacket,
+
+    #[error("error parsing error code")]
+    InvalidErrorCode,
+
+    #[error("error parsing error description")]
+    InvalidErrorDescription,
 }
 
 #[cfg(test)]
