@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Result};
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTMessage {
     #[serde(rename = "t", with = "serde_bytes")]
@@ -24,14 +22,14 @@ pub struct DHTMessage {
 }
 
 impl DHTMessage {
-    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<DHTMessage> {
+    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<DHTMessage, serde_bencode::Error> {
         let bytes = bytes.as_ref();
         let obj = serde_bencode::from_bytes(bytes)?;
         Ok(obj)
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_bencode::to_bytes(self).map_err(Error::BencodeError)
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_bencode::Error> {
+        serde_bencode::to_bytes(self)
     }
 }
 

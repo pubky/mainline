@@ -7,13 +7,12 @@ use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
 
 use super::socket::KrpcSocket;
-use crate::Error;
 use crate::{
     common::{
         ErrorSpecific, Id, Node, PutRequest, PutRequestSpecific, RequestSpecific,
         RequestTypeSpecific, RoutingTable,
     },
-    rpc::{PutResult, Response, ResponseSender},
+    rpc::{Response, ResponseSender},
 };
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
@@ -162,13 +161,17 @@ pub struct PutQuery {
     /// Nodes that confirmed success
     stored_at: u8,
     inflight_requests: Vec<u16>,
-    sender: Option<Sender<PutResult>>,
+    sender: Option<Sender<Result<Id, PutError>>>,
     request: PutRequestSpecific,
     error: Option<ErrorSpecific>,
 }
 
 impl PutQuery {
-    pub fn new(target: Id, request: PutRequestSpecific, sender: Option<Sender<PutResult>>) -> Self {
+    pub fn new(
+        target: Id,
+        request: PutRequestSpecific,
+        sender: Option<Sender<Result<Id, PutError>>>,
+    ) -> Self {
         Self {
             target,
             stored_at: 0,
@@ -190,7 +193,7 @@ impl PutQuery {
 
         if let Some(sender) = &self.sender {
             if nodes.is_empty() {
-                let _ = sender.send(Err(Error::NoClosestNodes));
+                let _ = sender.send(Err(PutError::NoClosestNodes));
             }
         }
 
@@ -250,7 +253,7 @@ impl PutQuery {
                     let _ = self
                         .sender
                         .to_owned()
-                        .map(|sender| sender.send(Err(Error::QueryError(error))));
+                        .map(|sender| sender.send(Err(PutError::ErrorResponse(error))));
                 }
             } else {
                 info!(?target, stored_at = ?self.stored_at, "PutQuery Done");
@@ -263,4 +266,23 @@ impl PutQuery {
 
         false
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Query errors
+pub enum PutError {
+    /// Failed to find any nodes close, usually means dht node failed to bootstrap,
+    /// so the routing table is empty. Check the machine's access to UDP socket,
+    /// or find better bootstrapping nodes.
+    #[error("Failed to find any nodes close to store value at")]
+    NoClosestNodes,
+
+    /// Put Query faild to store at any nodes, and got at least one
+    /// 3xx error response
+    #[error("Query Error Response")]
+    ErrorResponse(ErrorSpecific),
+
+    /// [crate::rpc::Rpc::put] query is already inflight to the same target
+    #[error("Put query is already inflight to the same target: {0}")]
+    PutQueryIsInflight(Id),
 }
