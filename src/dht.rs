@@ -133,7 +133,7 @@ impl Dht {
 
         self.0
             .send(ActorMessage::LocalAddr(sender))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
             .recv()
@@ -164,7 +164,7 @@ impl Dht {
     pub fn get_peers(
         &self,
         info_hash: Id,
-    ) -> Result<flume::IntoIter<Vec<SocketAddr>>, DhtIsShutdown> {
+    ) -> Result<flume::IntoIter<Vec<SocketAddr>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
@@ -180,7 +180,7 @@ impl Dht {
                 request,
                 ResponseSender::Peers(sender),
             ))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver.into_iter())
     }
@@ -206,7 +206,7 @@ impl Dht {
 
         self.0
             .send(ActorMessage::Put(info_hash, request, sender))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
             .recv()
@@ -216,7 +216,7 @@ impl Dht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Result<Bytes, DhtIsShutdown> {
+    pub fn get_immutable(&self, target: Id) -> Result<Bytes, DhtWasShutdown> {
         let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -231,7 +231,7 @@ impl Dht {
                 request,
                 ResponseSender::Immutable(sender),
             ))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
             .recv()
@@ -251,7 +251,7 @@ impl Dht {
 
         self.0
             .send(ActorMessage::Put(target, request, sender))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
             .recv()
@@ -266,7 +266,7 @@ impl Dht {
         public_key: &[u8; 32],
         salt: Option<Bytes>,
         seq: Option<i64>,
-    ) -> Result<flume::IntoIter<MutableItem>, DhtIsShutdown> {
+    ) -> Result<flume::IntoIter<MutableItem>, DhtWasShutdown> {
         let target = MutableItem::target_from_key(public_key, &salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
@@ -279,7 +279,7 @@ impl Dht {
                 request,
                 ResponseSender::Mutable(sender),
             ))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver.into_iter())
     }
@@ -300,7 +300,7 @@ impl Dht {
 
         self.0
             .send(ActorMessage::Put(*item.target(), request, sender))
-            .map_err(|_| DhtIsShutdown)?;
+            .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
             .recv()
@@ -390,7 +390,7 @@ pub enum DhtPutError {
     PutError(#[from] PutError),
 
     #[error(transparent)]
-    DhtIsShutdown(#[from] DhtIsShutdown),
+    DhtWasShutdown(#[from] DhtWasShutdown),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -400,15 +400,15 @@ pub enum DhtLocalAddrError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    DhtIsShutdown(#[from] DhtIsShutdown),
+    DhtWasShutdown(#[from] DhtWasShutdown),
 }
 
 #[derive(Debug)]
-pub struct DhtIsShutdown;
+pub struct DhtWasShutdown;
 
-impl std::error::Error for DhtIsShutdown {}
+impl std::error::Error for DhtWasShutdown {}
 
-impl std::fmt::Display for DhtIsShutdown {
+impl std::fmt::Display for DhtWasShutdown {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "The Dht was shutdown")
     }
@@ -434,7 +434,7 @@ mod test {
 
         let result = a.get_immutable(Id::random());
 
-        assert!(matches!(result, Err(DhtIsShutdown)))
+        assert!(matches!(result, Err(DhtWasShutdown)))
     }
 
     #[test]

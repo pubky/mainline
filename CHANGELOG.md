@@ -20,7 +20,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Id::as_bytes()` instead of exposing internal `bytes` property.
 - Replace crate `Error` with more granular errors.
 - Replace Flume's `RecvError` with `expect()` message, since the sender should never be dropped to soon.
-- `DhtIsShutdown` error is a standalone error.
+- `DhtWasShutdown` error is a standalone error.
 - `InvalidIdSize` error is a standalone error.
 
 ### Removed
