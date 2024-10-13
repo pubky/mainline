@@ -18,6 +18,7 @@ pub use dht::{Dht, Testnet};
 
 pub use ed25519_dalek::SigningKey;
 
-mod errors {
+pub mod errors {
+    //! Exported errors
     pub use super::rpc::PutError;
 }

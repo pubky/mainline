@@ -6,7 +6,7 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Added
 
-- Export `errors::PutError` as a part of the response of `Rpc::put`.
+- Export `errors` module containing `PutError` as a part of the response of `Rpc::put`.
 
 ### Changed
 
