@@ -266,7 +266,7 @@ mod test {
 
     use crate::{
         common::{Id, PingResponseArguments, RequestTypeSpecific},
-        server::DhtServer,
+        server::DefaultServer,
     };
 
     use super::*;
@@ -288,7 +288,7 @@ mod test {
     #[test]
     fn recv_request() {
         let mut server = KrpcSocket::new(&Settings {
-            server: Some(Box::<DhtServer>::default()),
+            server: Some(Box::<DefaultServer>::default()),
             bootstrap: None,
             request_timeout: None,
             port: None,

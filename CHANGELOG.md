@@ -23,6 +23,7 @@ All notable changes to mainline dht will be documented in this file.
 - `DhtWasShutdown` error is a standalone error.
 - `InvalidIdSize` error is a standalone error.
 - Rename `DhtSettings` to `Settings`
+- Rename `DhtServer` to `DefaultServer`
 
 ### Removed
 

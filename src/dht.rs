@@ -14,7 +14,7 @@ use crate::{
         PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
     },
     rpc::{PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
-    server::{DhtServer, Server},
+    server::{DefaultServer, Server},
 };
 
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ impl Builder {
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
-        self.settings.server = Some(Box::<DhtServer>::default());
+        self.settings.server = Some(Box::<DefaultServer>::default());
         self
     }
 
