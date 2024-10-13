@@ -12,8 +12,6 @@ It should work as a routing / storing node as well, and has been running in prod
 
 Check the [Examples](https://github.com/Nuhvi/mainline/tree/main/examples).
 
-## Features
-
 ### Client
 
 Running as a client, means you can store and query for values on the DHT, but not accept any incoming requests.

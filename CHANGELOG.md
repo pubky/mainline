@@ -6,11 +6,11 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Added
 
-- Export `PutError`
+- Export `errors::PutError` as a part of the response of `Rpc::put`.
 
 ### Changed
 
-- Removed all internal panic `#![deny(clippy::unwrap_used)]`
+- Removed all internal panic `#![deny(clippy::unwrap_used)]`.
 - `Testnet::new(size)` returns a `Result<Testnet>`.
 - `Dht::local_addr()` returns a `Result<SocketAddr>`.
 - `AsyncDht::local_addr()` returns a `Result<SocketAddr>`.
@@ -25,4 +25,4 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Removed
 
-- Removed `mainline::error::Error` and `mainline::error::Result`
+- Removed `mainline::error::Error` and `mainline::error::Result`.

@@ -18,7 +18,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-/// Mainlin eDht node.
+/// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
 pub struct Builder {
