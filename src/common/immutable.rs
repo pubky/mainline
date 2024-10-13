@@ -6,7 +6,7 @@ use super::ID_SIZE;
 use crate::Id;
 
 pub fn validate_immutable(v: &[u8], target: &Id) -> bool {
-    hash_immutable(v) == target.bytes
+    hash_immutable(v) == *target.as_bytes()
 }
 
 pub fn hash_immutable(v: &[u8]) -> [u8; ID_SIZE] {
@@ -47,6 +47,6 @@ mod test {
         let v = b"From the river to the sea, Palestine will be free";
         let target = Id::from_str("4238af8aff56cf6e0007d9d2003bf23d33eea7c3").unwrap();
 
-        assert_eq!(hash_immutable(v), target.bytes);
+        assert_eq!(hash_immutable(v), *target.as_bytes());
     }
 }
