@@ -20,7 +20,7 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
-use crate::dht::DhtSettings;
+use crate::dht::Settings;
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
@@ -69,7 +69,7 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(settings: &DhtSettings) -> Result<Self, std::io::Error> {
+    pub fn new(settings: &Settings) -> Result<Self, std::io::Error> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 

@@ -22,6 +22,7 @@ All notable changes to mainline dht will be documented in this file.
 - Replace Flume's `RecvError` with `expect()` message, since the sender should never be dropped to soon.
 - `DhtWasShutdown` error is a standalone error.
 - `InvalidIdSize` error is a standalone error.
+- Rename `DhtSettings` to `Settings`
 
 ### Removed
 

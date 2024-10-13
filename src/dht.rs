@@ -22,7 +22,7 @@ use crate::{
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
 pub struct Builder {
-    settings: DhtSettings,
+    settings: Settings,
 }
 
 impl Builder {
@@ -69,7 +69,7 @@ impl Builder {
 
 #[derive(Debug, Default)]
 /// Dht settings
-pub struct DhtSettings {
+pub struct Settings {
     /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Option<Vec<String>>,
     /// Defaults to None
@@ -84,7 +84,7 @@ impl Dht {
     /// Returns a builder to edit settings before creating a Dht node.
     pub fn builder() -> Builder {
         Builder {
-            settings: DhtSettings::default(),
+            settings: Settings::default(),
         }
     }
 
@@ -106,7 +106,7 @@ impl Dht {
     ///
     /// Could return an error if it failed to bind to the specified
     /// port or other io errors while binding the udp socket.
-    pub fn new(settings: DhtSettings) -> Result<Self, std::io::Error> {
+    pub fn new(settings: Settings) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::bounded(32);
 
         let rpc = Rpc::new(&settings)?;

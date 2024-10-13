@@ -7,7 +7,7 @@ use tracing::{debug, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-use crate::dht::DhtSettings;
+use crate::dht::Settings;
 
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
@@ -36,7 +36,7 @@ pub struct InflightRequest {
 }
 
 impl KrpcSocket {
-    pub fn new(settings: &DhtSettings) -> Result<Self, std::io::Error> {
+    pub fn new(settings: &Settings) -> Result<Self, std::io::Error> {
         let socket = if let Some(port) = settings.port {
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
@@ -273,7 +273,7 @@ mod test {
 
     #[test]
     fn tid() {
-        let mut socket = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut socket = KrpcSocket::new(&Settings::default()).unwrap();
 
         assert_eq!(socket.tid(), 0);
         assert_eq!(socket.tid(), 1);
@@ -287,7 +287,7 @@ mod test {
 
     #[test]
     fn recv_request() {
-        let mut server = KrpcSocket::new(&DhtSettings {
+        let mut server = KrpcSocket::new(&Settings {
             server: Some(Box::<DhtServer>::default()),
             bootstrap: None,
             request_timeout: None,
@@ -296,7 +296,7 @@ mod test {
         .unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
         client.next_tid = 120;
 
         let client_address = client.local_addr().unwrap();
@@ -329,10 +329,10 @@ mod test {
 
     #[test]
     fn recv_response() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
 
         let client_address = client.local_addr().unwrap();
 
@@ -373,10 +373,10 @@ mod test {
 
     #[test]
     fn ignore_unexcpected_response() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
 
         let _ = client.local_addr();
 
@@ -401,10 +401,10 @@ mod test {
 
     #[test]
     fn ignore_response_from_wrong_address() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
 
         let client_address = client.local_addr().unwrap();
 
@@ -435,10 +435,10 @@ mod test {
 
     #[test]
     fn ignore_request_in_read_only() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
         client.next_tid = 120;
 
         let _ = client.local_addr();

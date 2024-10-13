@@ -14,7 +14,7 @@ pub mod server;
 
 pub use crate::common::{Id, MutableItem};
 pub use bytes::Bytes;
-pub use dht::{Dht, Testnet};
+pub use dht::{Dht, Settings, Testnet};
 
 pub use ed25519_dalek::SigningKey;
 
