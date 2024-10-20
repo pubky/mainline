@@ -128,7 +128,7 @@ impl Rpc {
         self.socket.local_addr()
     }
 
-    pub(crate) fn routing_table(&self) -> &RoutingTable {
+    pub fn routing_table(&self) -> &RoutingTable {
         &self.routing_table
     }
 
@@ -140,7 +140,9 @@ impl Rpc {
     pub fn tick(&mut self) -> RpcTickReport {
         // === Tick Queries ===
 
-        let mut done_put_queries = Vec::with_capacity(self.queries.len());
+        let mut closest_nodes = Vec::with_capacity(self.queries.len());
+        let mut done_get_queries = Vec::with_capacity(self.queries.len());
+        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
             let done = query.tick(&mut self.socket);
@@ -152,10 +154,6 @@ impl Rpc {
 
         let self_id = self.id;
         let table_size = self.routing_table.size();
-
-        let mut closest_nodes = Vec::with_capacity(self.queries.len());
-        let mut done_get_queries = Vec::with_capacity(self.queries.len());
-        // let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.queries.iter_mut() {
             let is_done = query.tick(&mut self.socket);

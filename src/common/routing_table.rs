@@ -1,7 +1,6 @@
 //! Simplified Kademlia routing table
 
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 use std::slice::Iter;
 
 use crate::common::{Id, Node, MAX_DISTANCE};
@@ -31,6 +30,18 @@ impl RoutingTable {
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
         self
+    }
+
+    // === Getters ===
+
+    /// Returns the [Id] of this node, where the distance is measured from.
+    pub fn id(&self) -> Id {
+        self.id
+    }
+
+    /// Returns the map of distances and their [KBucket]
+    pub fn buckets(&self) -> &BTreeMap<u8, KBucket> {
+        &self.buckets
     }
 
     // === Public Methods ===
@@ -124,6 +135,28 @@ impl RoutingTable {
         nodes
     }
 
+    /// Get a rough estimate of the Dht size, by finding the `n` leading bits
+    /// shared with the closest bucket, then assuming uniform distribution,
+    /// we calculate the dht size to be `2^n * closest_bucket.len()`.
+    ///
+    /// In the diagrame below, you can see that if the closest bucket to us in a 4 bit keyspace,
+    /// is 1 bits away (shares 3 bits with us), then we can assume that the keyspace contains
+    /// 8 times (2^3) the number of nodes in the closest bucket.
+    ///
+    /// Distance to us  : 0000     0001     0010            0100
+    /// Keyspace/buckets: |--------|-closest-|-------|-------|-------|-------|-------|-------|
+    ///
+    pub fn estimate_dht_size(&self) -> usize {
+        self.buckets()
+            .iter()
+            .next()
+            .map_or(0, |(distance, bucket)| {
+                let no_of_zones = (161 - distance) as u32;
+
+                2usize.pow(no_of_zones) * bucket.len()
+            })
+    }
+
     // === Private Methods ===
 
     #[cfg(test)]
@@ -158,6 +191,12 @@ impl KBucket {
         KBucket {
             nodes: Vec::with_capacity(MAX_BUCKET_SIZE_K),
         }
+    }
+
+    // === Getters ===
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
     }
 
     // === Public Methods ===
@@ -195,6 +234,10 @@ impl KBucket {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.nodes.len() >= MAX_BUCKET_SIZE_K
     }
 
     pub fn iter(&self) -> Iter<'_, Node> {

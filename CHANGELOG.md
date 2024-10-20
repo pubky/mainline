@@ -7,6 +7,9 @@ All notable changes to mainline dht will be documented in this file.
 ### Added
 
 - Export `errors` module containing `PutError` as a part of the response of `Rpc::put`.
+- `Dht::id()` and `AsyncDht::id()` to get the node's Id.
+- `Dht::routing_table()` and `AsyncDht::routing_table()` to get a copy of the routing table.
+- `measure_dht` example to estimate the DHT size.
 
 ### Changed
 
