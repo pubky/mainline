@@ -11,7 +11,7 @@ use crate::{
     common::{
         hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
         GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
-        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
+        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific, RoutingTable,
     },
     rpc::{PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
     server::{DefaultServer, Server},
@@ -135,9 +135,18 @@ impl Dht {
             .send(ActorMessage::LocalAddr(sender))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver
-            .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")?)
+        Ok(receiver.recv().map_err(|_| DhtWasShutdown)??)
+    }
+
+    /// Returns a copy of this client's [RoutingTable]
+    pub fn routing_table(&self) -> Result<RoutingTable, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+
+        self.0
+            .send(ActorMessage::RoutingTable(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv().map_err(|_| DhtWasShutdown)
     }
 
     // === Public Methods ===
@@ -320,6 +329,9 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
                 ActorMessage::LocalAddr(sender) => {
                     let _ = sender.send(rpc.local_addr());
                 }
+                ActorMessage::RoutingTable(sender) => {
+                    let _ = sender.send(rpc.routing_table().clone());
+                }
                 ActorMessage::Put(target, request, sender) => {
                     rpc.put(target, request, Some(sender));
                 }
@@ -348,6 +360,7 @@ pub enum ActorMessage {
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     LocalAddr(Sender<Result<SocketAddr, std::io::Error>>),
+    RoutingTable(Sender<RoutingTable>),
     Shutdown(Sender<()>),
 }
 

@@ -5,14 +5,15 @@
 
 // Public modules
 mod common;
+mod dht;
 
+// Public modules
 #[cfg(feature = "async")]
 pub mod async_dht;
-mod dht;
 pub mod rpc;
 pub mod server;
 
-pub use crate::common::{Id, MutableItem};
+pub use crate::common::{Id, KBucket, MutableItem, Node, RoutingTable};
 pub use bytes::Bytes;
 pub use dht::{Dht, Settings, Testnet};
 

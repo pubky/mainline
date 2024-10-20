@@ -7,7 +7,7 @@ use crate::{
     common::{
         hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
         GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
-        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific,
+        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific, RoutingTable,
     },
     dht::{ActorMessage, Dht, DhtLocalAddrError, DhtPutError, DhtWasShutdown},
     rpc::{PutError, ResponseSender},
@@ -39,10 +39,19 @@ impl AsyncDht {
             .send(ActorMessage::LocalAddr(sender))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver
-            .recv_async()
-            .await
-            .expect("Query was dropped before sending a response, please open an issue.")?)
+        Ok(receiver.recv_async().await.map_err(|_| DhtWasShutdown)??)
+    }
+
+    /// Returns a copy of this client's [RoutingTable]
+    pub async fn routing_table(&self) -> Result<RoutingTable, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+
+        self.0
+             .0
+            .send(ActorMessage::RoutingTable(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
     }
 
     // === Public Methods ===
