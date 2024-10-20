@@ -27,6 +27,18 @@ pub struct AsyncDht(Dht);
 impl AsyncDht {
     // === Getters ===
 
+    /// Returns this node's [Id]
+    pub async fn id(&self) -> Result<Id, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Id>(1);
+
+        self.0
+             .0
+            .send(ActorMessage::RoutingTable(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
+    }
+
     /// Returns the local address of the udp socket this node is listening on.
     ///
     /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]

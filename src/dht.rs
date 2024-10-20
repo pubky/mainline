@@ -124,6 +124,17 @@ impl Dht {
 
     // === Getters ===
 
+    /// Returns this node's [Id]
+    pub fn id(&self) -> Result<Id, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Id>(1);
+
+        self.0
+            .send(ActorMessage::Id(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv().map_err(|_| DhtWasShutdown)
+    }
+
     /// Returns the local address of the udp socket this node is listening on.
     ///
     /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
@@ -326,6 +337,9 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
                     let _ = sender.send(());
                     break;
                 }
+                ActorMessage::Id(sender) => {
+                    let _ = sender.send(*rpc.id());
+                }
                 ActorMessage::LocalAddr(sender) => {
                     let _ = sender.send(rpc.local_addr());
                 }
@@ -357,10 +371,11 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
 }
 
 pub enum ActorMessage {
-    Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
-    Get(Id, RequestTypeSpecific, ResponseSender),
+    Id(Sender<Id>),
     LocalAddr(Sender<Result<SocketAddr, std::io::Error>>),
     RoutingTable(Sender<RoutingTable>),
+    Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
+    Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
 }
 
