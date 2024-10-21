@@ -125,40 +125,12 @@ impl Dht {
 
     // === Getters ===
 
-    /// Returns this node's [Id]
-    pub fn id(&self) -> Result<Id, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Id>(1);
+    /// Information and statistics about this [Dht] node.
+    pub fn info(&self) -> Result<Info, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Info>(1);
 
         self.0
-            .send(ActorMessage::Id(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        receiver.recv().map_err(|_| DhtWasShutdown)
-    }
-
-    /// Returns the local address of the udp socket this node is listening on.
-    ///
-    /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
-    /// returned an IO error.
-    pub fn local_addr(&self) -> Result<SocketAddr, DhtLocalAddrError> {
-        let (sender, receiver) = flume::bounded::<Result<SocketAddr, std::io::Error>>(1);
-
-        self.0
-            .send(ActorMessage::LocalAddr(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver.recv().map_err(|_| DhtWasShutdown)??)
-    }
-
-    /// Returns an estimate of the Dht size.
-    ///
-    /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
-    /// responding nodes of each get queries done in the background.
-    pub fn dht_size_estimate(&self) -> Result<usize, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<usize>(1);
-
-        self.0
-            .send(ActorMessage::SizeEstimate(sender))
+            .send(ActorMessage::Info(sender))
             .map_err(|_| DhtWasShutdown)?;
 
         receiver.recv().map_err(|_| DhtWasShutdown)
@@ -361,14 +333,14 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
                     let _ = sender.send(());
                     break;
                 }
-                ActorMessage::Id(sender) => {
-                    let _ = sender.send(*rpc.id());
-                }
-                ActorMessage::LocalAddr(sender) => {
-                    let _ = sender.send(rpc.local_addr());
-                }
-                ActorMessage::SizeEstimate(sender) => {
-                    let _ = sender.send(rpc.dht_size_estimate());
+                ActorMessage::Info(sender) => {
+                    let local_address = rpc.local_addr();
+
+                    let _ = sender.send(Info {
+                        id: *rpc.id(),
+                        local_address,
+                        dht_size_estimate: rpc.dht_size_estimate(),
+                    });
                 }
                 ActorMessage::Put(target, request, sender) => {
                     rpc.put(target, request, Some(sender));
@@ -395,12 +367,23 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
 }
 
 pub enum ActorMessage {
-    Id(Sender<Id>),
-    LocalAddr(Sender<Result<SocketAddr, std::io::Error>>),
-    SizeEstimate(Sender<usize>),
+    Info(Sender<Info>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
+}
+
+/// Information and statistics about this [Dht] node.
+pub struct Info {
+    /// This Node's [Id]
+    pub id: Id,
+    /// Local UDP socket address that this node is listening on.
+    pub local_address: Result<SocketAddr, std::io::Error>,
+    /// An estimate of the Dht size.
+    ///
+    /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
+    /// responding nodes of each get queries done in the background.
+    pub dht_size_estimate: usize,
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
@@ -420,7 +403,9 @@ impl Testnet {
                 let node = Dht::builder().server().bootstrap(&[]).build()?;
 
                 let addr = node
-                    .local_addr()
+                    .info()
+                    .expect("node should not be shutdown in Testnet")
+                    .local_address
                     .expect("node should not be shutdown in Testnet");
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
@@ -440,16 +425,6 @@ impl Testnet {
 pub enum DhtPutError {
     #[error(transparent)]
     PutError(#[from] PutError),
-
-    #[error(transparent)]
-    DhtWasShutdown(#[from] DhtWasShutdown),
-}
-
-#[derive(thiserror::Error, Debug)]
-/// Dht Actor errors
-pub enum DhtLocalAddrError {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
 
     #[error(transparent)]
     DhtWasShutdown(#[from] DhtWasShutdown),
@@ -478,7 +453,7 @@ mod test {
     fn shutdown() {
         let mut dht = Dht::client().unwrap();
 
-        dht.local_addr().unwrap();
+        dht.info().unwrap().local_address.unwrap();
 
         let a = dht.clone();
 
@@ -493,7 +468,7 @@ mod test {
     fn bind_twice() {
         let a = Dht::client().unwrap();
         let result = Dht::builder()
-            .port(a.local_addr().unwrap().port())
+            .port(a.info().unwrap().local_address.unwrap().port())
             .server()
             .build();
 

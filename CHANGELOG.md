@@ -9,17 +9,16 @@ All notable changes to mainline dht will be documented in this file.
 - Export `errors` module containing `PutError` as a part of the response of `Rpc::put`.
 - `Dht::id()` and `AsyncDht::id()` to get the node's Id.
 - `Dht::find_node()` and `AsyncDht::find_node()` to lookup a certain target, without calling `get_peers` and return a routing table of the responding nodes.
-- `Dht::dht_size_estimate()` and `AsyncDht::dht_size_estimate()` to get the ongoing dht size estimate resulting from watching results of all queries.
+- `Dht::info()` and `AsyncDht::info()` some internal information about the node from one method.
+- `Info::dht_size_estimate` to get the ongoing dht size estimate resulting from watching results of all queries.
 - `measure_dht` example to estimate the DHT size.
 
 ### Changed
 
 - Removed all internal panic `#![deny(clippy::unwrap_used)]`.
 - `Testnet::new(size)` returns a `Result<Testnet>`.
-- `Dht::local_addr()` returns a `Result<SocketAddr>`.
-- `AsyncDht::local_addr()` returns a `Result<SocketAddr>`.
-- `Dht::shutdown()` is now idempotent, and returns `()`.
-- `AsyncDht::shutdown()` is now idempotent, and returns `()`.
+- `Dht::local_addr()` and `AsyncDht::local_addr()` replaced with `::info()`.
+- `Dht::shutdown()` and `AsyncDht::shutdown()` are now idempotent, and returns `()`.
 - `Rpc::drop` uses `tracing::debug!()` to log dropping the Rpc.
 - `Id::as_bytes()` instead of exposing internal `bytes` property.
 - Replace crate `Error` with more granular errors.

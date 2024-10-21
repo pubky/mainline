@@ -10,7 +10,7 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific, RoutingTable,
     },
-    dht::{ActorMessage, Dht, DhtLocalAddrError, DhtPutError, DhtWasShutdown},
+    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info},
     rpc::{PutError, ResponseSender},
 };
 
@@ -28,43 +28,13 @@ pub struct AsyncDht(Dht);
 impl AsyncDht {
     // === Getters ===
 
-    /// Returns this node's [Id]
-    pub async fn id(&self) -> Result<Id, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Id>(1);
+    /// Information and statistics about this [Dht] node.
+    pub async fn info(&self) -> Result<Info, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Info>(1);
 
         self.0
              .0
-            .send(ActorMessage::Id(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
-    }
-
-    /// Returns the local address of the udp socket this node is listening on.
-    ///
-    /// Returns an error if the actor is shutdown, or if the [std::net::UdpSocket::local_addr]
-    /// returned an IO error.
-    pub async fn local_addr(&self) -> Result<SocketAddr, DhtLocalAddrError> {
-        let (sender, receiver) = flume::bounded::<Result<SocketAddr, std::io::Error>>(1);
-
-        self.0
-             .0
-            .send(ActorMessage::LocalAddr(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver.recv_async().await.map_err(|_| DhtWasShutdown)??)
-    }
-
-    /// Returns an estimate of the Dht size.
-    ///
-    /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
-    /// responding nodes of each get queries done in the background.
-    pub async fn dht_size_estimate(&self) -> Result<usize, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<usize>(1);
-
-        self.0
-             .0
-            .send(ActorMessage::SizeEstimate(sender))
+            .send(ActorMessage::Info(sender))
             .map_err(|_| DhtWasShutdown)?;
 
         receiver.recv_async().await.map_err(|_| DhtWasShutdown)
@@ -286,7 +256,7 @@ mod test {
         async fn test() {
             let mut dht = Dht::client().unwrap().as_async();
 
-            dht.local_addr().await.unwrap();
+            dht.info().await.unwrap().local_address.unwrap();
 
             let a = dht.clone();
 

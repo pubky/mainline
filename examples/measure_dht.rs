@@ -28,7 +28,7 @@ fn main() {
         println!(
             "Dht size esttimate after {} seconds: {} nodes",
             start.elapsed().as_secs(),
-            format_number(dht.dht_size_estimate().unwrap())
+            format_number(dht.info().unwrap().dht_size_estimate)
         );
     }
 }
