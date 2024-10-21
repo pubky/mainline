@@ -20,12 +20,14 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 pub struct Id([u8; ID_SIZE]);
 
 impl Id {
+    /// Generate a random Id
     pub fn random() -> Id {
         let mut rng = rand::thread_rng();
         let bytes: [u8; 20] = rng.gen();
 
         Id(bytes)
     }
+
     /// Create a new Id from some bytes. Returns Err if the input is not 20 bytes long.
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id, InvalidIdSize> {
         let bytes = bytes.as_ref();
@@ -47,16 +49,30 @@ impl Id {
     /// Distance to the furthest Id is 160
     /// Distance to an Id with 5 leading matching bits is 155
     pub fn distance(&self, other: &Id) -> u8 {
-        for (i, (a, b)) in self.0.iter().zip(other.0).enumerate() {
-            if a != &b {
-                // leading zeros so far + laedinge zeros of this byte
-                let leading_zeros = (i as u32 * 8 + (a ^ b).leading_zeros()) as u8;
+        MAX_DISTANCE - self.xor(other).leading_zeros()
+    }
 
-                return MAX_DISTANCE - leading_zeros;
+    /// Returns the number of leading zeros in the binary representation of `self`.
+    pub fn leading_zeros(&self) -> u8 {
+        for (i, byte) in self.0.iter().enumerate() {
+            if *byte != 0 {
+                // leading zeros so far + laedinge zeros of this byte
+                return (i as u32 * 8 + byte.leading_zeros()) as u8;
             }
         }
 
-        0
+        160
+    }
+
+    /// Performs bitwise XOR between two Ids
+    pub fn xor(&self, other: &Id) -> Id {
+        let mut result = [0_u8; 20];
+
+        for (i, (a, b)) in self.0.iter().zip(other.0).enumerate() {
+            result[i] = a ^ b;
+        }
+
+        result.into()
     }
 
     pub fn as_bytes(&self) -> &[u8; 20] {

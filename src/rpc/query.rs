@@ -122,10 +122,20 @@ impl Query {
 
         // If no more inflight_requests are inflight in the socket (not timed out),
         // then the query is done.
-        !self
+        let done = !self
             .inflight_requests
             .iter()
-            .any(|&tid| socket.inflight(&tid))
+            .any(|&tid| socket.inflight(&tid));
+
+        if done {
+            for sender in &self.senders {
+                if let ResponseSender::ClosestNodes(s) = sender {
+                    let _ = s.send(self.responders.to_owned());
+                }
+            }
+        };
+
+        done
     }
 
     // === Private Methods ===

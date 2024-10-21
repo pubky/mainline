@@ -1,11 +1,8 @@
-use std::{
-    sync::{Arc, Mutex},
-    thread::{self, sleep},
-    time::Duration,
-};
+use std::time::Instant;
 
 use clap::Parser;
-use mainline::Dht;
+use mainline::{Dht, Id};
+use tracing::Level;
 
 const DEFAULT_SAMPLES: usize = 20;
 
@@ -17,65 +14,34 @@ struct Cli {
 }
 
 fn main() {
-    let samples_count = Cli::parse().samples;
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    println!("Calculating Dht size with ({samples_count}) samples..",);
+    let dht = Dht::client().unwrap();
 
-    let samples = Arc::new(Mutex::new(vec![]));
+    println!("Calculating Dht size..",);
 
-    for _ in 0..samples_count {
-        let samples = samples.clone();
+    let mut sum = 0;
+    let mut samples = 0;
 
-        thread::spawn(move || {
-            let dht = Dht::client().unwrap();
-            // Wait for bootstrap
-            sleep(Duration::from_secs(2));
+    let start = Instant::now();
 
-            // Calculate the dht size estimate after bootstrap
-            let table = dht.routing_table().unwrap();
+    loop {
+        let table = dht.find_node(Id::random()).unwrap();
+
+        {
             let estimate = table.estimate_dht_size();
 
+            sum += estimate;
+            samples += 1;
+
             println!(
-                "\tSample estimate ({}): {} nodes",
-                table.id(),
-                format_number(estimate)
+                "Dht size esttimate after {} seconds and {} samples: {} nodes",
+                start.elapsed().as_secs(),
+                samples,
+                format_number(sum / samples)
             );
-
-            // Add to the samples
-            let mut s = samples.lock().unwrap();
-            insert_sorted(&mut s, estimate);
-        });
+        }
     }
-
-    // Wait for bootstrap
-    sleep(Duration::from_secs(4));
-
-    let s = samples.lock().unwrap();
-    let median = format_number(median(&s));
-    println!(
-        "\nMedian dht size estimate ({:>3} samples): {median} nodes",
-        s.len()
-    );
-
-    // loop {
-    //     let dht = Dht::client().unwrap();
-    //
-    //     // Wait for bootstrap
-    //     sleep(Duration::from_secs(2));
-    //
-    //     // Calculate the dht size estimate after bootstrap
-    //     let table = dht.routing_table().unwrap();
-    //     let estimate = table.estimate_dht_size();
-    //
-    //     // Add to the samples
-    //     insert_sorted(&mut samples, estimate);
-    //
-    //     let median = format_number(median(&samples));
-    //     println!(
-    //         "Median dht size estimate ({:>3} samples): {median} nodes",
-    //         samples.len()
-    //     );
-    // }
 }
 
 fn format_number(num: usize) -> String {
@@ -102,23 +68,4 @@ fn format_number(num: usize) -> String {
     }
 
     result
-}
-
-fn insert_sorted(vec: &mut Vec<usize>, value: usize) {
-    // Find the position to insert the value using binary search.
-    let pos = vec
-        .binary_search_by(|x| x.cmp(&value))
-        .unwrap_or_else(|e| e);
-    vec.insert(pos, value);
-}
-
-fn median(values: &[usize]) -> usize {
-    let len = values.len();
-    if len == 0 {
-        0
-    } else if len % 2 == 1 {
-        values[len / 2]
-    } else {
-        (values[len / 2 - 1] + values[len / 2]) / 2
-    }
 }

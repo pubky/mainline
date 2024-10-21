@@ -403,6 +403,9 @@ impl Rpc {
 
             if let Some((responder_id, token)) = message.get_token() {
                 query.add_responding_node(Node::new(responder_id, from).with_token(token.clone()));
+            } else if let Some(responder_id) = message.get_author_id() {
+                // update responding nodes even for FIND_NODE queries.
+                query.add_responding_node(Node::new(responder_id, from));
             }
 
             let target = query.target;
@@ -656,6 +659,7 @@ pub enum Response {
 
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
+    ClosestNodes(Sender<RoutingTable>),
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),

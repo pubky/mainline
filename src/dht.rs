@@ -9,9 +9,10 @@ use tracing::info;
 
 use crate::{
     common::{
-        hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
-        GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
-        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific, RoutingTable,
+        hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
+        GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
+        PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
+        RequestTypeSpecific, RoutingTable,
     },
     rpc::{PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
     server::{DefaultServer, Server},
@@ -168,6 +169,26 @@ impl Dht {
 
         let _ = self.0.send(ActorMessage::Shutdown(sender));
         let _ = receiver.recv();
+    }
+
+    // === Find nodes ===
+
+    pub fn find_node(&self, target: Id) -> Result<RoutingTable, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+
+        let request = RequestTypeSpecific::FindNode(FindNodeRequestArguments { target });
+
+        self.0
+            .send(ActorMessage::Get(
+                target,
+                request,
+                ResponseSender::ClosestNodes(sender),
+            ))
+            .map_err(|_| DhtWasShutdown)?;
+
+        Ok(receiver
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue."))
     }
 
     // === Peers ===

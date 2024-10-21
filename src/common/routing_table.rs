@@ -1,7 +1,7 @@
 //! Simplified Kademlia routing table
 
-use std::collections::BTreeMap;
 use std::slice::Iter;
+use std::{collections::BTreeMap, convert::TryInto};
 
 use crate::common::{Id, Node, MAX_DISTANCE};
 
@@ -135,26 +135,85 @@ impl RoutingTable {
         nodes
     }
 
-    /// Get a rough estimate of the Dht size, by finding the `n` leading bits
-    /// shared with the closest bucket, then assuming uniform distribution,
-    /// we calculate the dht size to be `2^n * closest_bucket.len()`.
+    /// An estimation of the Dht from the distribution of closest nodes
+    /// responding to a query.
     ///
-    /// In the diagrame below, you can see that if the closest bucket to us in a 4 bit keyspace,
-    /// is 1 bits away (shares 3 bits with us), then we can assume that the keyspace contains
-    /// 8 times (2^3) the number of nodes in the closest bucket.
+    /// In order to get an accurate calculation of the Dht size, you should take
+    /// as many lookups (at uniformally disrtibuted target) as you can,
+    /// and calculate the average of the estimations based on their responding nodes.
     ///
-    /// Distance to us  : 0000     0001     0010            0100
-    /// Keyspace/buckets: |--------|-closest-|-------|-------|-------|-------|-------|-------|
+    /// # Explanation
     ///
+    /// Consider a Dht with a 4 bit key space.
+    /// Then we can map nodes in that keyspace by their distance to a given target of a lookup.
+    ///
+    /// Assuming a random but uniform distribution of nodes (which can be measured independently),
+    /// you should see nodes distributed somewhat like this:
+    ///
+    /// ```
+    ///              (1)    (2)                  (3)    (4)           (5)           (6)           (7)      (8)       
+    /// |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
+    /// 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
+    /// ```
+    ///
+    /// So if you make a lookup and optained this partial view of the network:
+    /// ```
+    ///              (1)    (2)                  (3)                                (4)                  (5)       
+    /// |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
+    /// 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
+    /// ```
+    ///
+    /// Note: you see exponentially less further nodes than closer ones, which is what you should expect from how
+    /// the routing table works.
+    ///
+    /// Seeing one node at distance (d1=2), suggests that the routing table might contain 8 nodes,
+    /// since its full length is 8 times (d1).
+    ///
+    /// Similarily, seeing two nodes at (d2=3), suggests that the routing table might contain 10
+    /// nodes, since the key space is more than (d2).
+    ///
+    /// If we repeat this estimation for as many nodes as the routing table's `k` bucket size,
+    /// and take their average, we get a more accurate estimation of the dht.
+    ///
+    /// ## Formula
+    ///
+    /// The estimated number of Dht size, at each distance `di`, is `en_i = i * d_max / di` where `i` is the
+    /// count of nodes discovered until this distance and `d_max` is the size of the key space.
+    ///
+    /// The final Dht size estimation is the average of `en_1 + en_2 + .. + en_n`
+    ///
+    /// Read more at [A New Method for Estimating P2P Network Size](https://eli.sohl.com/2020/06/05/dht-size-estimation.html#fnref:query-count)
     pub fn estimate_dht_size(&self) -> usize {
-        self.buckets()
-            .iter()
-            .next()
-            .map_or(0, |(distance, bucket)| {
-                let no_of_zones = (161 - distance) as u32;
+        let mut sum = 0;
+        let mut i: usize = 0;
 
-                2usize.pow(no_of_zones) * bucket.len()
-            })
+        'outer: for bucket in self.buckets().values() {
+            for node in &bucket.nodes {
+                let xor = self.id.xor(&node.id);
+
+                let di =
+                    // Round up to the highest u128 and ignore the low part
+                    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"))
+                    // Round up to 1 to avoid dividing by zero
+                        .max(1);
+
+                // The inverse of the probability of finding (i) nodes at distance (di)
+                let estimated_n = i.saturating_mul((u128::MAX / di) as usize);
+
+                i += 1;
+                sum += estimated_n;
+
+                if i >= MAX_BUCKET_SIZE_K {
+                    break 'outer;
+                }
+            }
+        }
+
+        if i == 0 {
+            0
+        } else {
+            sum / i
+        }
     }
 
     // === Private Methods ===

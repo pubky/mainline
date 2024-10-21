@@ -5,9 +5,10 @@ use std::net::SocketAddr;
 
 use crate::{
     common::{
-        hash_immutable, AnnouncePeerRequestArguments, GetPeersRequestArguments,
-        GetValueRequestArguments, Id, MutableItem, PutImmutableRequestArguments,
-        PutMutableRequestArguments, PutRequestSpecific, RequestTypeSpecific, RoutingTable,
+        hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
+        GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
+        PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
+        RequestTypeSpecific, RoutingTable,
     },
     dht::{ActorMessage, Dht, DhtLocalAddrError, DhtPutError, DhtWasShutdown},
     rpc::{PutError, ResponseSender},
@@ -33,7 +34,7 @@ impl AsyncDht {
 
         self.0
              .0
-            .send(ActorMessage::RoutingTable(sender))
+            .send(ActorMessage::Id(sender))
             .map_err(|_| DhtWasShutdown)?;
 
         receiver.recv_async().await.map_err(|_| DhtWasShutdown)
@@ -74,6 +75,28 @@ impl AsyncDht {
 
         let _ = self.0 .0.send(ActorMessage::Shutdown(sender));
         let _ = receiver.recv_async().await;
+    }
+
+    // === Find nodes ===
+
+    pub async fn find_node(&self, target: Id) -> Result<RoutingTable, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+
+        let request = RequestTypeSpecific::FindNode(FindNodeRequestArguments { target });
+
+        self.0
+             .0
+            .send(ActorMessage::Get(
+                target,
+                request,
+                ResponseSender::ClosestNodes(sender),
+            ))
+            .map_err(|_| DhtWasShutdown)?;
+
+        Ok(receiver
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue."))
     }
 
     // === Peers ===
