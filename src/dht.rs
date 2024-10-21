@@ -161,6 +161,20 @@ impl Dht {
         receiver.recv().map_err(|_| DhtWasShutdown)
     }
 
+    /// Returns an estimate of the Dht size.
+    ///
+    /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
+    /// responding nodes of each get queries done in the background.
+    pub fn dht_size_estimate(&self) -> Result<usize, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<usize>(1);
+
+        self.0
+            .send(ActorMessage::SizeEstimate(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv().map_err(|_| DhtWasShutdown)
+    }
+
     // === Public Methods ===
 
     /// Shutdown the actor thread loop.
@@ -367,6 +381,9 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
                 ActorMessage::RoutingTable(sender) => {
                     let _ = sender.send(rpc.routing_table().clone());
                 }
+                ActorMessage::SizeEstimate(sender) => {
+                    let _ = sender.send(rpc.dht_size_estimate());
+                }
                 ActorMessage::Put(target, request, sender) => {
                     rpc.put(target, request, Some(sender));
                 }
@@ -395,6 +412,7 @@ pub enum ActorMessage {
     Id(Sender<Id>),
     LocalAddr(Sender<Result<SocketAddr, std::io::Error>>),
     RoutingTable(Sender<RoutingTable>),
+    SizeEstimate(Sender<usize>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),

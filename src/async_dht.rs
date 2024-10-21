@@ -67,6 +67,21 @@ impl AsyncDht {
         receiver.recv_async().await.map_err(|_| DhtWasShutdown)
     }
 
+    /// Returns an estimate of the Dht size.
+    ///
+    /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
+    /// responding nodes of each get queries done in the background.
+    pub async fn dht_size_estimate(&self) -> Result<usize, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<usize>(1);
+
+        self.0
+             .0
+            .send(ActorMessage::SizeEstimate(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
+    }
+
     // === Public Methods ===
 
     /// Shutdown the actor thread loop.

@@ -10,6 +10,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Dht::id()` and `AsyncDht::id()` to get the node's Id.
 - `Dht::find_node()` and `AsyncDht::find_node()` to lookup a certain target, without calling `get_peers` and return a routing table of the responding nodes.
 - `Dht::routing_table()` and `AsyncDht::routing_table()` to get a copy of the routing table.
+- `Dht::dht_size_estimate()` and `AsyncDht::dht_size_estimate()` to get the ongoing dht size estimate resulting from watching results of all queries.
 - `measure_dht` example to estimate the DHT size.
 
 ### Changed

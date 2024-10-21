@@ -14,10 +14,11 @@ use lru::LruCache;
 use tracing::{debug, error, info};
 
 use crate::common::{
-    validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
-    GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
-    MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
-    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
+    estimate_dht_size, validate_immutable, ErrorSpecific, FindNodeRequestArguments,
+    GetImmutableResponseArguments, GetMutableResponseArguments, GetPeersResponseArguments,
+    GetValueRequestArguments, Id, Message, MessageType, MutableItem,
+    NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node, PutRequestSpecific,
+    RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
 use crate::dht::Settings;
@@ -65,6 +66,9 @@ pub struct Rpc {
     /// Put queries are special, since they have to wait for a corresponing
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
+
+    dht_size_estimate_samples: usize,
+    dht_size_estimate_sum: usize,
 }
 
 impl Rpc {
@@ -104,6 +108,9 @@ impl Rpc {
                 .checked_sub(REFRESH_TABLE_INTERVAL)
                 .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
+
+            dht_size_estimate_samples: 0,
+            dht_size_estimate_sum: 0,
         })
     }
 
@@ -130,6 +137,10 @@ impl Rpc {
 
     pub fn routing_table(&self) -> &RoutingTable {
         &self.routing_table
+    }
+
+    pub fn dht_size_estimate(&self) -> usize {
+        self.dht_size_estimate_sum / self.dht_size_estimate_samples
     }
 
     // === Public Methods ===
@@ -160,6 +171,10 @@ impl Rpc {
 
             if is_done {
                 let closest = query.closest();
+
+                let dht_size_estimate = estimate_dht_size(query.target, &closest);
+                self.dht_size_estimate_sum += dht_size_estimate;
+                self.dht_size_estimate_samples += 1;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
                     put_query.start(&mut self.socket, closest.clone())

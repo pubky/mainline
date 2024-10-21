@@ -184,36 +184,7 @@ impl RoutingTable {
     ///
     /// Read more at [A New Method for Estimating P2P Network Size](https://eli.sohl.com/2020/06/05/dht-size-estimation.html#fnref:query-count)
     pub fn estimate_dht_size(&self) -> usize {
-        let mut sum = 0;
-        let mut i: usize = 0;
-
-        'outer: for bucket in self.buckets().values() {
-            for node in &bucket.nodes {
-                let xor = self.id.xor(&node.id);
-
-                let di =
-                    // Round up to the highest u128 and ignore the low part
-                    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"))
-                    // Round up to 1 to avoid dividing by zero
-                        .max(1);
-
-                // The inverse of the probability of finding (i) nodes at distance (di)
-                let estimated_n = i.saturating_mul((u128::MAX / di) as usize);
-
-                i += 1;
-                sum += estimated_n;
-
-                if i >= MAX_BUCKET_SIZE_K {
-                    break 'outer;
-                }
-            }
-        }
-
-        if i == 0 {
-            0
-        } else {
-            sum / i
-        }
+        estimate_dht_size(self.id, &self.to_vec())
     }
 
     // === Private Methods ===
@@ -229,6 +200,33 @@ impl RoutingTable {
         }
         false
     }
+}
+
+pub(crate) fn estimate_dht_size(target: Id, nodes: &[Node]) -> usize {
+    if nodes.is_empty() {
+        return 0;
+    };
+
+    let mut sum = 0;
+    let mut i: usize = 0;
+
+    for node in nodes {
+        let xor = target.xor(&node.id);
+
+        let di =
+                    // Round up to the highest u128 and ignore the low part
+                    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"))
+                    // Round up to 1 to avoid dividing by zero
+                        .max(1);
+
+        // The inverse of the probability of finding (i) nodes at distance (di)
+        let estimated_n = i.saturating_mul((u128::MAX / di) as usize);
+
+        i += 1;
+        sum += estimated_n;
+    }
+
+    sum / i
 }
 
 impl Default for RoutingTable {

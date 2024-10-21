@@ -20,27 +20,21 @@ fn main() {
 
     println!("Calculating Dht size..",);
 
-    let mut sum = 0;
     let mut samples = 0;
 
     let start = Instant::now();
 
     loop {
-        let table = dht.find_node(Id::random()).unwrap();
+        samples += 1;
 
-        {
-            let estimate = table.estimate_dht_size();
+        let _ = dht.find_node(Id::random()).unwrap();
 
-            sum += estimate;
-            samples += 1;
-
-            println!(
-                "Dht size esttimate after {} seconds and {} samples: {} nodes",
-                start.elapsed().as_secs(),
-                samples,
-                format_number(sum / samples)
-            );
-        }
+        println!(
+            "Dht size esttimate after {} seconds and {} samples: {} nodes",
+            start.elapsed().as_secs(),
+            samples,
+            format_number(dht.dht_size_estimate().unwrap())
+        );
     }
 }
 
