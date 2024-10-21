@@ -55,18 +55,6 @@ impl AsyncDht {
         Ok(receiver.recv_async().await.map_err(|_| DhtWasShutdown)??)
     }
 
-    /// Returns a copy of this client's [RoutingTable]
-    pub async fn routing_table(&self) -> Result<RoutingTable, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
-
-        self.0
-             .0
-            .send(ActorMessage::RoutingTable(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
-    }
-
     /// Returns an estimate of the Dht size.
     ///
     /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the

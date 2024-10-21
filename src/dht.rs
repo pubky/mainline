@@ -150,17 +150,6 @@ impl Dht {
         Ok(receiver.recv().map_err(|_| DhtWasShutdown)??)
     }
 
-    /// Returns a copy of this client's [RoutingTable]
-    pub fn routing_table(&self) -> Result<RoutingTable, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
-
-        self.0
-            .send(ActorMessage::RoutingTable(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        receiver.recv().map_err(|_| DhtWasShutdown)
-    }
-
     /// Returns an estimate of the Dht size.
     ///
     /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
@@ -378,9 +367,6 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
                 ActorMessage::LocalAddr(sender) => {
                     let _ = sender.send(rpc.local_addr());
                 }
-                ActorMessage::RoutingTable(sender) => {
-                    let _ = sender.send(rpc.routing_table().clone());
-                }
                 ActorMessage::SizeEstimate(sender) => {
                     let _ = sender.send(rpc.dht_size_estimate());
                 }
@@ -411,7 +397,6 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
 pub enum ActorMessage {
     Id(Sender<Id>),
     LocalAddr(Sender<Result<SocketAddr, std::io::Error>>),
-    RoutingTable(Sender<RoutingTable>),
     SizeEstimate(Sender<usize>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
