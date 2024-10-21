@@ -1,14 +1,14 @@
 use std::{thread::sleep, time::Duration};
 
 use mainline::{
-    server::{DhtServer, Server},
+    server::{DefaultServer, Server},
     Dht,
 };
 use tracing::{info, instrument, Level};
 
 #[derive(Debug, Default)]
 struct MyCustomServer {
-    inner: DhtServer,
+    inner: DefaultServer,
 }
 
 impl Server for MyCustomServer {

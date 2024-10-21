@@ -3,7 +3,7 @@
 mod query;
 mod socket;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
@@ -14,18 +14,19 @@ use lru::LruCache;
 use tracing::{debug, error, info};
 
 use crate::common::{
-    validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
-    GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
-    MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
-    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
+    estimate_dht_size, validate_immutable, ErrorSpecific, FindNodeRequestArguments,
+    GetImmutableResponseArguments, GetMutableResponseArguments, GetPeersResponseArguments,
+    GetValueRequestArguments, Id, Message, MessageType, MutableItem,
+    NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node, PutRequestSpecific,
+    RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
-use crate::error::SocketAddrResult;
-use crate::{dht::DhtSettings, Error, Result};
+use crate::dht::Settings;
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
+pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
@@ -40,6 +41,10 @@ const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 const MAX_CACHED_BUCKETS: usize = 1000;
+
+// If you are making a FIND_NODE requests subsequentially,
+// you can expect the oldest sample to be an hour ago.
+const DHT_SIZE_ESTIMATE_SAMPLE_SIZE: usize = 1024;
 
 #[derive(Debug)]
 /// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
@@ -65,11 +70,13 @@ pub struct Rpc {
     /// Put queries are special, since they have to wait for a corresponing
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
+
+    dht_size_estimate_samples: VecDeque<usize>,
 }
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(settings: &DhtSettings) -> Result<Self> {
+    pub fn new(settings: &Settings) -> Result<Self, std::io::Error> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
@@ -104,6 +111,8 @@ impl Rpc {
                 .checked_sub(REFRESH_TABLE_INTERVAL)
                 .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
+
+            dht_size_estimate_samples: VecDeque::with_capacity(DHT_SIZE_ESTIMATE_SAMPLE_SIZE),
         })
     }
 
@@ -124,12 +133,17 @@ impl Rpc {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddrResult {
+    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
         self.socket.local_addr()
     }
 
-    pub(crate) fn routing_table(&self) -> &RoutingTable {
+    pub fn routing_table(&self) -> &RoutingTable {
         &self.routing_table
+    }
+
+    pub fn dht_size_estimate(&self) -> usize {
+        self.dht_size_estimate_samples.iter().sum::<usize>()
+            / self.dht_size_estimate_samples.len().max(1)
     }
 
     // === Public Methods ===
@@ -140,7 +154,9 @@ impl Rpc {
     pub fn tick(&mut self) -> RpcTickReport {
         // === Tick Queries ===
 
-        let mut done_put_queries = Vec::with_capacity(self.queries.len());
+        let mut closest_nodes = Vec::with_capacity(self.queries.len());
+        let mut done_get_queries = Vec::with_capacity(self.queries.len());
+        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
             let done = query.tick(&mut self.socket);
@@ -153,15 +169,17 @@ impl Rpc {
         let self_id = self.id;
         let table_size = self.routing_table.size();
 
-        let mut closest_nodes = Vec::with_capacity(self.queries.len());
-        let mut done_get_queries = Vec::with_capacity(self.queries.len());
-        // let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
-
         for (id, query) in self.queries.iter_mut() {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
                 let closest = query.closest();
+
+                if self.dht_size_estimate_samples.len() >= DHT_SIZE_ESTIMATE_SAMPLE_SIZE {
+                    self.dht_size_estimate_samples.remove(0);
+                }
+                let dht_size_estimate = estimate_dht_size(query.target, &closest);
+                self.dht_size_estimate_samples.push_back(dht_size_estimate);
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
                     put_query.start(&mut self.socket, closest.clone())
@@ -252,11 +270,11 @@ impl Rpc {
         &mut self,
         target: Id,
         request: PutRequestSpecific,
-        sender: Option<Sender<PutResult>>,
+        sender: Option<Sender<Result<Id, PutError>>>,
     ) {
         if self.put_queries.contains_key(&target) {
             if let Some(sender) = sender {
-                let _ = sender.send(Err(Error::PutQueryIsInflight(target)));
+                let _ = sender.send(Err(PutError::PutQueryIsInflight(target)));
             };
 
             debug!(?target, "Put query for the same target is already inflight");
@@ -405,6 +423,9 @@ impl Rpc {
 
             if let Some((responder_id, token)) = message.get_token() {
                 query.add_responding_node(Node::new(responder_id, from).with_token(token.clone()));
+            } else if let Some(responder_id) = message.get_author_id() {
+                // update responding nodes even for FIND_NODE queries.
+                query.add_responding_node(Node::new(responder_id, from));
             }
 
             let target = query.target;
@@ -598,6 +619,12 @@ impl Rpc {
     }
 }
 
+impl Drop for Rpc {
+    fn drop(&mut self) {
+        debug!("Dropped Mainline::Rpc");
+    }
+}
+
 /// Any received message and done queries in the [Rpc::tick].
 #[derive(Debug, Clone)]
 pub struct RpcTickReport {
@@ -652,11 +679,8 @@ pub enum Response {
 
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
+    ClosestNodes(Sender<RoutingTable>),
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),
 }
-
-/// Returns the info_hash or target of the operation.
-/// Useful for put_immutable.
-pub type PutResult = Result<Id>;
