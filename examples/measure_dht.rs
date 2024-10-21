@@ -18,21 +18,16 @@ fn main() {
 
     let dht = Dht::client().unwrap();
 
-    println!("Calculating Dht size..",);
-
-    let mut samples = 0;
+    println!("Calculating Dht size by sampling random lookup queries within the past hour..",);
 
     let start = Instant::now();
 
     loop {
-        samples += 1;
-
         let _ = dht.find_node(Id::random()).unwrap();
 
         println!(
-            "Dht size esttimate after {} seconds and {} samples: {} nodes",
+            "Dht size esttimate after {} seconds: {} nodes",
             start.elapsed().as_secs(),
-            samples,
             format_number(dht.dht_size_estimate().unwrap())
         );
     }

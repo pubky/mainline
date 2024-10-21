@@ -139,7 +139,7 @@ impl RoutingTable {
     /// responding to a query.
     ///
     /// In order to get an accurate calculation of the Dht size, you should take
-    /// as many lookups (at uniformally disrtibuted target) as you can,
+    /// as many lookups (at uniformly disrtibuted target) as you can,
     /// and calculate the average of the estimations based on their responding nodes.
     ///
     /// # Explanation
@@ -150,14 +150,14 @@ impl RoutingTable {
     /// Assuming a random but uniform distribution of nodes (which can be measured independently),
     /// you should see nodes distributed somewhat like this:
     ///
-    /// ```
+    /// ```md
     ///              (1)    (2)                  (3)    (4)           (5)           (6)           (7)      (8)       
     /// |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
     /// 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
     /// ```
     ///
     /// So if you make a lookup and optained this partial view of the network:
-    /// ```
+    /// ```md
     ///              (1)    (2)                  (3)                                (4)                  (5)       
     /// |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
     /// 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
@@ -169,7 +169,7 @@ impl RoutingTable {
     /// Seeing one node at distance (d1=2), suggests that the routing table might contain 8 nodes,
     /// since its full length is 8 times (d1).
     ///
-    /// Similarily, seeing two nodes at (d2=3), suggests that the routing table might contain 10
+    /// Similarily, seeing two nodes at (d2=3), suggests that the routing table might contain ~11
     /// nodes, since the key space is more than (d2).
     ///
     /// If we repeat this estimation for as many nodes as the routing table's `k` bucket size,
