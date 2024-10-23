@@ -381,9 +381,6 @@ pub struct Info {
     /// Local UDP socket address that this node is listening on.
     pub local_address: Result<SocketAddr, std::io::Error>,
     /// An estimate of the Dht size.
-    ///
-    /// Calculated as the average of the results of calling [RoutingTable::estimate_dht_size] on the
-    /// responding nodes of each get queries done in the background.
     pub dht_size_estimate: usize,
 }
 

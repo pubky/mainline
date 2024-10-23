@@ -582,6 +582,15 @@ impl Rpc {
         if self.routing_table.is_empty()
             && self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL
         {
+            // Make a random query, to help the dht size estimation.
+            let target = Id::random();
+            self.get(
+                target,
+                RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }),
+                None,
+                None,
+            );
+
             self.last_table_refresh = Instant::now();
             self.populate();
         }

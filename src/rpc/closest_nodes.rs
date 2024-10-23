@@ -1,6 +1,6 @@
-use std::vec::IntoIter;
+use std::{convert::TryInto, vec::IntoIter};
 
-use crate::{Id, Node};
+use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
 #[derive(Debug, Clone)]
 pub struct ClosestNodes {
@@ -29,8 +29,17 @@ impl ClosestNodes {
     // === Public Methods ===
 
     pub fn add(&mut self, node: Node) {
-        match self.nodes.binary_search_by(|item| item.id.cmp(&node.id)) {
-            Ok(pos) | Err(pos) => self.nodes.insert(pos, node),
+        let seek = node.id.xor(&self.target);
+
+        match self.nodes.binary_search_by(|prope| {
+            if prope.id == node.id {
+                std::cmp::Ordering::Equal
+            } else {
+                prope.id.xor(&self.target).cmp(&seek)
+            }
+        }) {
+            Err(pos) => self.nodes.insert(pos, node),
+            _ => {}
         }
     }
 
@@ -91,18 +100,29 @@ impl ClosestNodes {
             return 0;
         };
 
-        self.nodes
-            .iter()
-            .map(|n| n.id)
-            .enumerate()
-            .fold(0, |mut sum, (idx, id)| {
-                let intervals = id.keyspace_intervals(self.target);
-                let estimated_n = intervals.saturating_mul(idx + 1);
+        let mut sum: usize = 0;
+        let mut count = 0;
 
-                sum += estimated_n;
-                sum
-            })
-            / self.nodes.len()
+        for node in &self.nodes {
+            if count >= MAX_BUCKET_SIZE_K {
+                break;
+            }
+
+            count += 1;
+
+            let xor = node.id.xor(&self.target);
+
+            // Round up the lower 4 bytes to get a u128 from u160.
+            let distance =
+                u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) + 1;
+
+            let intervals = (u128::MAX / distance) as usize;
+            let estimated_n = intervals.saturating_mul(count);
+
+            sum = sum.saturating_add(estimated_n);
+        }
+
+        (sum / count) as usize
     }
 }
 
@@ -121,5 +141,85 @@ impl<'a> IntoIterator for &'a ClosestNodes {
 
     fn into_iter(self) -> Self::IntoIter {
         self.nodes.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[test]
+    fn add() {
+        let target = Id::random();
+
+        let mut closest_nodes = ClosestNodes::new(target);
+
+        for _ in 0..10 {
+            let node = Node::random();
+            closest_nodes.add(node.clone());
+            closest_nodes.add(node);
+        }
+
+        assert_eq!(closest_nodes.nodes().len(), 10);
+
+        let distances = closest_nodes
+            .nodes()
+            .iter()
+            .map(|n| n.id.distance(&target))
+            .collect::<Vec<_>>();
+
+        let mut sorted = distances.clone();
+        sorted.sort();
+
+        assert_eq!(sorted, distances);
+    }
+
+    #[test]
+    fn simulation() {
+        let lookups = 10;
+        let acceptable_margin = 0.6;
+
+        let tests = [2500, 25000, 250000];
+
+        for dht_size in tests {
+            let estimate = simulate(dht_size, lookups) as f64;
+
+            let margin = (estimate - (dht_size as f64)).abs() / dht_size as f64;
+
+            assert!(margin <= acceptable_margin);
+        }
+    }
+
+    fn simulate(dht_size: usize, lookups: usize) -> usize {
+        let mut nodes = BTreeMap::new();
+
+        // Bootstrap
+        for _ in 0..dht_size {
+            let node = Node::random();
+            nodes.insert(node.id, node);
+        }
+
+        let mut estimates = vec![];
+
+        for _ in 0..lookups.min(dht_size) {
+            let target = Id::random();
+
+            let mut closest_nodes = ClosestNodes::new(target);
+
+            for (_, node) in nodes.range(target..).take(20) {
+                closest_nodes.add(node.clone());
+            }
+            for (_, node) in nodes.range(target..).rev().take(20) {
+                closest_nodes.add(node.clone());
+            }
+
+            let estimate = closest_nodes.dht_size_estimate();
+
+            estimates.push(estimate)
+        }
+
+        estimates.iter().sum::<usize>() / estimates.len()
     }
 }

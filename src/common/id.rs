@@ -121,20 +121,6 @@ impl Id {
             }
         }
     }
-
-    /// Returns the number of intervals in the keyspace if divided by the distance
-    /// between this id and a given `target`.
-    ///
-    /// Useful to estimate the Dht size see [crate::ClosestNodes::dht_size_estimate]
-    pub fn keyspace_intervals(&self, target: Id) -> usize {
-        let xor = self.xor(&target);
-
-        // Round up the lower 4 bytes to get a u128 from u160.
-        let distance =
-            u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) + 1;
-
-        (u128::MAX / distance) as usize
-    }
 }
 
 fn first_21_bits(bytes: &[u8]) -> [u8; 3] {
