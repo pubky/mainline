@@ -20,7 +20,6 @@ use crate::{
 /// repeating this process until no closer nodes (that aren't already queried) are found.
 #[derive(Debug)]
 pub struct Query {
-    pub target: Id,
     pub request: RequestSpecific,
     candidates: RoutingTable,
     closest_nodes: ClosestNodes,
@@ -35,7 +34,6 @@ impl Query {
         trace!(?target, ?request, "New Query");
 
         Self {
-            target,
             request,
 
             candidates: RoutingTable::new().with_id(target),
@@ -50,6 +48,10 @@ impl Query {
     }
 
     // === Getters ===
+
+    pub fn target(&self) -> Id {
+        self.closest_nodes.target()
+    }
 
     /// Return the closest responding nodes after the query is done.
     pub fn closest_nodes(&self) -> &ClosestNodes {
@@ -102,7 +104,7 @@ impl Query {
 
     /// Add received response
     pub fn response(&mut self, from: SocketAddr, response: Response) {
-        let target = self.target;
+        let target = self.target();
 
         debug!(?target, ?response, ?from, "Query got response");
 
@@ -157,7 +159,7 @@ impl Query {
 
     /// Visit the closest candidates and remove them as candidates
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
-        for node in self.candidates.closest(&self.target) {
+        for node in self.candidates.closest(&self.target()) {
             if !self.visited.contains(&node.address) {
                 self.visit(socket, node.address);
             }

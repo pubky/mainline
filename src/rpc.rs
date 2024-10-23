@@ -431,7 +431,7 @@ impl Rpc {
                 query.add_responding_node(Node::new(responder_id, from));
             }
 
-            let target = query.target;
+            let target = query.target();
 
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
@@ -451,7 +451,7 @@ impl Rpc {
                         v, responder_id, ..
                     },
                 )) => {
-                    if validate_immutable(v, &query.target) {
+                    if validate_immutable(v, &query.target()) {
                         let response = Response::Immutable(v.to_owned().into());
 
                         query.response(from, response.to_owned());
@@ -462,7 +462,7 @@ impl Rpc {
                         });
                     }
 
-                    let target = query.target;
+                    let target = query.target();
                     debug!(?v, ?target, ?responder_id, ?from, from_version = ?message.version, "Invalid immutable value");
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
@@ -479,10 +479,10 @@ impl Rpc {
                         RequestTypeSpecific::GetValue(args) => args.salt,
                         _ => None,
                     };
-                    let target = query.target;
+                    let target = query.target();
 
                     if let Ok(item) = MutableItem::from_dht_message(
-                        &query.target,
+                        &query.target(),
                         k,
                         v.to_owned().into(),
                         seq,
@@ -518,7 +518,7 @@ impl Rpc {
                     },
                 )) => {
                     debug!(
-                        target= ?query.target,
+                        target= ?query.target(),
                         salt= ?match query.request.request_type.clone() {
                             RequestTypeSpecific::GetValue(args) => args.salt,
                             _ => None,
@@ -540,7 +540,7 @@ impl Rpc {
                     ..
                 })) => {
                     debug!(
-                        target= ?query.target,
+                        target= ?query.target(),
                         salt= ?match query.request.request_type.clone() {
                             RequestTypeSpecific::GetValue(args) => args.salt,
                             _ => None,
