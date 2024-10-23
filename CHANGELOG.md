@@ -8,7 +8,7 @@ All notable changes to mainline dht will be documented in this file.
 
 - Export `errors` module containing `PutError` as a part of the response of `Rpc::put`.
 - `Dht::id()` and `AsyncDht::id()` to get the node's Id.
-- `Dht::find_node()` and `AsyncDht::find_node()` to lookup a certain target, without calling `get_peers` and return a routing table of the responding nodes.
+- `Dht::find_node()` and `AsyncDht::find_node()` to lookup a certain target, without calling `get_peers` and the closest responding nodes.
 - `Dht::info()` and `AsyncDht::info()` some internal information about the node from one method.
 - `Info::dht_size_estimate` to get the ongoing dht size estimate resulting from watching results of all queries.
 - `measure_dht` example to estimate the DHT size.

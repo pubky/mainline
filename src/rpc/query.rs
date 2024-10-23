@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
 
-use super::socket::KrpcSocket;
+use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
     common::{
         ErrorSpecific, Id, Node, PutRequest, PutRequestSpecific, RequestSpecific,
@@ -23,7 +23,7 @@ pub struct Query {
     pub target: Id,
     pub request: RequestSpecific,
     candidates: RoutingTable,
-    responders: RoutingTable,
+    closest_nodes: ClosestNodes,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
@@ -39,7 +39,7 @@ impl Query {
             request,
 
             candidates: RoutingTable::new().with_id(target),
-            responders: RoutingTable::new().with_id(target),
+            closest_nodes: ClosestNodes::new(target),
 
             inflight_requests: Vec::with_capacity(200),
             visited: HashSet::with_capacity(200),
@@ -52,8 +52,8 @@ impl Query {
     // === Getters ===
 
     /// Return the closest responding nodes after the query is done.
-    pub fn closest(&self) -> Vec<Node> {
-        self.responders.closest(&self.target)
+    pub fn closest_nodes(&self) -> &ClosestNodes {
+        &self.closest_nodes
     }
 
     // === Public Methods ===
@@ -97,7 +97,7 @@ impl Query {
 
     /// Add a node that responded with a token as a probable storage node.
     pub fn add_responding_node(&mut self, node: Node) {
-        self.responders.add(node.clone());
+        self.closest_nodes.add(node)
     }
 
     /// Add received response
@@ -130,7 +130,7 @@ impl Query {
         if done {
             for sender in &self.senders {
                 if let ResponseSender::ClosestNodes(s) = sender {
-                    let _ = s.send(self.responders.to_owned());
+                    let _ = s.send(self.closest_nodes.nodes().to_owned());
                 }
             }
         };
@@ -192,7 +192,7 @@ impl PutQuery {
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Vec<Node>) {
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Node]) {
         // Already started.
         if !self.inflight_requests.is_empty() {
             panic!("should not call PutQuery.start() twice");

@@ -1,5 +1,6 @@
 //! K-RPC implementatioStoreQueryMetdatan
 
+mod closest_nodes;
 mod query;
 mod socket;
 
@@ -14,11 +15,10 @@ use lru::LruCache;
 use tracing::{debug, error, info};
 
 use crate::common::{
-    estimate_dht_size, validate_immutable, ErrorSpecific, FindNodeRequestArguments,
-    GetImmutableResponseArguments, GetMutableResponseArguments, GetPeersResponseArguments,
-    GetValueRequestArguments, Id, Message, MessageType, MutableItem,
-    NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node, PutRequestSpecific,
-    RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
+    validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
+    GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
+    MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
+    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
 use crate::dht::Settings;
@@ -26,6 +26,7 @@ use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
+pub use closest_nodes::ClosestNodes;
 pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
@@ -63,7 +64,7 @@ pub struct Rpc {
     /// Last time we pinged nodes in the routing table.
     last_table_ping: Instant,
     /// Closest nodes to specific target
-    closest_nodes: LruCache<Id, Vec<Node>>,
+    closest_nodes: LruCache<Id, ClosestNodes>,
 
     // Active Queries
     queries: HashMap<Id, Query>,
@@ -156,7 +157,6 @@ impl Rpc {
     pub fn tick(&mut self) -> RpcTickReport {
         // === Tick Queries ===
 
-        let mut closest_nodes = Vec::with_capacity(self.queries.len());
         let mut done_get_queries = Vec::with_capacity(self.queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
@@ -175,10 +175,10 @@ impl Rpc {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
-                let closest = query.closest();
+                let closest_nodes = query.closest_nodes();
 
                 // Calculate moving average
-                let estimate = estimate_dht_size(query.target, &closest) as i32;
+                let estimate = closest_nodes.dht_size_estimate() as i32;
                 self.dht_size_estimate_samples =
                     (self.dht_size_estimate_samples + 1).min(DHT_SIZE_ESTIMATE_WINDOW);
 
@@ -188,10 +188,10 @@ impl Rpc {
                     + (estimate - self.dht_size_estimate) / self.dht_size_estimate_samples;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
-                    put_query.start(&mut self.socket, closest.clone())
+                    put_query.start(&mut self.socket, closest_nodes.nodes())
                 }
 
-                closest_nodes.push((*id, closest));
+                self.closest_nodes.put(*id, closest_nodes.clone());
                 done_get_queries.push(*id);
 
                 if id == &self_id && table_size == 0 {
@@ -200,9 +200,6 @@ impl Rpc {
                     debug!(table_size, "Populated the routing table");
                 };
             };
-        }
-        for (id, nodes) in closest_nodes {
-            self.closest_nodes.put(id, nodes);
         }
 
         // === Remove done queries ===
@@ -293,9 +290,9 @@ impl Rpc {
         if let Some(closest_nodes) = self
             .closest_nodes
             .get(&target)
-            .filter(|nodes| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
+            .filter(|nodes| !nodes.is_empty() && nodes.into_iter().any(|n| n.valid_token()))
         {
-            query.start(&mut self.socket, closest_nodes.to_vec())
+            query.start(&mut self.socket, closest_nodes.nodes())
         } else {
             let salt = match request {
                 PutRequestSpecific::PutMutable(args) => args.salt,
@@ -685,7 +682,7 @@ pub enum Response {
 
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
-    ClosestNodes(Sender<RoutingTable>),
+    ClosestNodes(Sender<Vec<Node>>),
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),

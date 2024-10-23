@@ -6,9 +6,9 @@ use std::net::SocketAddr;
 use crate::{
     common::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
-        GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
+        GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-        RequestTypeSpecific, RoutingTable,
+        RequestTypeSpecific,
     },
     dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info},
     rpc::{PutError, ResponseSender},
@@ -52,8 +52,8 @@ impl AsyncDht {
 
     // === Find nodes ===
 
-    pub async fn find_node(&self, target: Id) -> Result<RoutingTable, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+    pub async fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 
         let request = RequestTypeSpecific::FindNode(FindNodeRequestArguments { target });
 

@@ -12,10 +12,11 @@ use crate::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-        RequestTypeSpecific, RoutingTable,
+        RequestTypeSpecific,
     },
     rpc::{PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
     server::{DefaultServer, Server},
+    Node,
 };
 
 #[derive(Debug, Clone)]
@@ -148,8 +149,8 @@ impl Dht {
 
     // === Find nodes ===
 
-    pub fn find_node(&self, target: Id) -> Result<RoutingTable, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<RoutingTable>(1);
+    pub fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 
         let request = RequestTypeSpecific::FindNode(FindNodeRequestArguments { target });
 

@@ -13,10 +13,10 @@ pub mod async_dht;
 pub mod rpc;
 pub mod server;
 
-pub use crate::common::{Id, KBucket, MutableItem, Node, RoutingTable};
-pub use bytes::Bytes;
+pub use crate::common::{Id, MutableItem, Node};
 pub use dht::{Dht, Settings, Testnet};
 
+pub use bytes::Bytes;
 pub use ed25519_dalek::SigningKey;
 
 pub mod errors {
