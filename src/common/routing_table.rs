@@ -213,11 +213,8 @@ pub(crate) fn estimate_dht_size(target: Id, nodes: &[Node]) -> usize {
     for node in nodes {
         let xor = target.xor(&node.id);
 
-        let di =
-                    // Round up to the highest u128 and ignore the low part
-                    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"))
-                    // Round up to 1 to avoid dividing by zero
-                        .max(1);
+        // Round up the lower 4 bytes to get a u128 from u160.
+        let di = u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) + 1;
 
         // The inverse of the probability of finding (i) nodes at distance (di)
         let estimated_n = i.saturating_mul((u128::MAX / di) as usize);
