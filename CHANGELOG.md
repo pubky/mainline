@@ -27,6 +27,7 @@ All notable changes to mainline dht will be documented in this file.
 - `InvalidIdSize` error is a standalone error.
 - Rename `DhtSettings` to `Settings`
 - Rename `DhtServer` to `DefaultServer`
+- `Dht::get_immutable()` and `AsyncDht::get_immutable()` return `Result<Option<bytes::Bytes>, DhtWasShutdown>`
 
 ### Removed
 

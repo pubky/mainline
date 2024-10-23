@@ -233,7 +233,7 @@ impl Dht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Result<Bytes, DhtWasShutdown> {
+    pub fn get_immutable(&self, target: Id) -> Result<Option<Bytes>, DhtWasShutdown> {
         let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -250,9 +250,7 @@ impl Dht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver
-            .recv()
-            .expect("Query was dropped before sending a response, please open an issue."))
+        Ok(receiver.recv().map(|b| Some(b)).unwrap_or(None))
     }
 
     /// Put an immutable data to the DHT.
@@ -515,8 +513,23 @@ mod test {
         let target = a.put_immutable(value.clone()).unwrap();
         assert_eq!(target, expected_target);
 
-        let response = b.get_immutable(target).unwrap();
+        let response = b.get_immutable(target).unwrap().unwrap();
+
         assert_eq!(response, value);
+    }
+
+    #[test]
+    fn find_node_no_values() {
+        let client = Dht::builder().bootstrap(&vec![]).build().unwrap();
+
+        client.find_node(Id::random()).unwrap();
+    }
+
+    #[test]
+    fn put_get_immutable_no_values() {
+        let client = Dht::builder().bootstrap(&vec![]).build().unwrap();
+
+        assert_eq!(client.get_immutable(Id::random()).unwrap(), None);
     }
 
     #[test]

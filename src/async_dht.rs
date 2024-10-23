@@ -141,7 +141,7 @@ impl AsyncDht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub async fn get_immutable(&self, target: Id) -> Result<Bytes, DhtWasShutdown> {
+    pub async fn get_immutable(&self, target: Id) -> Result<Option<Bytes>, DhtWasShutdown> {
         let (sender, receiver) = flume::unbounded::<Bytes>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -159,10 +159,7 @@ impl AsyncDht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver
-            .recv_async()
-            .await
-            .expect("Query was dropped before sending a response, please open an issue."))
+        Ok(receiver.recv_async().await.map(|b| Some(b)).unwrap_or(None))
     }
 
     /// Put an immutable data to the DHT.
@@ -327,7 +324,7 @@ mod test {
             assert_eq!(target, expected_target);
 
             let response = b.get_immutable(target).await.unwrap();
-            assert_eq!(response, value);
+            assert_eq!(response, Some(value));
         }
 
         futures::executor::block_on(test());
