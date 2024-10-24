@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use clap::Parser;
 use mainline::{Dht, Id};
 use tracing::Level;
@@ -20,14 +18,12 @@ fn main() {
 
     println!("Calculating Dht size by sampling random lookup queries within the past hour..",);
 
-    let start = Instant::now();
-
-    loop {
+    for lookups in 0..2000 {
         let _ = dht.find_node(Id::random()).unwrap();
 
         println!(
-            "Dht size esttimate after {} seconds: {} nodes",
-            start.elapsed().as_secs(),
+            "Dht size esttimate after {} lookups: {} nodes",
+            lookups,
             format_number(dht.info().unwrap().dht_size_estimate)
         );
     }

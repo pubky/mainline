@@ -2,7 +2,12 @@ use std::{convert::TryInto, vec::IntoIter};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
+const CORRECTION_FACTOR: f64 = 1.26;
+
 #[derive(Debug, Clone)]
+/// Manage closest nodes found in a query.
+///
+/// Useful to estimate the Dht size.
 pub struct ClosestNodes {
     target: Id,
     nodes: Vec<Node>,
@@ -50,79 +55,29 @@ impl ClosestNodes {
     /// An estimation of the Dht from the distribution of closest nodes
     /// responding to a query.
     ///
-    /// In order to get an accurate calculation of the Dht size, you should take
-    /// as many lookups (at uniformly disrtibuted target) as you can,
-    /// and calculate the average of the estimations based on their responding nodes.
-    ///
-    /// # Explanation
-    ///
-    /// Consider a Dht with a 4 bit key space.
-    /// Then we can map nodes in that keyspace by their distance to a given target of a lookup.
-    ///
-    /// Assuming a random but uniform distribution of nodes (which can be measured independently),
-    /// you should see nodes distributed somewhat like this:
-    ///
-    /// ```md
-    ///              (1)    (2)                  (3)    (4)           (5)           (6)           (7)      (8)       
-    /// |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
-    /// 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
-    /// ```
-    ///
-    /// So if you make a lookup and optained this partial view of the network:
-    /// ```md
-    ///              (1)    (2)                  (3)                                (4)                  (5)       
-    /// |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
-    /// 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
-    /// ```
-    ///
-    /// Note: you see exponentially less further nodes than closer ones, which is what you should expect from how
-    /// the routing table works.
-    ///
-    /// Seeing one node at distance (d1=2), suggests that the routing table might contain 8 nodes,
-    /// since its full length is 8 times (d1).
-    ///
-    /// Similarily, seeing two nodes at (d2=3), suggests that the routing table might contain ~11
-    /// nodes, since the key space is more than (d2).
-    ///
-    /// If we repeat this estimation for as many nodes as the routing table's `k` bucket size,
-    /// and take their average, we get a more accurate estimation of the dht.
-    ///
-    /// ## Formula
-    ///
-    /// The estimated number of Dht size, at each distance `di`, is `en_i = i * d_max / di` where `i` is the
-    /// count of nodes discovered until this distance and `d_max` is the size of the key space.
-    ///
-    /// The final Dht size estimation is the average of `en_1 + en_2 + .. + en_n`
-    ///
-    /// Read more at [A New Method for Estimating P2P Network Size](https://eli.sohl.com/2020/06/05/dht-size-estimation.html#fnref:query-count)
+    /// [Read more](../../docs/dht_size_estimate/README.md)
     pub fn dht_size_estimate(&self) -> usize {
         if self.is_empty() {
             return 0;
         };
 
-        let mut sum: usize = 0;
-        let mut count = 0;
+        let sum = self.nodes.iter().take(20).enumerate().fold(
+            0,
+            |sum: usize, (i, node): (usize, &Node)| {
+                let xor = node.id.xor(&self.target);
 
-        for node in &self.nodes {
-            if count >= MAX_BUCKET_SIZE_K {
-                break;
-            }
+                // Round up the lower 4 bytes to get a u128 from u160.
+                let distance =
+                    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"));
 
-            count += 1;
+                let intervals = (u128::MAX / distance) as usize;
+                let estimated_n = intervals.saturating_mul(i);
 
-            let xor = node.id.xor(&self.target);
+                sum + estimated_n as usize
+            },
+        );
 
-            // Round up the lower 4 bytes to get a u128 from u160.
-            let distance =
-                u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) + 1;
-
-            let intervals = (u128::MAX / distance) as usize;
-            let estimated_n = intervals.saturating_mul(count);
-
-            sum = sum.saturating_add(estimated_n);
-        }
-
-        (sum / count) as usize
+        (CORRECTION_FACTOR * (sum / self.nodes.len().max(MAX_BUCKET_SIZE_K)) as f64) as usize
     }
 }
 
@@ -178,8 +133,8 @@ mod tests {
 
     #[test]
     fn simulation() {
-        let lookups = 10;
-        let acceptable_margin = 0.6;
+        let lookups = 100;
+        let acceptable_margin = 0.1;
 
         let tests = [2500, 25000, 250000];
 
@@ -188,38 +143,36 @@ mod tests {
 
             let margin = (estimate - (dht_size as f64)).abs() / dht_size as f64;
 
+            dbg!(margin);
             assert!(margin <= acceptable_margin);
         }
     }
 
     fn simulate(dht_size: usize, lookups: usize) -> usize {
         let mut nodes = BTreeMap::new();
-
-        // Bootstrap
         for _ in 0..dht_size {
             let node = Node::random();
             nodes.insert(node.id, node);
         }
 
-        let mut estimates = vec![];
+        (0..lookups)
+            .map(|_| {
+                let target = Id::random();
 
-        for _ in 0..lookups.min(dht_size) {
-            let target = Id::random();
+                let mut closest_nodes = ClosestNodes::new(target);
 
-            let mut closest_nodes = ClosestNodes::new(target);
+                for (_, node) in nodes.range(target..).take(10) {
+                    closest_nodes.add(node.clone())
+                }
+                for (_, node) in nodes.range(..target).rev().take(10) {
+                    closest_nodes.add(node.clone())
+                }
 
-            for (_, node) in nodes.range(target..).take(20) {
-                closest_nodes.add(node.clone());
-            }
-            for (_, node) in nodes.range(target..).rev().take(20) {
-                closest_nodes.add(node.clone());
-            }
+                let estimate = closest_nodes.dht_size_estimate();
 
-            let estimate = closest_nodes.dht_size_estimate();
-
-            estimates.push(estimate)
-        }
-
-        estimates.iter().sum::<usize>() / estimates.len()
+                estimate
+            })
+            .sum::<usize>()
+            / lookups
     }
 }

@@ -44,7 +44,6 @@ impl Node {
     }
 
     /// Creates a random node for testing purposes.
-    #[cfg(test)]
     pub fn random() -> Node {
         Node {
             id: Id::random(),
