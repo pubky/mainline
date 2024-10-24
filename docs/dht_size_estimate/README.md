@@ -1,5 +1,16 @@
 # Dht Size Estimattion
 
+This is a documentation for the Dht size estimation used in this Mainline Dht implementation,
+within the context of [Censorship Resistance](../censorship-resistance.md).
+
+If you want to see a live estimation of the Dht size, you can run (in the root directory):
+
+```
+cargo run -- example measure_dht
+```
+
+## How does it work?
+
 In order to get an accurate calculation of the Dht size, you should take
 as many lookups (at uniformly disrtibuted target) as you can,
 and calculate the average of the estimations based on their responding nodes.
