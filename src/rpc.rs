@@ -1,5 +1,6 @@
 //! K-RPC implementatioStoreQueryMetdatan
 
+mod closest_nodes;
 mod query;
 mod socket;
 
@@ -20,12 +21,13 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
-use crate::error::SocketAddrResult;
-use crate::{dht::DhtSettings, Error, Result};
+use crate::dht::Settings;
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
+pub use closest_nodes::ClosestNodes;
+pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
@@ -40,6 +42,10 @@ const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 const MAX_CACHED_BUCKETS: usize = 1000;
+
+// If you are making a FIND_NODE requests subsequentially,
+// you can expect the oldest sample to be an hour ago.
+const DHT_SIZE_ESTIMATE_WINDOW: i32 = 1024;
 
 #[derive(Debug)]
 /// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
@@ -58,18 +64,22 @@ pub struct Rpc {
     /// Last time we pinged nodes in the routing table.
     last_table_ping: Instant,
     /// Closest nodes to specific target
-    closest_nodes: LruCache<Id, Vec<Node>>,
+    closest_nodes: LruCache<Id, ClosestNodes>,
 
     // Active Queries
     queries: HashMap<Id, Query>,
     /// Put queries are special, since they have to wait for a corresponing
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
+
+    /// Moving average of the estimated dht size from the lookups within a [DHT_SIZE_ESTIMATE_WINDOW]
+    dht_size_estimate: i32,
+    dht_size_estimate_samples: i32,
 }
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(settings: &DhtSettings) -> Result<Self> {
+    pub fn new(settings: &Settings) -> Result<Self, std::io::Error> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
@@ -104,6 +114,9 @@ impl Rpc {
                 .checked_sub(REFRESH_TABLE_INTERVAL)
                 .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
+
+            dht_size_estimate: 0,
+            dht_size_estimate_samples: 0,
         })
     }
 
@@ -124,12 +137,16 @@ impl Rpc {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddrResult {
+    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
         self.socket.local_addr()
     }
 
-    pub(crate) fn routing_table(&self) -> &RoutingTable {
+    pub fn routing_table(&self) -> &RoutingTable {
         &self.routing_table
+    }
+
+    pub fn dht_size_estimate(&self) -> usize {
+        self.dht_size_estimate as usize
     }
 
     // === Public Methods ===
@@ -140,7 +157,8 @@ impl Rpc {
     pub fn tick(&mut self) -> RpcTickReport {
         // === Tick Queries ===
 
-        let mut done_put_queries = Vec::with_capacity(self.queries.len());
+        let mut done_get_queries = Vec::with_capacity(self.queries.len());
+        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
             let done = query.tick(&mut self.socket);
@@ -153,21 +171,27 @@ impl Rpc {
         let self_id = self.id;
         let table_size = self.routing_table.size();
 
-        let mut closest_nodes = Vec::with_capacity(self.queries.len());
-        let mut done_get_queries = Vec::with_capacity(self.queries.len());
-        // let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
-
         for (id, query) in self.queries.iter_mut() {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
-                let closest = query.closest();
+                let closest_nodes = query.closest_nodes();
+
+                // Calculate moving average
+                let estimate = closest_nodes.dht_size_estimate() as i32;
+                self.dht_size_estimate_samples =
+                    (self.dht_size_estimate_samples + 1).min(DHT_SIZE_ESTIMATE_WINDOW);
+
+                // TODO: warn if a Horizontal Sybil attack is deteceted.
+
+                self.dht_size_estimate = self.dht_size_estimate
+                    + (estimate - self.dht_size_estimate) / self.dht_size_estimate_samples;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
-                    put_query.start(&mut self.socket, closest.clone())
+                    put_query.start(&mut self.socket, closest_nodes.nodes())
                 }
 
-                closest_nodes.push((*id, closest));
+                self.closest_nodes.put(*id, closest_nodes.clone());
                 done_get_queries.push(*id);
 
                 if id == &self_id && table_size == 0 {
@@ -176,9 +200,6 @@ impl Rpc {
                     debug!(table_size, "Populated the routing table");
                 };
             };
-        }
-        for (id, nodes) in closest_nodes {
-            self.closest_nodes.put(id, nodes);
         }
 
         // === Remove done queries ===
@@ -252,11 +273,11 @@ impl Rpc {
         &mut self,
         target: Id,
         request: PutRequestSpecific,
-        sender: Option<Sender<PutResult>>,
+        sender: Option<Sender<Result<Id, PutError>>>,
     ) {
         if self.put_queries.contains_key(&target) {
             if let Some(sender) = sender {
-                let _ = sender.send(Err(Error::PutQueryIsInflight(target)));
+                let _ = sender.send(Err(PutError::PutQueryIsInflight(target)));
             };
 
             debug!(?target, "Put query for the same target is already inflight");
@@ -269,9 +290,9 @@ impl Rpc {
         if let Some(closest_nodes) = self
             .closest_nodes
             .get(&target)
-            .filter(|nodes| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
+            .filter(|nodes| !nodes.is_empty() && nodes.into_iter().any(|n| n.valid_token()))
         {
-            query.start(&mut self.socket, closest_nodes.to_vec())
+            query.start(&mut self.socket, closest_nodes.nodes())
         } else {
             let salt = match request {
                 PutRequestSpecific::PutMutable(args) => args.salt,
@@ -405,9 +426,12 @@ impl Rpc {
 
             if let Some((responder_id, token)) = message.get_token() {
                 query.add_responding_node(Node::new(responder_id, from).with_token(token.clone()));
+            } else if let Some(responder_id) = message.get_author_id() {
+                // update responding nodes even for FIND_NODE queries.
+                query.add_responding_node(Node::new(responder_id, from));
             }
 
-            let target = query.target;
+            let target = query.target();
 
             match &message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
@@ -427,7 +451,7 @@ impl Rpc {
                         v, responder_id, ..
                     },
                 )) => {
-                    if validate_immutable(v, &query.target) {
+                    if validate_immutable(v, &query.target()) {
                         let response = Response::Immutable(v.to_owned().into());
 
                         query.response(from, response.to_owned());
@@ -438,7 +462,7 @@ impl Rpc {
                         });
                     }
 
-                    let target = query.target;
+                    let target = query.target();
                     debug!(?v, ?target, ?responder_id, ?from, from_version = ?message.version, "Invalid immutable value");
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
@@ -455,10 +479,10 @@ impl Rpc {
                         RequestTypeSpecific::GetValue(args) => args.salt,
                         _ => None,
                     };
-                    let target = query.target;
+                    let target = query.target();
 
                     if let Ok(item) = MutableItem::from_dht_message(
-                        &query.target,
+                        &query.target(),
                         k,
                         v.to_owned().into(),
                         seq,
@@ -494,7 +518,7 @@ impl Rpc {
                     },
                 )) => {
                     debug!(
-                        target= ?query.target,
+                        target= ?query.target(),
                         salt= ?match query.request.request_type.clone() {
                             RequestTypeSpecific::GetValue(args) => args.salt,
                             _ => None,
@@ -516,7 +540,7 @@ impl Rpc {
                     ..
                 })) => {
                     debug!(
-                        target= ?query.target,
+                        target= ?query.target(),
                         salt= ?match query.request.request_type.clone() {
                             RequestTypeSpecific::GetValue(args) => args.salt,
                             _ => None,
@@ -558,6 +582,15 @@ impl Rpc {
         if self.routing_table.is_empty()
             && self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL
         {
+            // Make a random query, to help the dht size estimation.
+            let target = Id::random();
+            self.get(
+                target,
+                RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }),
+                None,
+                None,
+            );
+
             self.last_table_refresh = Instant::now();
             self.populate();
         }
@@ -595,6 +628,12 @@ impl Rpc {
                 request_type: RequestTypeSpecific::Ping,
             },
         );
+    }
+}
+
+impl Drop for Rpc {
+    fn drop(&mut self) {
+        debug!("Dropped Mainline::Rpc");
     }
 }
 
@@ -652,11 +691,8 @@ pub enum Response {
 
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
+    ClosestNodes(Sender<Vec<Node>>),
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),
 }
-
-/// Returns the info_hash or target of the operation.
-/// Useful for put_immutable.
-pub type PutResult = Result<Id>;

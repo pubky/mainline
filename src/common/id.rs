@@ -8,8 +8,6 @@ use std::{
     str::FromStr,
 };
 
-use crate::{Error, Result};
-
 /// The size of node IDs in bits.
 pub const ID_SIZE: usize = 20;
 pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
@@ -19,28 +17,28 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 #[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash)]
 /// Kademlia node Id or a lookup target
-pub struct Id {
-    pub bytes: [u8; ID_SIZE],
-}
+pub struct Id([u8; ID_SIZE]);
 
 impl Id {
+    /// Generate a random Id
     pub fn random() -> Id {
         let mut rng = rand::thread_rng();
         let bytes: [u8; 20] = rng.gen();
 
-        Id { bytes }
+        Id(bytes)
     }
+
     /// Create a new Id from some bytes. Returns Err if the input is not 20 bytes long.
-    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id> {
+    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Id, InvalidIdSize> {
         let bytes = bytes.as_ref();
         if bytes.len() != ID_SIZE {
-            return Err(Error::InvalidIdSize(bytes.len()));
+            return Err(InvalidIdSize(bytes.len()));
         }
 
         let mut tmp: [u8; ID_SIZE] = [0; ID_SIZE];
         tmp[..ID_SIZE].clone_from_slice(&bytes[..ID_SIZE]);
 
-        Ok(Id { bytes: tmp })
+        Ok(Id(tmp))
     }
 
     /// Simplified XOR distance between this Id and a target Id.
@@ -51,20 +49,38 @@ impl Id {
     /// Distance to the furthest Id is 160
     /// Distance to an Id with 5 leading matching bits is 155
     pub fn distance(&self, other: &Id) -> u8 {
-        for (i, (a, b)) in self.bytes.iter().zip(other.bytes).enumerate() {
-            if a != &b {
-                // leading zeros so far + laedinge zeros of this byte
-                let leading_zeros = (i as u32 * 8 + (a ^ b).leading_zeros()) as u8;
+        MAX_DISTANCE - self.xor(other).leading_zeros()
+    }
 
-                return MAX_DISTANCE - leading_zeros;
+    /// Returns the number of leading zeros in the binary representation of `self`.
+    pub fn leading_zeros(&self) -> u8 {
+        for (i, byte) in self.0.iter().enumerate() {
+            if *byte != 0 {
+                // leading zeros so far + laedinge zeros of this byte
+                return (i as u32 * 8 + byte.leading_zeros()) as u8;
             }
         }
 
-        0
+        160
     }
 
-    pub fn to_vec(self) -> Vec<u8> {
-        self.bytes.to_vec()
+    /// Performs bitwise XOR between two Ids
+    pub fn xor(&self, other: &Id) -> Id {
+        let mut result = [0_u8; 20];
+
+        for (i, (a, b)) in self.0.iter().zip(other.0).enumerate() {
+            result[i] = a ^ b;
+        }
+
+        result.into()
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 20] {
+        &self.0
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
     }
 
     /// Create a new Id according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
@@ -90,8 +106,8 @@ impl Id {
                     return true;
                 }
 
-                let expected = first_21_bits(&id_prefix_ipv4(ipv4, self.bytes[ID_SIZE - 1]));
-                let actual = first_21_bits(&self.bytes);
+                let expected = first_21_bits(&id_prefix_ipv4(ipv4, self.0[ID_SIZE - 1]));
+                let actual = first_21_bits(&self.0);
 
                 expected == actual
             }
@@ -118,22 +134,22 @@ fn from_ipv4_and_r(bytes: [u8; 20], ip: Ipv4Addr, r: u8) -> Id {
     // Set first 21 bits to the prefix
     bytes[0] = prefix[0];
     bytes[1] = prefix[1];
-    // set the first 5 bits of the 3 byte to the remaining 5 bits of the prefix
+    // set the first 5 bits of the 3rd byte to the remaining 5 bits of the prefix
     bytes[2] = (prefix[2] & 0xf8) | (bytes[2] & 0x7);
 
     // Set the last byte to the random r
     bytes[ID_SIZE - 1] = r;
 
-    Id { bytes }
+    Id(bytes)
 }
 
 fn id_prefix_ipv4(ip: &Ipv4Addr, r: u8) -> [u8; 3] {
     let r32: u32 = r.into();
     let ip_int: u32 = u32::from_be_bytes(ip.octets());
-    let nonsense: u32 = (ip_int & IPV4_MASK) | (r32 << 29);
+    let masked_ip: u32 = (ip_int & IPV4_MASK) | (r32 << 29);
 
     let mut digest = CASTAGNOLI.digest();
-    digest.update(&nonsense.to_be_bytes());
+    digest.update(&masked_ip.to_be_bytes());
 
     let crc = digest.finalize();
 
@@ -145,11 +161,7 @@ fn id_prefix_ipv4(ip: &Ipv4Addr, r: u8) -> [u8; 3] {
 impl Display for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         #[allow(clippy::format_collect)]
-        let hex_chars: String = self
-            .bytes
-            .iter()
-            .map(|byte| format!("{:02x}", byte))
-            .collect();
+        let hex_chars: String = self.0.iter().map(|byte| format!("{:02x}", byte)).collect();
 
         write!(f, "{}", hex_chars)
     }
@@ -157,18 +169,28 @@ impl Display for Id {
 
 impl From<[u8; ID_SIZE]> for Id {
     fn from(bytes: [u8; ID_SIZE]) -> Id {
-        Id { bytes }
+        Id(bytes)
+    }
+}
+
+impl From<&[u8; ID_SIZE]> for Id {
+    fn from(bytes: &[u8; ID_SIZE]) -> Id {
+        Id(*bytes)
+    }
+}
+
+impl From<Id> for [u8; ID_SIZE] {
+    fn from(value: Id) -> Self {
+        value.0
     }
 }
 
 impl FromStr for Id {
-    type Err = Error;
+    type Err = DecodeIdError;
 
-    fn from_str(s: &str) -> Result<Id> {
+    fn from_str(s: &str) -> Result<Id, DecodeIdError> {
         if s.len() % 2 != 0 {
-            return Err(Error::InvalidIdEncoding(
-                "Number of Hex characters should be even".into(),
-            ));
+            return Err(DecodeIdError::OddNumberOfCharacters);
         }
 
         let mut bytes = Vec::with_capacity(s.len() / 2);
@@ -178,11 +200,11 @@ impl FromStr for Id {
             if let Ok(byte) = u8::from_str_radix(byte_str, 16) {
                 bytes.push(byte);
             } else {
-                return Err(Error::Static("Invalid hex character")); // Invalid hex character
+                return Err(DecodeIdError::InvalidHexCharacter(byte_str.into()));
             }
         }
 
-        Id::from_bytes(bytes)
+        Ok(Id::from_bytes(bytes)?)
     }
 }
 
@@ -190,6 +212,32 @@ impl Debug for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "Id({})", self)
     }
+}
+
+#[derive(Debug)]
+pub struct InvalidIdSize(usize);
+
+impl std::error::Error for InvalidIdSize {}
+
+impl std::fmt::Display for InvalidIdSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Invalid Id size, expected 20, got {0}", self.0)
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Mainline crate error enum.
+pub enum DecodeIdError {
+    /// Id is expected to by 20 bytes.
+    #[error(transparent)]
+    InvalidIdSize(#[from] InvalidIdSize),
+
+    #[error("Hex encoding should contain an even number of hex characters")]
+    OddNumberOfCharacters,
+
+    /// Invalid hex character
+    #[error("Invalid Id encoding: {0}")]
+    InvalidHexCharacter(String),
 }
 
 #[cfg(test)]
@@ -229,7 +277,7 @@ mod test {
         let id = Id::random();
 
         let mut opposite = [0_u8; 20];
-        for (i, &value) in id.bytes.iter().enumerate() {
+        for (i, &value) in id.as_bytes().iter().enumerate() {
             opposite[i] = value ^ 0xff;
         }
         let target = Id::from_bytes(opposite).unwrap();
@@ -245,7 +293,7 @@ mod test {
 
         let id: Id = bytes.into();
 
-        assert_eq!(id.bytes, bytes);
+        assert_eq!(*id.as_bytes(), bytes);
     }
 
     #[test]
@@ -264,11 +312,11 @@ mod test {
 
         fn test(ip: Ipv4Addr, r: u8, expected_prefix: [u8; 3]) {
             let id = Id::random();
-            let result = from_ipv4_and_r(id.bytes, ip, r);
-            let prefix = first_21_bits(&result.bytes);
+            let result = from_ipv4_and_r(*id.as_bytes(), ip, r);
+            let prefix = first_21_bits(result.as_bytes());
 
             assert_eq!(prefix, first_21_bits(&expected_prefix));
-            assert_eq!(result.bytes[ID_SIZE - 1], r);
+            assert_eq!(result.as_bytes()[ID_SIZE - 1], r);
         }
     }
 

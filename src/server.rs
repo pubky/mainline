@@ -50,7 +50,7 @@ pub trait Server: std::fmt::Debug + Send + Sync {
 /// Supports [BEP0005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
 ///
 /// But it doesn't implement any rate-limiting or blocking.
-pub struct DhtServer {
+pub struct DefaultServer {
     tokens: Tokens,
     // server storage
     peers: PeersStore,
@@ -59,14 +59,14 @@ pub struct DhtServer {
     mutable_values: LruCache<Id, MutableItem>,
 }
 
-impl Default for DhtServer {
+impl Default for DefaultServer {
     fn default() -> Self {
-        DhtServer::new(&DhtServerSettings::default())
+        DefaultServer::new(&DefaultServerSettings::default())
     }
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DhtServerSettings {
+pub struct DefaultServerSettings {
     /// The maximum info_hashes for which to store peers.
     ///
     /// Defaults to [MAX_INFO_HASHES]
@@ -85,8 +85,8 @@ pub struct DhtServerSettings {
     pub max_mutable_values: usize,
 }
 
-impl DhtServer {
-    pub fn new(settings: &DhtServerSettings) -> Self {
+impl DefaultServer {
+    pub fn new(settings: &DefaultServerSettings) -> Self {
         let tokens = Tokens::new();
 
         Self {
@@ -158,7 +158,7 @@ impl DhtServer {
     }
 }
 
-impl Server for DhtServer {
+impl Server for DefaultServer {
     /// Handle incoming request.
     fn handle_request(
         &mut self,
