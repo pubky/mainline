@@ -62,6 +62,15 @@ Running this [simulation](./src/main.rs) for 25 million nodes and a after 25 loo
 
 ![dht-25-million-nodes-25-lookup](./plot.png)
 
+## Limitations
+
+Unlike the simulation above, real networks are not perfect, meaning there is an error factor that can't be hard coded,
+as it depends on the response rate of nodes you query, the more requests timeout before you get a response, the more nodes
+you will miss, and the smaller you will think the Dht is.
+
+However, this is an error on the side of conservatism. And I can't think of anything in the real world that could distort the results
+expected from this simulation to the direction of overestimating the Dht size.
+
 ## Acknowledgment
 
 This size estimation was based on [A New Method for Estimating P2P Network Size](https://eli.sohl.com/2020/06/05/dht-size-estimation.html#fnref:query-count)
