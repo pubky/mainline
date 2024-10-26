@@ -57,7 +57,7 @@ The final Dht size estimation is the average of `en_1 + en_2 + .. + en_n`
 
 Running this [simulation](./src/main.rs) for 20 million nodes and a after 12 lookups, we observe:
 
-- Mean estimate: 2,004,408 nodes 
+- Mean estimate: 1,998,382 nodes 
 - Standard deviation: 10%
 
 Meaning that after 12 lookups, you can be confident you are not overestimating the Dht size by more than 10%,

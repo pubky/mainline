@@ -2,8 +2,6 @@ use std::{convert::TryInto, vec::IntoIter};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
-const CORRECTION_FACTOR: f64 = 1.0544;
-
 #[derive(Debug, Clone)]
 /// Manage closest nodes found in a query.
 ///
@@ -61,25 +59,31 @@ impl ClosestNodes {
             return 0;
         };
 
-        let sum = self.nodes.iter().take(20).enumerate().fold(
-            0,
-            |sum: usize, (i, node): (usize, &Node)| {
-                let xor = node.id.xor(&self.target);
+        let mut sum = 0;
+        let mut count = 0;
 
-                // Round up the lower 4 bytes to get a u128 from u160.
-                let distance =
-                    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"));
+        // Ignoring the first node, as that gives the best result in simulations.
+        for node in &self.nodes[1..] {
+            count += 1;
 
-                let intervals = (u128::MAX / distance) as usize;
-                let estimated_n = intervals.saturating_mul(i);
+            let xor = node.id.xor(&self.target);
 
-                sum + estimated_n as usize
-            },
-        );
+            // Round up the lower 4 bytes to get a u128 from u160.
+            let distance =
+                u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"));
 
-        let count = MAX_BUCKET_SIZE_K.min(self.nodes.len());
+            let intervals = (u128::MAX / distance) as usize;
 
-        (CORRECTION_FACTOR * (sum / count) as f64) as usize
+            let estimated_n = intervals * count;
+
+            sum += estimated_n as usize;
+
+            if count >= MAX_BUCKET_SIZE_K {
+                break;
+            }
+        }
+
+        (sum / count) as usize
     }
 }
 
@@ -113,13 +117,13 @@ mod tests {
 
         let mut closest_nodes = ClosestNodes::new(target);
 
-        for _ in 0..10 {
+        for _ in 0..100 {
             let node = Node::random();
             closest_nodes.add(node.clone());
             closest_nodes.add(node);
         }
 
-        assert_eq!(closest_nodes.nodes().len(), 10);
+        assert_eq!(closest_nodes.nodes().len(), 100);
 
         let distances = closest_nodes
             .nodes()
