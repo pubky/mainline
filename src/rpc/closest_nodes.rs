@@ -2,7 +2,7 @@ use std::{convert::TryInto, vec::IntoIter};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
-const CORRECTION_FACTOR: f64 = 1.26;
+const CORRECTION_FACTOR: f64 = 1.0544;
 
 #[derive(Debug, Clone)]
 /// Manage closest nodes found in a query.
@@ -77,7 +77,9 @@ impl ClosestNodes {
             },
         );
 
-        (CORRECTION_FACTOR * (sum / self.nodes.len().max(MAX_BUCKET_SIZE_K)) as f64) as usize
+        let count = MAX_BUCKET_SIZE_K.min(self.nodes.len());
+
+        (CORRECTION_FACTOR * (sum / count) as f64) as usize
     }
 }
 
@@ -163,10 +165,10 @@ mod tests {
 
                 let mut closest_nodes = ClosestNodes::new(target);
 
-                for (_, node) in nodes.range(target..).take(10) {
+                for (_, node) in nodes.range(target..).take(100) {
                     closest_nodes.add(node.clone())
                 }
-                for (_, node) in nodes.range(..target).rev().take(10) {
+                for (_, node) in nodes.range(..target).rev().take(100) {
                     closest_nodes.add(node.clone())
                 }
 

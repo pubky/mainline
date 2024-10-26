@@ -13,7 +13,7 @@ use statrs::statistics::*;
 
 const DEFAULT_DHT_SIZE: usize = 2_000_000;
 
-const DEFAULT_LOOKUPS: usize = 4;
+const DEFAULT_LOOKUPS: usize = 12;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -68,7 +68,6 @@ fn main() {
 
     for handle in handles {
         handle.join().expect("Thread panicked");
-        // println!("Worker joined.");
     }
 
     let estimates = estimates.lock().unwrap();
@@ -99,10 +98,10 @@ fn simulate(dht: &BTreeMap<Id, Node>, lookups: usize) -> usize {
 
             let mut closest_nodes = ClosestNodes::new(target);
 
-            for (_, node) in dht.range(target..).take(10) {
+            for (_, node) in dht.range(target..).take(200) {
                 closest_nodes.add(node.clone())
             }
-            for (_, node) in dht.range(..target).rev().take(10) {
+            for (_, node) in dht.range(..target).rev().take(200) {
                 closest_nodes.add(node.clone())
             }
 
