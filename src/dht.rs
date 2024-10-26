@@ -250,7 +250,7 @@ impl Dht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.recv().map(|b| Some(b)).unwrap_or(None))
+        Ok(receiver.recv().map(Some).unwrap_or(None))
     }
 
     /// Put an immutable data to the DHT.

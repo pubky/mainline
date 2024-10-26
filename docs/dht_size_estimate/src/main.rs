@@ -11,7 +11,7 @@ use mainline::{ClosestNodes, Id, Node};
 use plotters::prelude::*;
 use statrs::statistics::*;
 
-const DEFAULT_DHT_SIZE: usize = 2_500_000;
+const DEFAULT_DHT_SIZE: usize = 2_000_000;
 
 const DEFAULT_LOOKUPS: usize = 4;
 

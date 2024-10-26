@@ -55,12 +55,19 @@ The final Dht size estimation is the average of `en_1 + en_2 + .. + en_n`
 
 ## Simulation
 
-Running this [simulation](./src/main.rs) for 25 million nodes and a after 25 lookups, we observe:
+Running this [simulation](./src/main.rs) for 20 million nodes and a after 4 lookups, we observe:
 
-- Mean estimate: 2,341,502 nodes
-- Standard deviation: 9%
+- Mean estimate: 2,001,627 nodes
+- Standard deviation: 23%
 
-![dht-25-million-nodes-25-lookup](./plot.png)
+![distribution of estimated dht size after 4 lookups](./plot.png)
+
+
+The relationship between the number of lookups and precision suggest that it doesn't take too many lookups 
+for the 95% confidence intervals to drop below +-20% from the real value. Meaning a very infrequent random
+FIND_NODE queries in the background, is all what an implementation needs to get a good-enough estimation of the size of the dht.
+
+![standrd deviation relative to number of lookups](./plot.png)
 
 ## Limitations
 

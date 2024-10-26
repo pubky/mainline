@@ -159,7 +159,7 @@ impl AsyncDht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.recv_async().await.map(|b| Some(b)).unwrap_or(None))
+        Ok(receiver.recv_async().await.map(Some).unwrap_or(None))
     }
 
     /// Put an immutable data to the DHT.
