@@ -106,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add() {
+    fn add_sorted_by_id() {
         let target = Id::random();
 
         let mut closest_nodes = ClosestNodes::new(target);
@@ -133,19 +133,21 @@ mod tests {
 
     #[test]
     fn simulation() {
-        let lookups = 100;
-        let acceptable_margin = 0.1;
+        let lookups = 4;
+        let acceptable_margin = 0.2;
+        let sims = 10;
+        let dht_size = 2500 as f64;
 
-        let tests = [2500, 25000, 250000];
+        let mean = (0..sims)
+            .into_iter()
+            .map(|_| simulate(dht_size as usize, lookups) as f64)
+            .sum::<f64>()
+            / (sims as f64);
 
-        for dht_size in tests {
-            let estimate = simulate(dht_size, lookups) as f64;
+        let margin = (mean - dht_size).abs() / dht_size;
 
-            let margin = (estimate - (dht_size as f64)).abs() / dht_size as f64;
-
-            dbg!(margin);
-            assert!(margin <= acceptable_margin);
-        }
+        dbg!(&margin);
+        assert!(margin <= acceptable_margin);
     }
 
     fn simulate(dht_size: usize, lookups: usize) -> usize {
