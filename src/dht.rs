@@ -374,12 +374,28 @@ pub enum ActorMessage {
 
 /// Information and statistics about this [Dht] node.
 pub struct Info {
+    id: Id,
+    local_address: Result<SocketAddr, std::io::Error>,
+    dht_size_estimate: (usize, f64),
+}
+
+impl Info {
     /// This Node's [Id]
-    pub id: Id,
-    /// Local UDP socket address that this node is listening on.
-    pub local_address: Result<SocketAddr, std::io::Error>,
-    /// An estimate of the Dht size.
-    pub dht_size_estimate: usize,
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
+    /// Local UDP Ipv4 socket address that this node is listening on.
+    pub fn local_addr(&self) -> &Result<SocketAddr, std::io::Error> {
+        &self.local_address
+    }
+    /// Dht size estimate
+    pub fn dht_size_estimate(&self) -> usize {
+        self.dht_size_estimate.0
+    }
+    /// The standard deviation (fraction) from the the [Self::dht_size_estimate]
+    pub fn dht_size_estimate_standard_deviation(&self) -> f64 {
+        self.dht_size_estimate.1
+    }
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.

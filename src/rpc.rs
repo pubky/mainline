@@ -43,10 +43,6 @@ const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 const MAX_CACHED_BUCKETS: usize = 1000;
 
-// If you are making a FIND_NODE requests subsequentially,
-// you can expect the oldest sample to be an hour ago.
-const DHT_SIZE_ESTIMATE_WINDOW: i32 = 1024;
-
 #[derive(Debug)]
 /// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
 pub struct Rpc {
@@ -72,9 +68,8 @@ pub struct Rpc {
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
 
-    /// Moving average of the estimated dht size from the lookups within a [DHT_SIZE_ESTIMATE_WINDOW]
-    dht_size_estimate: i32,
-    dht_size_estimate_samples: i32,
+    /// Sum of Dht size estimates from closest nodes from get queries.
+    dht_size_estimates_sum: usize,
 }
 
 impl Rpc {
@@ -115,8 +110,7 @@ impl Rpc {
                 .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
 
-            dht_size_estimate: 0,
-            dht_size_estimate_samples: 0,
+            dht_size_estimates_sum: 0,
         })
     }
 
@@ -145,8 +139,13 @@ impl Rpc {
         &self.routing_table
     }
 
-    pub fn dht_size_estimate(&self) -> usize {
-        self.dht_size_estimate as usize
+    /// Returns the current Dht size estimate and the expected standard deviation (fraction).
+    pub fn dht_size_estimate(&self) -> (usize, f64) {
+        let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
+
+        let estimate = self.dht_size_estimates_sum / self.closest_nodes.len();
+
+        (estimate, std_dev)
     }
 
     // === Public Methods ===
@@ -177,21 +176,18 @@ impl Rpc {
             if is_done {
                 let closest_nodes = query.closest_nodes();
 
-                // Calculate moving average
-                let estimate = closest_nodes.dht_size_estimate() as i32;
-                self.dht_size_estimate_samples =
-                    (self.dht_size_estimate_samples + 1).min(DHT_SIZE_ESTIMATE_WINDOW);
-
-                // TODO: warn if a Horizontal Sybil attack is deteceted.
-
-                self.dht_size_estimate = self.dht_size_estimate
-                    + (estimate - self.dht_size_estimate) / self.dht_size_estimate_samples;
+                if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
+                    if let Some((_, closest)) = self.closest_nodes.pop_lru() {
+                        self.dht_size_estimates_sum -= closest.dht_size_estimate();
+                    };
+                }
+                self.dht_size_estimates_sum += closest_nodes.dht_size_estimate();
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
                     put_query.start(&mut self.socket, closest_nodes.nodes())
                 }
 
-                self.closest_nodes.put(*id, closest_nodes.clone());
+                self.closest_nodes.put(*id, closest_nodes.to_owned());
                 done_get_queries.push(*id);
 
                 if id == &self_id && table_size == 0 {

@@ -21,13 +21,13 @@ fn main() {
     for lookups in 1.. {
         let _ = dht.find_node(Id::random()).unwrap();
 
-        let std_dev = 0.281 * (lookups as f64).powf(-0.529);
+        let info = dht.info().unwrap();
 
         println!(
             "Dht size esttimate after {} lookups: {} +-{:.0}% nodes",
             lookups,
-            format_number(dht.info().unwrap().dht_size_estimate),
-            (std_dev * 2.0) * 100.0
+            format_number(info.dht_size_estimate()),
+            (info.dht_size_estimate_standard_deviation() * 2.0) * 100.0
         );
     }
 }
