@@ -81,7 +81,7 @@ fn build_dht(size: usize) -> Arc<BTreeMap<Id, Node>> {
     let mut dht = BTreeMap::new();
     for _ in 0..size {
         let node = Node::random();
-        dht.insert(node.id, node);
+        dht.insert(*node.id(), node);
     }
 
     Arc::new(dht)
