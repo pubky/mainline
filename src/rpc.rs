@@ -140,6 +140,8 @@ impl Rpc {
     }
 
     /// Returns the current Dht size estimate and the expected standard deviation (fraction).
+    ///
+    /// [Read more](../../docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> (usize, f64) {
         let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
 

@@ -73,7 +73,15 @@ fn main() {
     let estimates = estimates.lock().unwrap();
     println!("\nDone.\n");
 
-    draw_plot(dht_size as f64, lookups, &estimates, "plot.png");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
+    let file_path = std::path::Path::new(&manifest_dir).join("docs/plot.png");
+
+    draw_plot(
+        dht_size as f64,
+        lookups,
+        &estimates,
+        file_path.to_str().unwrap(),
+    );
 }
 
 /// Build a Dht with `size` number of nodes, uniformly distributed across the key space.

@@ -1,7 +1,7 @@
 # Dht Size Estimattion
 
 This is a documentation for the Dht size estimation used in this Mainline Dht implementation,
-within the context of [Censorship Resistance](../censorship-resistance.md).
+within the context of [Censorship Resistance](./censorship-resistance.md).
 
 If you want to see a live estimation of the Dht size, you can run (in the root directory):
 
@@ -55,7 +55,7 @@ The final Dht size estimation is the least-squares fit of `en_1 + en_2 + .. + en
 
 ## Simulation
 
-Running this [simulation](./src/main.rs) for 2 million nodes and a after 16 lookups, we observe:
+Running this [simulation](../examples/dht_size_estimate.rs) for 2 million nodes and a after 16 lookups, we observe:
 
 - Mean estimate: 2,123,314 nodes 
 - Standard deviation: 7%
