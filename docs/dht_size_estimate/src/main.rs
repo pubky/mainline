@@ -13,7 +13,7 @@ use statrs::statistics::*;
 
 const DEFAULT_DHT_SIZE: usize = 2_000_000;
 
-const DEFAULT_LOOKUPS: usize = 12;
+const DEFAULT_LOOKUPS: usize = 16;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

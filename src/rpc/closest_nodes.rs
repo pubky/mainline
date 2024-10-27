@@ -59,31 +59,29 @@ impl ClosestNodes {
             return 0;
         };
 
-        let mut sum = 0;
+        let mut sum = 0.0;
         let mut count = 0;
 
         // Ignoring the first node, as that gives the best result in simulations.
-        for node in &self.nodes[1..] {
+        for node in &self.nodes {
             count += 1;
 
             let xor = node.id.xor(&self.target);
 
             // Round up the lower 4 bytes to get a u128 from u160.
             let distance =
-                u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"));
+                u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) as f64;
 
-            let intervals = (u128::MAX / distance) as usize;
-
-            let estimated_n = intervals * count;
-
-            sum += estimated_n as usize;
+            sum += count as f64 * distance;
 
             if count >= MAX_BUCKET_SIZE_K {
                 break;
             }
         }
 
-        (sum / count) as usize
+        let lsq_constant = (count * (count + 1) * (2 * count + 1) / 6) as f64;
+
+        (lsq_constant * u128::MAX as f64 / sum) as usize
     }
 }
 

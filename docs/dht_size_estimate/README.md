@@ -51,27 +51,34 @@ and take their average, we get a more accurate estimation of the dht.
 The estimated number of Dht size, at each distance `di`, is `en_i = i * d_max / di` where `i` is the
 count of nodes discovered until this distance and `d_max` is the size of the key space.
 
-The final Dht size estimation is the average of `en_1 + en_2 + .. + en_n`
+The final Dht size estimation is the least-squares fit of `en_1 + en_2 + .. + en_n`
 
 ## Simulation
 
-Running this [simulation](./src/main.rs) for 20 million nodes and a after 12 lookups, we observe:
+Running this [simulation](./src/main.rs) for 2 million nodes and a after 16 lookups, we observe:
 
-- Mean estimate: 1,998,382 nodes 
-- Standard deviation: 10%
+- Mean estimate: 2,123,314 nodes 
+- Standard deviation: 7%
+- 95% Confidence Interval: +-14%
 
 Meaning that after 12 lookups, you can be confident you are not overestimating the Dht size by more than 10%,
 in fact you are most likely underestimating it slightly due to the limitation of real networks. 
 
 ![distribution of estimated dht size after 4 lookups](./plot.png)
 
-## Limitations
+Finally the standard deviation seems to follow a power law `stddev = 0.281 * lookups^-0.529`. Meaning after only 4 lookups, you can get an estimate with 95% confidence interval of +-28%.
+
+![Standard deviation relationship with number of lookups](./standard-deviation-vs-lookups.png)
+
+## Mapping simulation to real networks
+
+While the Mean estimate in the simulation slightly over estimate the real size in the simulation, the opposite is what should be expected in real networks.
 
 Unlike the simulation above, real networks are not perfect, meaning there is an error factor that can't be hard coded,
 as it depends on the response rate of nodes you query, the more requests timeout before you get a response, the more nodes
 you will miss, and the smaller you will think the Dht is.
 
-However, this is an error on the side of conservatism. And I can't think of anything in the real world that could distort the results
+This is an error on the side of conservatism. And I can't think of anything in the real world that could distort the results
 expected from this simulation to the direction of overestimating the Dht size.
 
 ## Acknowledgment
