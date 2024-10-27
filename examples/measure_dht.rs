@@ -18,13 +18,16 @@ fn main() {
 
     println!("Calculating Dht size by sampling random lookup queries within the past hour..",);
 
-    for lookups in 0..2000 {
+    for lookups in 1.. {
         let _ = dht.find_node(Id::random()).unwrap();
 
+        let std_dev = 0.281 * (lookups as f64).powf(-0.529);
+
         println!(
-            "Dht size esttimate after {} lookups: {} nodes",
+            "Dht size esttimate after {} lookups: {} +-{:.0}% nodes",
             lookups,
-            format_number(dht.info().unwrap().dht_size_estimate)
+            format_number(dht.info().unwrap().dht_size_estimate),
+            (std_dev * 2.0) * 100.0
         );
     }
 }
