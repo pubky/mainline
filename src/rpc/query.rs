@@ -10,7 +10,7 @@ use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
     common::{
         ErrorSpecific, Id, Node, PutRequest, PutRequestSpecific, RequestSpecific,
-        RequestTypeSpecific, RoutingTable,
+        RequestTypeSpecific, MAX_BUCKET_SIZE_K,
     },
     rpc::{Response, ResponseSender},
 };
@@ -21,7 +21,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Query {
     pub request: RequestSpecific,
-    candidates: RoutingTable,
+    candidates: ClosestNodes,
     closest_nodes: ClosestNodes,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
@@ -36,7 +36,7 @@ impl Query {
         Self {
             request,
 
-            candidates: RoutingTable::new().with_id(target),
+            candidates: ClosestNodes::new(target),
             closest_nodes: ClosestNodes::new(target),
 
             inflight_requests: Vec::with_capacity(200),
@@ -159,10 +159,17 @@ impl Query {
 
     /// Visit the closest candidates and remove them as candidates
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
-        for node in self.candidates.closest(&self.target()) {
-            if !self.visited.contains(&node.address) {
-                self.visit(socket, node.address);
-            }
+        let to_visit = self
+            .candidates
+            .nodes()
+            .iter()
+            .take(MAX_BUCKET_SIZE_K)
+            .filter(|node| !self.visited.contains(&node.address))
+            .map(|node| node.address)
+            .collect::<Vec<_>>();
+
+        for address in to_visit {
+            self.visit(socket, address);
         }
     }
 }
