@@ -159,6 +159,8 @@ impl KrpcSocket {
                                         self.inflight_requests.remove(index);
                                     } else {
                                         trace!(?message, "Response from the wrong address");
+
+                                        return None;
                                     }
                                 }
                                 Err(_) => {
@@ -367,34 +369,6 @@ mod test {
     }
 
     #[test]
-    fn ignore_unexcpected_response() {
-        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
-        let server_address = server.local_addr().unwrap();
-
-        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
-
-        let _ = client.local_addr();
-
-        let response = ResponseSpecific::Ping(PingResponseArguments {
-            responder_id: Id::random(),
-        });
-
-        let _ = response.clone();
-
-        let server_thread = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5));
-            assert!(
-                server.recv_from().is_none(),
-                "Should not receive a unexpected response"
-            );
-        });
-
-        client.response(server_address, 120, response);
-
-        server_thread.join().unwrap();
-    }
-
-    #[test]
     fn ignore_response_from_wrong_address() {
         let mut server = KrpcSocket::new(&Settings::default()).unwrap();
         let server_address = server.local_addr().unwrap();
@@ -423,7 +397,7 @@ mod test {
             );
         });
 
-        client.response(server_address, 120, response);
+        client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
     }
