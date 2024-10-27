@@ -34,15 +34,18 @@ impl ClosestNodes {
     pub fn add(&mut self, node: Node) {
         let seek = node.id.xor(&self.target);
 
-        match self.nodes.binary_search_by(|prope| {
-            if prope.id == node.id {
+        if let Err(pos) = self.nodes.binary_search_by(|prope| {
+            if prope.is_secure() && !node.is_secure() {
+                std::cmp::Ordering::Less
+            } else if !prope.is_secure() && node.is_secure() {
+                std::cmp::Ordering::Greater
+            } else if prope.id == node.id {
                 std::cmp::Ordering::Equal
             } else {
                 prope.id.xor(&self.target).cmp(&seek)
             }
         }) {
-            Err(pos) => self.nodes.insert(pos, node),
-            _ => {}
+            self.nodes.insert(pos, node)
         }
     }
 
@@ -105,7 +108,7 @@ impl<'a> IntoIterator for &'a ClosestNodes {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, net::Ipv4Addr, str::FromStr, time::Instant};
 
     use super::*;
 
@@ -133,6 +136,24 @@ mod tests {
         sorted.sort();
 
         assert_eq!(sorted, distances);
+    }
+
+    #[test]
+    fn order_by_secure_id() {
+        let unsecure = Node::random();
+        let secure = Node {
+            id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
+            address: (Ipv4Addr::new(21, 75, 31, 124), 0).into(),
+            token: None,
+            last_seen: Instant::now(),
+        };
+
+        let mut closest_nodes = ClosestNodes::new(*unsecure.id());
+
+        closest_nodes.add(unsecure.clone());
+        closest_nodes.add(secure.clone());
+
+        assert_eq!(closest_nodes.nodes(), vec![secure, unsecure])
     }
 
     #[test]
