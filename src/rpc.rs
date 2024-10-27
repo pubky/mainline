@@ -143,7 +143,7 @@ impl Rpc {
     pub fn dht_size_estimate(&self) -> (usize, f64) {
         let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
 
-        let estimate = self.dht_size_estimates_sum / self.closest_nodes.len();
+        let estimate = self.dht_size_estimates_sum / self.closest_nodes.len().max(1);
 
         (estimate, std_dev)
     }
@@ -386,10 +386,6 @@ impl Rpc {
     // === Private Methods ===
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<QueryResponse> {
-        if message.read_only {
-            return None;
-        };
-
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
         if let Some(query) = self
             .put_queries
@@ -407,6 +403,11 @@ impl Rpc {
 
             return None;
         }
+
+        // If someone claims to be readonly, then let's not store anything even if they respond.
+        if message.read_only {
+            return None;
+        };
 
         // Get corresponing query for message.transaction_id
         if let Some(query) = self

@@ -253,7 +253,9 @@ mod test {
         async fn test() {
             let mut dht = Dht::client().unwrap().as_async();
 
-            dht.info().await.unwrap().local_address.unwrap();
+            let info = dht.info().await.unwrap();
+
+            info.local_addr().unwrap();
 
             let a = dht.clone();
 

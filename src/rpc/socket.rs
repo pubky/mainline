@@ -119,7 +119,7 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
         let mut buf = [0u8; MTU];
 
-        // Cleanup timedout transaction_ids.
+        // Cleanup timed-out transaction_ids.
         // Find the first timedout request, and delete all earlier requests.
         match self.inflight_requests.binary_search_by(|request| {
             if request.sent_at.elapsed() > self.request_timeout {
@@ -143,38 +143,33 @@ impl KrpcSocket {
                 Ok(message) => {
                     // Parsed correctly.
                     match message.message_type {
-                        MessageType::Request(_) => {
-                            if self.read_only {
-                                return None;
-                            }
-
-                            return Some((message, from));
-                        }
-                        // Response or an error to an inflight request.
-                        _ => {
+                        // Positive or an error response or to an inflight request.
+                        MessageType::Response(_) | MessageType::Error(_) => {
                             match self.inflight_requests.binary_search_by(|request| {
                                 request.tid.cmp(&message.transaction_id)
                             }) {
                                 Ok(index) => {
-                                    match self.inflight_requests.get(index) {
-                                        Some(inflight_request) => {
-                                            if compare_socket_addr(&inflight_request.to, &from) {
-                                                // Confirm that it is a response we actually sent.
-                                                self.inflight_requests.remove(index);
+                                    let inflight_request = self
+                                        .inflight_requests
+                                        .get(index)
+                                        .expect("should be infallible");
 
-                                                return Some((message, from));
-                                            }
-                                            trace!(?message, "Response from the wrong address");
-                                        }
-                                        _ => panic!("should not return None"),
-                                    };
+                                    if compare_socket_addr(&inflight_request.to, &from) {
+                                        // Confirm that it is a response we actually sent.
+                                        self.inflight_requests.remove(index);
+                                    } else {
+                                        trace!(?message, "Response from the wrong address");
+                                    }
                                 }
                                 Err(_) => {
                                     trace!(?message, "Unexpected response id");
                                 }
-                            };
+                            }
                         }
-                    }
+                        _ => {}
+                    };
+
+                    return Some((message, from));
                 }
                 Err(error) => {
                     trace!(?error, ?bytes, "Received invalid message");
@@ -429,35 +424,6 @@ mod test {
         });
 
         client.response(server_address, 120, response);
-
-        server_thread.join().unwrap();
-    }
-
-    #[test]
-    fn ignore_request_in_read_only() {
-        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
-        let server_address = server.local_addr().unwrap();
-
-        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
-        client.next_tid = 120;
-
-        let _ = client.local_addr();
-        let request = RequestSpecific {
-            requester_id: Id::random(),
-            request_type: RequestTypeSpecific::Ping,
-        };
-
-        let _ = request.clone();
-
-        let server_thread = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5));
-            assert!(
-                server.recv_from().is_none(),
-                "should not receieve requests in read-only mode"
-            );
-        });
-
-        client.request(server_address, request);
 
         server_thread.join().unwrap();
     }

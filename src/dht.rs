@@ -385,8 +385,8 @@ impl Info {
         &self.id
     }
     /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn local_addr(&self) -> &Result<SocketAddr, std::io::Error> {
-        &self.local_address
+    pub fn local_addr(&self) -> Result<&SocketAddr, &std::io::Error> {
+        self.local_address.as_ref()
     }
     /// Dht size estimate
     pub fn dht_size_estimate(&self) -> usize {
