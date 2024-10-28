@@ -75,7 +75,7 @@ impl Rpc {
 
         let socket = KrpcSocket::new(settings)?;
 
-        info!(?settings, "Sarting Mainline Rpc");
+        info!(?settings, "Starting Mainline Rpc");
 
         Ok(Rpc {
             id,
