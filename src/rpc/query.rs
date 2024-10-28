@@ -19,7 +19,7 @@ use crate::{
 /// the target, updating the routing table with closer nodes discovered in the responses, and
 /// repeating this process until no closer nodes (that aren't already queried) are found.
 #[derive(Debug)]
-pub struct Query {
+pub(crate) struct Query {
     pub request: RequestSpecific,
     candidates: ClosestNodes,
     closest_nodes: ClosestNodes,
@@ -54,8 +54,8 @@ impl Query {
     }
 
     /// Return the closest responding nodes after the query is done.
-    pub fn closest_nodes(&self) -> &ClosestNodes {
-        &self.closest_nodes
+    pub fn closest_nodes(self) -> ClosestNodes {
+        self.closest_nodes
     }
 
     // === Public Methods ===

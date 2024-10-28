@@ -69,7 +69,7 @@ pub struct Rpc {
     put_queries: HashMap<Id, PutQuery>,
 
     /// Sum of Dht size estimates from closest nodes from get queries.
-    dht_size_estimates_sum: usize,
+    dht_size_estimates_sum: f64,
 }
 
 impl Rpc {
@@ -110,7 +110,7 @@ impl Rpc {
                 .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
 
-            dht_size_estimates_sum: 0,
+            dht_size_estimates_sum: 0.0,
         })
     }
 
@@ -145,7 +145,7 @@ impl Rpc {
     pub fn dht_size_estimate(&self) -> (usize, f64) {
         let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
 
-        let estimate = self.dht_size_estimates_sum / self.closest_nodes.len().max(1);
+        let estimate = self.dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
 
         (estimate, std_dev)
     }
@@ -176,20 +176,6 @@ impl Rpc {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
-                let closest_nodes = query.closest_nodes();
-
-                if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
-                    if let Some((_, closest)) = self.closest_nodes.pop_lru() {
-                        self.dht_size_estimates_sum -= closest.dht_size_estimate();
-                    };
-                }
-                self.dht_size_estimates_sum += closest_nodes.dht_size_estimate();
-
-                if let Some(put_query) = self.put_queries.get_mut(id) {
-                    put_query.start(&mut self.socket, closest_nodes.nodes())
-                }
-
-                self.closest_nodes.put(*id, closest_nodes.to_owned());
                 done_get_queries.push(*id);
 
                 if id == &self_id && table_size == 0 {
@@ -206,7 +192,28 @@ impl Rpc {
         //
         // Has to happen _before_ `self.socket.recv_from()`.
         for id in &done_get_queries {
-            self.queries.remove(id);
+            if let Some(query) = self.queries.remove(id) {
+                // Handle closest nodes from a get query.
+
+                let (previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
+
+                let mut closest_nodes = query.closest_nodes();
+
+                closest_nodes.remove_sybil(previous_dht_size_estimate, std_dev);
+
+                if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
+                    if let Some((_, closest)) = self.closest_nodes.pop_lru() {
+                        self.dht_size_estimates_sum -= closest.dht_size_estimate();
+                    };
+                }
+                self.dht_size_estimates_sum += closest_nodes.dht_size_estimate();
+
+                if let Some(put_query) = self.put_queries.get_mut(id) {
+                    put_query.start(&mut self.socket, closest_nodes.nodes())
+                }
+
+                self.closest_nodes.put(*id, closest_nodes.to_owned());
+            };
         }
         for id in &done_put_queries {
             self.put_queries.remove(id);

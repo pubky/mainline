@@ -9,6 +9,7 @@ use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 pub struct ClosestNodes {
     target: Id,
     nodes: Vec<Node>,
+    pub(crate) dht_size_estimate: Option<f64>,
 }
 
 impl ClosestNodes {
@@ -16,6 +17,7 @@ impl ClosestNodes {
         Self {
             target,
             nodes: Vec::with_capacity(200),
+            dht_size_estimate: None,
         }
     }
 
@@ -53,39 +55,86 @@ impl ClosestNodes {
         self.nodes.is_empty()
     }
 
+    /// Remove all nodes too close according to what we know about the Dht size.
+    ///
+    /// Make sure that we retain minimum [MAX_BUCKET_SIZE_K] even if some are too close to the
+    /// target.
+    pub(crate) fn remove_sybil(&mut self, previous_dht_size_estimate: usize, std_dev: f64) {
+        // TODO: Write a unit test to prove we are ignoring Sybil.
+        let minimum_ed1 =
+            (1.0 / (previous_dht_size_estimate as f64 + 1.0)) / (1.0 + (std_dev * 2.0));
+
+        let minimum_index = self.nodes.len().saturating_sub(MAX_BUCKET_SIZE_K);
+
+        let distances = self
+            .nodes
+            .iter()
+            .map(|node| distance(&self.target, node))
+            .enumerate()
+            .filter(|(i, d)| {
+                !(
+                    // Is sybil
+                    *d < minimum_ed1
+                    // Is not necessary
+                    && *i <  minimum_index
+                )
+            })
+            .map(|(_, d)| d)
+            .take(MAX_BUCKET_SIZE_K);
+
+        let (estimate, count) = dht_size_estimate(distances);
+
+        self.dht_size_estimate = Some(estimate);
+        self.nodes.truncate(count);
+    }
+
     /// An estimation of the Dht from the distribution of closest nodes
     /// responding to a query.
     ///
     /// [Read more](../../docs/dht_size_estimate.md)
-    pub fn dht_size_estimate(&self) -> usize {
-        if self.is_empty() {
-            return 0;
-        };
-
-        let mut sum = 0.0;
-        let mut count = 0;
-
-        // Ignoring the first node, as that gives the best result in simulations.
-        for node in &self.nodes {
-            count += 1;
-
-            let xor = node.id.xor(&self.target);
-
-            // Round up the lower 4 bytes to get a u128 from u160.
-            let distance =
-                u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) as f64;
-
-            sum += count as f64 * distance;
-
-            if count >= MAX_BUCKET_SIZE_K {
-                break;
-            }
-        }
-
-        let lsq_constant = (count * (count + 1) * (2 * count + 1) / 6) as f64;
-
-        (lsq_constant * u128::MAX as f64 / sum) as usize
+    pub fn dht_size_estimate(&self) -> f64 {
+        self.dht_size_estimate.unwrap_or(
+            dht_size_estimate(
+                self.nodes
+                    .iter()
+                    .take(MAX_BUCKET_SIZE_K)
+                    .map(|node| distance(&self.target, node)),
+            )
+            .0,
+        )
     }
+}
+
+fn distance(target: &Id, node: &Node) -> f64 {
+    let xor = node.id.xor(target);
+
+    // Round up the lower 4 bytes to get a u128 from u160.
+    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) as f64
+}
+
+fn dht_size_estimate<I>(distances: I) -> (f64, usize)
+where
+    I: IntoIterator<Item = f64>,
+{
+    let mut sum = 0.0;
+    let mut count = 0;
+
+    // Ignoring the first node, as that gives the best result in simulations.
+    for distance in distances {
+        count += 1;
+
+        sum += count as f64 * distance;
+    }
+
+    if count == 0 {
+        return (0.0, 0);
+    }
+
+    let lsq_constant = (count * (count + 1) * (2 * count + 1) / 6) as f64;
+
+    let estimate = lsq_constant * u128::MAX as f64 / sum;
+
+    (estimate, count)
 }
 
 impl IntoIterator for ClosestNodes {
@@ -171,7 +220,6 @@ mod tests {
 
         let margin = (mean - dht_size).abs() / dht_size;
 
-        dbg!(&margin);
         assert!(margin <= acceptable_margin);
     }
 
@@ -197,7 +245,7 @@ mod tests {
 
                 let estimate = closest_nodes.dht_size_estimate();
 
-                estimate
+                estimate as usize
             })
             .sum::<usize>()
             / lookups

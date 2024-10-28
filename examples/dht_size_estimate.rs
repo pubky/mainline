@@ -115,7 +115,7 @@ fn simulate(dht: &BTreeMap<Id, Node>, lookups: usize) -> usize {
 
             let estimate = closest_nodes.dht_size_estimate();
 
-            estimate
+            estimate as usize
         })
         .sum::<usize>()
         / lookups
