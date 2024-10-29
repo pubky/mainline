@@ -84,7 +84,7 @@ impl RoutingTable {
             match &self.buckets.get(&i) {
                 Some(bucket) => {
                     for node in bucket.iter() {
-                        if result.len() < 20 {
+                        if result.len() < MAX_BUCKET_SIZE_K {
                             if node.is_secure() {
                                 result.push(node.clone());
                             } else {
@@ -99,9 +99,9 @@ impl RoutingTable {
             }
         }
 
-        if result.len() < 20 {
+        if result.len() < MAX_BUCKET_SIZE_K {
             for node in unsecure {
-                if result.len() < 20 {
+                if result.len() < MAX_BUCKET_SIZE_K {
                     result.push(node);
                 } else {
                     break;
@@ -184,7 +184,10 @@ impl KBucket {
             // If it is the same socket address too, remove the old node,
             // and add the incoming one, effectively updating the node's
             // `last_seen` and moving it to the end of the bucket.
-            if self.nodes[index].same_adress(&incoming) {
+            //
+            // If the incoming node is secure, then the new socket address (if it differs)
+            // is the correct one anyways.
+            if self.nodes[index].same_adress(&incoming) || incoming.is_secure() {
                 self.nodes.remove(index);
                 self.nodes.push(incoming);
 
@@ -256,7 +259,7 @@ mod test {
 
         let mut expected_nodes: Vec<Node> = vec![];
 
-        for _ in 0..20 {
+        for _ in 0..MAX_BUCKET_SIZE_K {
             expected_nodes.push(Node::random());
         }
 
