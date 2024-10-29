@@ -55,37 +55,38 @@ impl ClosestNodes {
         self.nodes.is_empty()
     }
 
-    /// Remove all nodes too close according to what we know about the Dht size.
+    /// Truncate [Self::nodes] to the minimum amount of secure nodes to store data at.
     ///
-    /// Make sure that we retain minimum [MAX_BUCKET_SIZE_K] even if some are too close to the
-    /// target.
-    pub(crate) fn remove_sybil(&mut self, previous_dht_size_estimate: usize, std_dev: f64) {
+    /// That is at least [MAX_BUCKET_SIZE_K] number of nodes, or all the nodes closer than the
+    /// expected 20th closest node.
+    ///
+    /// By using all nodes until that expected distance, we avoid Vertical Sybil attacks, because
+    pub fn truncate_furthest_than_expected_dk(
+        &mut self,
+        previous_dht_size_estimate: usize,
+        std_dev: f64,
+    ) {
         // TODO: Write a unit test to prove we are ignoring Sybil.
-        let minimum_ed1 =
-            (1.0 / (previous_dht_size_estimate as f64 + 1.0)) / (1.0 + (std_dev * 2.0));
+        let mut distances = vec![];
+        let mut until_edk = 0;
 
-        let minimum_index = self.nodes.len().saturating_sub(MAX_BUCKET_SIZE_K);
+        let expected_dk =
+            ((1.0 / (previous_dht_size_estimate as f64 + 1.0)) * (1.0 + (std_dev * 2.0))) as u128;
 
-        let distances = self
-            .nodes
-            .iter()
-            .map(|node| distance(&self.target, node))
-            .enumerate()
-            .filter(|(i, d)| {
-                !(
-                    // Is sybil
-                    *d < minimum_ed1
-                    // Is not necessary
-                    && *i <  minimum_index
-                )
-            })
-            .map(|(_, d)| d)
-            .take(MAX_BUCKET_SIZE_K);
+        for node in &self.nodes {
+            let distance = distance(&self.target, node);
 
-        let (estimate, count) = dht_size_estimate(distances);
+            if distances.len() < MAX_BUCKET_SIZE_K {
+                distances.push(distance)
+            } else if distance >= expected_dk {
+                break;
+            }
 
-        self.dht_size_estimate = Some(estimate);
-        self.nodes.truncate(count);
+            until_edk += 1;
+        }
+
+        self.dht_size_estimate = Some(dht_size_estimate(distances));
+        self.nodes.truncate(until_edk.max(MAX_BUCKET_SIZE_K));
     }
 
     /// An estimation of the Dht from the distribution of closest nodes
@@ -93,28 +94,25 @@ impl ClosestNodes {
     ///
     /// [Read more](../../docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> f64 {
-        self.dht_size_estimate.unwrap_or(
-            dht_size_estimate(
-                self.nodes
-                    .iter()
-                    .take(MAX_BUCKET_SIZE_K)
-                    .map(|node| distance(&self.target, node)),
-            )
-            .0,
-        )
+        self.dht_size_estimate.unwrap_or(dht_size_estimate(
+            self.nodes
+                .iter()
+                .take(MAX_BUCKET_SIZE_K)
+                .map(|node| distance(&self.target, node)),
+        ))
     }
 }
 
-fn distance(target: &Id, node: &Node) -> f64 {
+fn distance(target: &Id, node: &Node) -> u128 {
     let xor = node.id.xor(target);
 
     // Round up the lower 4 bytes to get a u128 from u160.
-    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible")) as f64
+    u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"))
 }
 
-fn dht_size_estimate<I>(distances: I) -> (f64, usize)
+fn dht_size_estimate<I>(distances: I) -> f64
 where
-    I: IntoIterator<Item = f64>,
+    I: IntoIterator<Item = u128>,
 {
     let mut sum = 0.0;
     let mut count = 0;
@@ -123,18 +121,16 @@ where
     for distance in distances {
         count += 1;
 
-        sum += count as f64 * distance;
+        sum += count as f64 * distance as f64;
     }
 
     if count == 0 {
-        return (0.0, 0);
+        return 0.0;
     }
 
     let lsq_constant = (count * (count + 1) * (2 * count + 1) / 6) as f64;
 
-    let estimate = lsq_constant * u128::MAX as f64 / sum;
-
-    (estimate, count)
+    lsq_constant * u128::MAX as f64 / sum
 }
 
 impl IntoIterator for ClosestNodes {

@@ -195,17 +195,18 @@ impl Rpc {
             if let Some(query) = self.queries.remove(id) {
                 // Handle closest nodes from a get query.
 
-                let (previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
-
                 let mut closest_nodes = query.closest_nodes();
 
-                closest_nodes.remove_sybil(previous_dht_size_estimate, std_dev);
+                let (previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
+                closest_nodes
+                    .truncate_furthest_than_expected_dk(previous_dht_size_estimate, std_dev);
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
                     if let Some((_, closest)) = self.closest_nodes.pop_lru() {
                         self.dht_size_estimates_sum -= closest.dht_size_estimate();
                     };
                 }
+
                 self.dht_size_estimates_sum += closest_nodes.dht_size_estimate();
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
