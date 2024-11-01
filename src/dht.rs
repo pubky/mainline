@@ -23,6 +23,7 @@ use crate::{
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
+#[derive(Debug)]
 pub struct Builder {
     settings: Settings,
 }
