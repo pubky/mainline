@@ -29,8 +29,8 @@ All notable changes to mainline dht will be documented in this file.
 - Rename `DhtServer` to `DefaultServer`
 - `Dht::get_immutable()` and `AsyncDht::get_immutable()` return `Result<Option<bytes::Bytes>, DhtWasShutdown>`
 - `Node` fields are now all private, with `id()` and `address()` getters.
+- Changed `Settings` to be a the Builder, and make fields private.
 
 ### Removed
 
 - Removed `mainline::error::Error` and `mainline::error::Result`.
-- Removed `Settings` as a publicly exported struct.

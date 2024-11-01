@@ -23,37 +23,50 @@ use crate::{
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
-#[derive(Debug)]
-pub struct Builder {
-    settings: Settings,
+#[derive(Debug, Default)]
+/// Dht settings
+pub struct Settings {
+    /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
+    pub(crate) bootstrap: Option<Vec<String>>,
+    /// Defaults to None
+    pub(crate) server: Option<Box<dyn Server>>,
+    /// Defaults to [crate::rpc::DEFAULT_PORT]
+    pub(crate) port: Option<u16>,
+    /// Defaults to [crate::rpc::DEFAULT_REQUEST_TIMEOUT]
+    pub(crate) request_timeout: Option<Duration>,
 }
 
-impl Builder {
+impl Settings {
     /// Create a Dht node.
     pub fn build(self) -> Result<Dht, std::io::Error> {
-        Dht::new(self.settings)
+        Dht::new(self)
+    }
+
+    /// Build an [Rpc] instance that you intend to manage in an Actor thread yourself.
+    pub fn build_rpc(self) -> Result<Rpc, std::io::Error> {
+        Rpc::new(&self)
     }
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
-        self.settings.server = Some(Box::<DefaultServer>::default());
+        self.server = Some(Box::<DefaultServer>::default());
         self
     }
 
     pub fn custom_server(mut self, custom_server: Box<dyn Server>) -> Self {
-        self.settings.server = Some(custom_server);
+        self.server = Some(custom_server);
         self
     }
 
     /// Set bootstrapping nodes
     pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
-        self.settings.bootstrap = Some(bootstrap.to_vec());
+        self.bootstrap = Some(bootstrap.to_vec());
         self
     }
 
     /// Set the port to listen on.
     pub fn port(mut self, port: u16) -> Self {
-        self.settings.port = Some(port);
+        self.port = Some(port);
         self
     }
 
@@ -65,30 +78,15 @@ impl Builder {
     ///
     /// Defaults to 2 seconds.
     pub fn request_timeout(mut self, request_timeout: Duration) -> Self {
-        self.settings.request_timeout = Some(request_timeout);
+        self.request_timeout = Some(request_timeout);
         self
     }
 }
 
-#[derive(Debug, Default)]
-/// Dht settings
-pub struct Settings {
-    /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
-    pub bootstrap: Option<Vec<String>>,
-    /// Defaults to None
-    pub server: Option<Box<dyn Server>>,
-    /// Defaults to [crate::rpc::DEFAULT_PORT]
-    pub port: Option<u16>,
-    /// Defaults to [crate::rpc::DEFAULT_REQUEST_TIMEOUT]
-    pub request_timeout: Option<Duration>,
-}
-
 impl Dht {
     /// Returns a builder to edit settings before creating a Dht node.
-    pub fn builder() -> Builder {
-        Builder {
-            settings: Settings::default(),
-        }
+    pub fn builder() -> Settings {
+        Settings::default()
     }
 
     /// Create a new DHT client with default bootstrap nodes.
