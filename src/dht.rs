@@ -108,7 +108,7 @@ impl Dht {
     ///
     /// Could return an error if it failed to bind to the specified
     /// port or other io errors while binding the udp socket.
-    pub fn new(settings: Settings) -> Result<Self, std::io::Error> {
+    pub(crate) fn new(settings: Settings) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::bounded(32);
 
         let rpc = Rpc::new(&settings)?;

@@ -33,3 +33,4 @@ All notable changes to mainline dht will be documented in this file.
 ### Removed
 
 - Removed `mainline::error::Error` and `mainline::error::Result`.
+- Removed `Settings` as a publicly exported struct.
