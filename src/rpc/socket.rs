@@ -7,8 +7,6 @@ use tracing::{debug, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-use crate::dht::Settings;
-
 const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
 const MTU: usize = 2048;
 
@@ -36,8 +34,12 @@ pub struct InflightRequest {
 }
 
 impl KrpcSocket {
-    pub fn new(settings: &Settings) -> Result<Self, std::io::Error> {
-        let socket = if let Some(port) = settings.port {
+    pub(crate) fn new(
+        read_only: bool,
+        request_timeout: Option<Duration>,
+        port: Option<u16>,
+    ) -> Result<Self, std::io::Error> {
+        let socket = if let Some(port) = port {
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
             match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
@@ -51,8 +53,8 @@ impl KrpcSocket {
         Ok(Self {
             socket,
             next_tid: 0,
-            read_only: settings.server.is_none(),
-            request_timeout: settings.request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
+            read_only,
+            request_timeout: request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
             inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
@@ -261,16 +263,13 @@ fn compare_socket_addr(a: &SocketAddr, b: &SocketAddr) -> bool {
 mod test {
     use std::thread;
 
-    use crate::{
-        common::{Id, PingResponseArguments, RequestTypeSpecific},
-        server::DefaultServer,
-    };
+    use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
 
     use super::*;
 
     #[test]
     fn tid() {
-        let mut socket = KrpcSocket::new(&Settings::default()).unwrap();
+        let mut socket = KrpcSocket::new(false, None, None).unwrap();
 
         assert_eq!(socket.tid(), 0);
         assert_eq!(socket.tid(), 1);
@@ -284,16 +283,10 @@ mod test {
 
     #[test]
     fn recv_request() {
-        let mut server = KrpcSocket::new(&Settings {
-            server: Some(Box::<DefaultServer>::default()),
-            bootstrap: None,
-            request_timeout: None,
-            port: None,
-        })
-        .unwrap();
+        let mut server = KrpcSocket::new(false, None, None).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
+        let mut client = KrpcSocket::new(true, None, None).unwrap();
         client.next_tid = 120;
 
         let client_address = client.local_addr().unwrap();
@@ -326,10 +319,10 @@ mod test {
 
     #[test]
     fn recv_response() {
-        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
+        let mut server = KrpcSocket::new(true, None, None).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
+        let mut client = KrpcSocket::new(true, None, None).unwrap();
 
         let client_address = client.local_addr().unwrap();
 
@@ -370,10 +363,10 @@ mod test {
 
     #[test]
     fn ignore_response_from_wrong_address() {
-        let mut server = KrpcSocket::new(&Settings::default()).unwrap();
+        let mut server = KrpcSocket::new(true, None, None).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&Settings::default()).unwrap();
+        let mut client = KrpcSocket::new(true, None, None).unwrap();
 
         let client_address = client.local_addr().unwrap();
 

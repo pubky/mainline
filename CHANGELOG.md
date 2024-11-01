@@ -30,6 +30,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Dht::get_immutable()` and `AsyncDht::get_immutable()` return `Result<Option<bytes::Bytes>, DhtWasShutdown>`
 - `Node` fields are now all private, with `id()` and `address()` getters.
 - Changed `Settings` to be a the Builder, and make fields private.
+- Replaced `Rpc::new()` with `Settings::build_rpc()`.
 
 ### Removed
 

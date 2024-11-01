@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use flume::Sender;
 use lru::LruCache;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::common::{
     validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
@@ -21,7 +21,6 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
-use crate::dht::Settings;
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
 
@@ -74,18 +73,20 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(settings: &Settings) -> Result<Self, std::io::Error> {
+    pub(crate) fn new(
+        bootstrap: &Option<Vec<String>>,
+        read_only: bool,
+        request_timeout: Option<Duration>,
+        port: Option<u16>,
+    ) -> Result<Self, std::io::Error> {
         // TODO: One day I might implement BEP42 on Routing nodes.
         let id = Id::random();
 
-        let socket = KrpcSocket::new(settings)?;
-
-        info!(?settings, "Sarting Mainline Rpc");
+        let socket = KrpcSocket::new(read_only, request_timeout, port)?;
 
         Ok(Rpc {
             id,
-            bootstrap: settings
-                .bootstrap
+            bootstrap: bootstrap
                 .to_owned()
                 .unwrap_or(
                     DEFAULT_BOOTSTRAP_NODES

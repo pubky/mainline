@@ -43,8 +43,13 @@ impl Settings {
     }
 
     /// Build an [Rpc] instance that you intend to manage in an Actor thread yourself.
-    pub fn build_rpc(self) -> Result<Rpc, std::io::Error> {
-        Rpc::new(&self)
+    pub fn build_rpc(&self) -> Result<Rpc, std::io::Error> {
+        Rpc::new(
+            &self.bootstrap,
+            self.server.is_none(),
+            self.request_timeout,
+            self.port,
+        )
     }
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
@@ -110,7 +115,7 @@ impl Dht {
     pub(crate) fn new(settings: Settings) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::bounded(32);
 
-        let rpc = Rpc::new(&settings)?;
+        let rpc = settings.build_rpc()?;
 
         let address = rpc.local_addr()?;
 
@@ -357,7 +362,7 @@ fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<Ac
             message: ReceivedMessage::Request((transaction_id, request_specific)),
         }) = report.received_from
         {
-            if let Some(server) = server.as_mut() {
+            if let Some(server) = server {
                 server.handle_request(&mut rpc, from, transaction_id, &request_specific);
             }
         };
