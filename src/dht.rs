@@ -52,6 +52,11 @@ impl Settings {
         )
     }
 
+    // Returns the configured custom server.
+    pub fn into_server(self) -> Option<Box<dyn Server>> {
+        self.server
+    }
+
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
         self.server = Some(Box::<DefaultServer>::default());
