@@ -8,9 +8,11 @@ It should work as a routing / storing node as well, and has been running in prod
 
 **[API Docs](https://docs.rs/mainline/latest/mainline/)**
 
-## Get started
+## Getting started
 
 Check the [Examples](https://github.com/Nuhvi/mainline/tree/main/examples).
+
+## Features
 
 ### Client
 
@@ -27,6 +29,8 @@ Supported BEPs:
 - [x] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
 - [x] [BEP0043 Read-only DHT Nodes](https://www.bittorrent.org/beps/bep_0043.html)
 - [x] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
+
+This implementation also includes [measures against Vertical Sybil Attacks](./docs/sybil-resistance.md).
 
 ### Server
 
