@@ -9,7 +9,6 @@ use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 pub struct ClosestNodes {
     target: Id,
     nodes: Vec<Node>,
-    pub(crate) dht_size_estimate: Option<f64>,
 }
 
 impl ClosestNodes {
@@ -17,7 +16,6 @@ impl ClosestNodes {
         Self {
             target,
             nodes: Vec::with_capacity(200),
-            dht_size_estimate: None,
         }
     }
 
@@ -55,19 +53,10 @@ impl ClosestNodes {
         self.nodes.is_empty()
     }
 
-    /// Truncate [Self::nodes] to the minimum amount of secure nodes to store data at.
-    ///
-    /// That is at least [MAX_BUCKET_SIZE_K] number of nodes, or all the nodes closer than the
-    /// expected 20th closest node.
-    ///
-    /// By using all nodes until that expected distance, we avoid Vertical Sybil attacks, because
-    pub fn truncate_furthest_than_expected_dk(
-        &mut self,
-        previous_dht_size_estimate: usize,
-        std_dev: f64,
-    ) {
+    /// Get the closest [K][MAX_BUCKET_SIZE_K] nodes or all the nodes until the
+    /// expected distance of the Kth node, given a DHT size estimation.
+    pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize, std_dev: f64) -> &[Node] {
         // TODO: Write a unit test to prove we are ignoring Sybil.
-        let mut distances = vec![];
         let mut until_edk = 0;
 
         let expected_dk =
@@ -76,17 +65,14 @@ impl ClosestNodes {
         for node in &self.nodes {
             let distance = distance(&self.target, node);
 
-            if distances.len() < MAX_BUCKET_SIZE_K {
-                distances.push(distance)
-            } else if distance >= expected_dk {
+            if distance >= expected_dk {
                 break;
             }
 
             until_edk += 1;
         }
 
-        self.dht_size_estimate = Some(dht_size_estimate(distances));
-        self.nodes.truncate(until_edk.max(MAX_BUCKET_SIZE_K));
+        &self.nodes[0..until_edk.max(MAX_BUCKET_SIZE_K).min(self.nodes().len())]
     }
 
     /// An estimation of the Dht from the distribution of closest nodes
@@ -94,12 +80,12 @@ impl ClosestNodes {
     ///
     /// [Read more](../../docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> f64 {
-        self.dht_size_estimate.unwrap_or(dht_size_estimate(
+        dht_size_estimate(
             self.nodes
                 .iter()
                 .take(MAX_BUCKET_SIZE_K)
                 .map(|node| distance(&self.target, node)),
-        ))
+        )
     }
 }
 

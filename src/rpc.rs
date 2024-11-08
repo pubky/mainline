@@ -30,11 +30,12 @@ pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
-pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
+pub const DEFAULT_BOOTSTRAP_NODES: [&str; 5] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
     "dht.libtorrent.org:25401",
     "dht.anacrolix.link:42069",
+    "relay.pkarr.org:6881",
 ];
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -58,8 +59,10 @@ pub struct Rpc {
     last_table_refresh: Instant,
     /// Last time we pinged nodes in the routing table.
     last_table_ping: Instant,
-    /// Closest nodes to specific target
-    closest_nodes: LruCache<Id, ClosestNodes>,
+    /// Closest responding nodes to specific target
+    ///
+    /// as well as the dht size estimate based on closest claimed nodes, and closest responding nodes.
+    closest_nodes: LruCache<Id, (Vec<Node>, f64, f64)>,
 
     // Active Queries
     queries: HashMap<Id, Query>,
@@ -69,6 +72,8 @@ pub struct Rpc {
 
     /// Sum of Dht size estimates from closest nodes from get queries.
     dht_size_estimates_sum: f64,
+    /// Sum of Dht size estimates from closest _responding_ nodes from get queries.
+    responders_based_dht_size_estimates_sum: f64,
 }
 
 impl Rpc {
@@ -112,6 +117,7 @@ impl Rpc {
             last_table_ping: Instant::now(),
 
             dht_size_estimates_sum: 0.0,
+            responders_based_dht_size_estimates_sum: 0.0,
         })
     }
 
@@ -146,7 +152,8 @@ impl Rpc {
     pub fn dht_size_estimate(&self) -> (usize, f64) {
         let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
 
-        let estimate = self.dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
+        let estimate =
+            self.responders_based_dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
 
         (estimate, std_dev)
     }
@@ -179,10 +186,12 @@ impl Rpc {
             if is_done {
                 done_get_queries.push(*id);
 
-                if id == &self_id && table_size == 0 {
-                    error!("Could not bootstrap the routing table");
-                } else {
-                    debug!(table_size, "Populated the routing table");
+                if id == &self_id {
+                    if table_size == 0 {
+                        error!("Could not bootstrap the routing table");
+                    } else {
+                        debug!(table_size, "Populated the routing table");
+                    }
                 };
             };
         }
@@ -196,25 +205,35 @@ impl Rpc {
             if let Some(query) = self.queries.remove(id) {
                 // Handle closest nodes from a get query.
 
-                let mut closest_nodes = query.closest_nodes();
+                let closest = query.closest();
+                let responders = query.responders();
 
                 let (previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
-                closest_nodes
-                    .truncate_furthest_than_expected_dk(previous_dht_size_estimate, std_dev);
+                let closest_responding_nodes =
+                    responders.nodes_until_edk(previous_dht_size_estimate, std_dev);
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
-                    if let Some((_, closest)) = self.closest_nodes.pop_lru() {
-                        self.dht_size_estimates_sum -= closest.dht_size_estimate();
+                    if let Some((_, (_, closest, responding))) = self.closest_nodes.pop_lru() {
+                        self.dht_size_estimates_sum -= closest;
+                        self.responders_based_dht_size_estimates_sum -= responding;
                     };
                 }
 
-                self.dht_size_estimates_sum += closest_nodes.dht_size_estimate();
+                self.dht_size_estimates_sum += closest.dht_size_estimate();
+                self.responders_based_dht_size_estimates_sum += responders.dht_size_estimate();
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
-                    put_query.start(&mut self.socket, closest_nodes.nodes())
+                    put_query.start(&mut self.socket, closest_responding_nodes)
                 }
 
-                self.closest_nodes.put(*id, closest_nodes.to_owned());
+                self.closest_nodes.put(
+                    *id,
+                    (
+                        closest_responding_nodes.to_vec(),
+                        closest.dht_size_estimate(),
+                        responders.dht_size_estimate(),
+                    ),
+                );
             };
         }
         for id in &done_put_queries {
@@ -294,12 +313,12 @@ impl Rpc {
 
         let mut query = PutQuery::new(target, request.clone(), sender);
 
-        if let Some(closest_nodes) = self
+        if let Some((closest_nodes, _, _)) = self
             .closest_nodes
             .get(&target)
-            .filter(|nodes| !nodes.is_empty() && nodes.into_iter().any(|n| n.valid_token()))
+            .filter(|(nodes, _, _)| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
         {
-            query.start(&mut self.socket, closest_nodes.nodes())
+            query.start(&mut self.socket, closest_nodes)
         } else {
             let salt = match request {
                 PutRequestSpecific::PutMutable(args) => args.salt,
@@ -382,7 +401,7 @@ impl Rpc {
             query.add_candidate(node)
         }
 
-        if let Some(cached_closest) = self.closest_nodes.get(&target) {
+        if let Some((cached_closest, _, _)) = self.closest_nodes.get(&target) {
             for node in cached_closest {
                 query.add_candidate(node.clone())
             }

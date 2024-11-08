@@ -16,7 +16,7 @@ fn main() {
 
     let dht = Dht::client().unwrap();
 
-    println!("Calculating Dht size by sampling random lookup queries within the past hour..",);
+    println!("Calculating Dht size by sampling random lookup queries..",);
 
     for lookups in 1.. {
         let _ = dht.find_node(Id::random()).unwrap();

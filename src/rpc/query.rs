@@ -21,8 +21,8 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct Query {
     pub request: RequestSpecific,
-    candidates: ClosestNodes,
-    closest_nodes: ClosestNodes,
+    closest: ClosestNodes,
+    responders: ClosestNodes,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
@@ -36,8 +36,8 @@ impl Query {
         Self {
             request,
 
-            candidates: ClosestNodes::new(target),
-            closest_nodes: ClosestNodes::new(target),
+            closest: ClosestNodes::new(target),
+            responders: ClosestNodes::new(target),
 
             inflight_requests: Vec::with_capacity(200),
             visited: HashSet::with_capacity(200),
@@ -50,12 +50,17 @@ impl Query {
     // === Getters ===
 
     pub fn target(&self) -> Id {
-        self.closest_nodes.target()
+        self.responders.target()
+    }
+
+    /// Closest nodes according to other nodes.
+    pub fn closest(&self) -> &ClosestNodes {
+        &self.closest
     }
 
     /// Return the closest responding nodes after the query is done.
-    pub fn closest_nodes(self) -> ClosestNodes {
-        self.closest_nodes
+    pub fn responders(&self) -> &ClosestNodes {
+        &self.responders
     }
 
     // === Public Methods ===
@@ -77,7 +82,7 @@ impl Query {
     /// Add a candidate node to query on next tick if it is among the closest nodes.
     pub fn add_candidate(&mut self, node: Node) {
         // ready for a ipv6 routing table?
-        self.candidates.add(node);
+        self.closest.add(node);
     }
 
     /// Visit explicitly given addresses, and add them to the visited set.
@@ -89,6 +94,16 @@ impl Query {
 
         let tid = socket.request(address, self.request.clone());
         self.inflight_requests.push(tid);
+
+        let tid = socket.request(
+            address,
+            RequestSpecific {
+                requester_id: Id::random(),
+                request_type: RequestTypeSpecific::Ping,
+            },
+        );
+        self.inflight_requests.push(tid);
+
         self.visited.insert(address);
     }
 
@@ -99,7 +114,7 @@ impl Query {
 
     /// Add a node that responded with a token as a probable storage node.
     pub fn add_responding_node(&mut self, node: Node) {
-        self.closest_nodes.add(node)
+        self.responders.add(node)
     }
 
     /// Add received response
@@ -132,7 +147,7 @@ impl Query {
         if done {
             for sender in &self.senders {
                 if let ResponseSender::ClosestNodes(s) = sender {
-                    let _ = s.send(self.closest_nodes.nodes().to_owned());
+                    let _ = s.send(self.responders.nodes().to_owned());
                 }
             }
         };
@@ -160,7 +175,7 @@ impl Query {
     /// Visit the closest candidates and remove them as candidates
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
         let to_visit = self
-            .candidates
+            .closest
             .nodes()
             .iter()
             .take(MAX_BUCKET_SIZE_K)
