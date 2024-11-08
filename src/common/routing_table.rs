@@ -1,7 +1,6 @@
 //! Simplified Kademlia routing table
 
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 use std::slice::Iter;
 
 use crate::common::{Id, Node, MAX_DISTANCE};
@@ -31,6 +30,18 @@ impl RoutingTable {
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
         self
+    }
+
+    // === Getters ===
+
+    /// Returns the [Id] of this node, where the distance is measured from.
+    pub fn id(&self) -> Id {
+        self.id
+    }
+
+    /// Returns the map of distances and their [KBucket]
+    pub fn buckets(&self) -> &BTreeMap<u8, KBucket> {
+        &self.buckets
     }
 
     // === Public Methods ===
@@ -73,7 +84,7 @@ impl RoutingTable {
             match &self.buckets.get(&i) {
                 Some(bucket) => {
                     for node in bucket.iter() {
-                        if result.len() < 20 {
+                        if result.len() < MAX_BUCKET_SIZE_K {
                             if node.is_secure() {
                                 result.push(node.clone());
                             } else {
@@ -88,9 +99,9 @@ impl RoutingTable {
             }
         }
 
-        if result.len() < 20 {
+        if result.len() < MAX_BUCKET_SIZE_K {
             for node in unsecure {
-                if result.len() < 20 {
+                if result.len() < MAX_BUCKET_SIZE_K {
                     result.push(node);
                 } else {
                     break;
@@ -160,6 +171,12 @@ impl KBucket {
         }
     }
 
+    // === Getters ===
+
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     // === Public Methods ===
 
     pub fn add(&mut self, incoming: Node) -> bool {
@@ -167,7 +184,10 @@ impl KBucket {
             // If it is the same socket address too, remove the old node,
             // and add the incoming one, effectively updating the node's
             // `last_seen` and moving it to the end of the bucket.
-            if self.nodes[index].same_adress(&incoming) {
+            //
+            // If the incoming node is secure, then the new socket address (if it differs)
+            // is the correct one anyways.
+            if self.nodes[index].same_adress(&incoming) || incoming.is_secure() {
                 self.nodes.remove(index);
                 self.nodes.push(incoming);
 
@@ -195,6 +215,10 @@ impl KBucket {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.nodes.len() >= MAX_BUCKET_SIZE_K
     }
 
     pub fn iter(&self) -> Iter<'_, Node> {
@@ -235,7 +259,7 @@ mod test {
 
         let mut expected_nodes: Vec<Node> = vec![];
 
-        for _ in 0..20 {
+        for _ in 0..MAX_BUCKET_SIZE_K {
             expected_nodes.push(Node::random());
         }
 

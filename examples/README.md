@@ -41,3 +41,9 @@ cargo run --example get_mutable <40 bytes hex target from put_mutable>
 ```sh
 cargo run --example custom_server
 ````
+
+## Measure the Dht size
+
+```sh
+cargo run --example measure_dht
+```

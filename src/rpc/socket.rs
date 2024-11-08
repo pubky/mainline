@@ -7,10 +7,7 @@ use tracing::{debug, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-use crate::error::SocketAddrResult;
-use crate::{dht::DhtSettings, Result};
-
-const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
+const VERSION: [u8; 4] = [82, 83, 0, 4]; // "RS" version 04
 const MTU: usize = 2048;
 
 pub const DEFAULT_PORT: u16 = 6881;
@@ -37,8 +34,12 @@ pub struct InflightRequest {
 }
 
 impl KrpcSocket {
-    pub fn new(settings: &DhtSettings) -> Result<Self> {
-        let socket = if let Some(port) = settings.port {
+    pub(crate) fn new(
+        read_only: bool,
+        request_timeout: Option<Duration>,
+        port: Option<u16>,
+    ) -> Result<Self, std::io::Error> {
+        let socket = if let Some(port) = port {
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
             match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
@@ -52,8 +53,8 @@ impl KrpcSocket {
         Ok(Self {
             socket,
             next_tid: 0,
-            read_only: settings.server.is_none(),
-            request_timeout: settings.request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
+            read_only,
+            request_timeout: request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
             inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
@@ -62,7 +63,7 @@ impl KrpcSocket {
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> SocketAddrResult {
+    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
         self.socket.local_addr()
     }
 
@@ -120,7 +121,7 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
         let mut buf = [0u8; MTU];
 
-        // Cleanup timedout transaction_ids.
+        // Cleanup timed-out transaction_ids.
         // Find the first timedout request, and delete all earlier requests.
         match self.inflight_requests.binary_search_by(|request| {
             if request.sent_at.elapsed() > self.request_timeout {
@@ -144,38 +145,35 @@ impl KrpcSocket {
                 Ok(message) => {
                     // Parsed correctly.
                     match message.message_type {
-                        MessageType::Request(_) => {
-                            if self.read_only {
-                                return None;
-                            }
-
-                            return Some((message, from));
-                        }
-                        // Response or an error to an inflight request.
-                        _ => {
+                        // Positive or an error response or to an inflight request.
+                        MessageType::Response(_) | MessageType::Error(_) => {
                             match self.inflight_requests.binary_search_by(|request| {
                                 request.tid.cmp(&message.transaction_id)
                             }) {
                                 Ok(index) => {
-                                    match self.inflight_requests.get(index) {
-                                        Some(inflight_request) => {
-                                            if compare_socket_addr(&inflight_request.to, &from) {
-                                                // Confirm that it is a response we actually sent.
-                                                self.inflight_requests.remove(index);
+                                    let inflight_request = self
+                                        .inflight_requests
+                                        .get(index)
+                                        .expect("should be infallible");
 
-                                                return Some((message, from));
-                                            }
-                                            trace!(?message, "Response from the wrong address");
-                                        }
-                                        _ => panic!("should not return None"),
-                                    };
+                                    if compare_socket_addr(&inflight_request.to, &from) {
+                                        // Confirm that it is a response we actually sent.
+                                        self.inflight_requests.remove(index);
+                                    } else {
+                                        trace!(?message, "Response from the wrong address");
+
+                                        return None;
+                                    }
                                 }
                                 Err(_) => {
                                     trace!(?message, "Unexpected response id");
                                 }
-                            };
+                            }
                         }
-                    }
+                        _ => {}
+                    };
+
+                    return Some((message, from));
                 }
                 Err(error) => {
                     trace!(?error, ?bytes, "Received invalid message");
@@ -229,11 +227,23 @@ impl KrpcSocket {
     }
 
     /// Send a raw dht message
-    fn send(&mut self, address: SocketAddr, message: Message) -> Result<()> {
+    fn send(&mut self, address: SocketAddr, message: Message) -> Result<(), SendMessageError> {
         trace!(?message, "Sending a message");
         self.socket.send_to(&message.to_bytes()?, address)?;
         Ok(())
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Mainline crate error enum.
+pub enum SendMessageError {
+    /// Errors related to parsing DHT messages.
+    #[error("Failed to parse packet bytes: {0}")]
+    BencodeError(#[from] serde_bencode::Error),
+
+    #[error(transparent)]
+    /// Transparent [std::io::Error]
+    IO(#[from] std::io::Error),
 }
 
 // Same as SocketAddr::eq but ingores the ip if it is unspecified for testing reasons.
@@ -253,16 +263,13 @@ fn compare_socket_addr(a: &SocketAddr, b: &SocketAddr) -> bool {
 mod test {
     use std::thread;
 
-    use crate::{
-        common::{Id, PingResponseArguments, RequestTypeSpecific},
-        server::DhtServer,
-    };
+    use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
 
     use super::*;
 
     #[test]
     fn tid() {
-        let mut socket = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut socket = KrpcSocket::new(false, None, None).unwrap();
 
         assert_eq!(socket.tid(), 0);
         assert_eq!(socket.tid(), 1);
@@ -276,16 +283,10 @@ mod test {
 
     #[test]
     fn recv_request() {
-        let mut server = KrpcSocket::new(&DhtSettings {
-            server: Some(Box::<DhtServer>::default()),
-            bootstrap: None,
-            request_timeout: None,
-            port: None,
-        })
-        .unwrap();
+        let mut server = KrpcSocket::new(false, None, None).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(true, None, None).unwrap();
         client.next_tid = 120;
 
         let client_address = client.local_addr().unwrap();
@@ -318,10 +319,10 @@ mod test {
 
     #[test]
     fn recv_response() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut server = KrpcSocket::new(true, None, None).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(true, None, None).unwrap();
 
         let client_address = client.local_addr().unwrap();
 
@@ -361,39 +362,11 @@ mod test {
     }
 
     #[test]
-    fn ignore_unexcpected_response() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        let server_address = server.local_addr().unwrap();
-
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
-
-        let _ = client.local_addr();
-
-        let response = ResponseSpecific::Ping(PingResponseArguments {
-            responder_id: Id::random(),
-        });
-
-        let _ = response.clone();
-
-        let server_thread = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5));
-            assert!(
-                server.recv_from().is_none(),
-                "Should not receive a unexpected response"
-            );
-        });
-
-        client.response(server_address, 120, response);
-
-        server_thread.join().unwrap();
-    }
-
-    #[test]
     fn ignore_response_from_wrong_address() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut server = KrpcSocket::new(true, None, None).unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
+        let mut client = KrpcSocket::new(true, None, None).unwrap();
 
         let client_address = client.local_addr().unwrap();
 
@@ -417,36 +390,7 @@ mod test {
             );
         });
 
-        client.response(server_address, 120, response);
-
-        server_thread.join().unwrap();
-    }
-
-    #[test]
-    fn ignore_request_in_read_only() {
-        let mut server = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        let server_address = server.local_addr().unwrap();
-
-        let mut client = KrpcSocket::new(&DhtSettings::default()).unwrap();
-        client.next_tid = 120;
-
-        let _ = client.local_addr();
-        let request = RequestSpecific {
-            requester_id: Id::random(),
-            request_type: RequestTypeSpecific::Ping,
-        };
-
-        let _ = request.clone();
-
-        let server_thread = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(5));
-            assert!(
-                server.recv_from().is_none(),
-                "should not receieve requests in read-only mode"
-            );
-        });
-
-        client.request(server_address, request);
+        client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
     }

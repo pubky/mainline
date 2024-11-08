@@ -16,10 +16,10 @@ pub const TOKEN_ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 #[derive(Clone, PartialEq)]
 /// Node entry in Kademlia routing table
 pub struct Node {
-    pub id: Id,
-    pub address: SocketAddr,
-    pub token: Option<Vec<u8>>,
-    last_seen: Instant,
+    pub(crate) id: Id,
+    pub(crate) address: SocketAddr,
+    pub(crate) token: Option<Vec<u8>>,
+    pub(crate) last_seen: Instant,
 }
 
 impl Debug for Node {
@@ -43,8 +43,17 @@ impl Node {
         }
     }
 
+    // === Getters ===
+
+    pub fn id(&self) -> &Id {
+        &self.id
+    }
+
+    pub fn address(&self) -> &SocketAddr {
+        &self.address
+    }
+
     /// Creates a random node for testing purposes.
-    #[cfg(test)]
     pub fn random() -> Node {
         Node {
             id: Id::random(),
@@ -88,8 +97,10 @@ impl Node {
         self.address == other.address
     }
 
+    /// Node [Id] is valid for its IP address.
+    ///
     /// Check [BEP0042](https://www.bittorrent.org/beps/bep_0042.html).
-    pub(crate) fn is_secure(&self) -> bool {
+    pub fn is_secure(&self) -> bool {
         self.id.is_valid_for_ip(&self.address.ip())
     }
 }

@@ -6,25 +6,23 @@ use std::net::SocketAddr;
 use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
 
-use super::socket::KrpcSocket;
-use crate::Error;
+use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
     common::{
         ErrorSpecific, Id, Node, PutRequest, PutRequestSpecific, RequestSpecific,
-        RequestTypeSpecific, RoutingTable,
+        RequestTypeSpecific, MAX_BUCKET_SIZE_K,
     },
-    rpc::{PutResult, Response, ResponseSender},
+    rpc::{Response, ResponseSender},
 };
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and
 /// repeating this process until no closer nodes (that aren't already queried) are found.
 #[derive(Debug)]
-pub struct Query {
-    pub target: Id,
+pub(crate) struct Query {
     pub request: RequestSpecific,
-    candidates: RoutingTable,
-    responders: RoutingTable,
+    closest: ClosestNodes,
+    responders: ClosestNodes,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     senders: Vec<ResponseSender>,
@@ -36,11 +34,10 @@ impl Query {
         trace!(?target, ?request, "New Query");
 
         Self {
-            target,
             request,
 
-            candidates: RoutingTable::new().with_id(target),
-            responders: RoutingTable::new().with_id(target),
+            closest: ClosestNodes::new(target),
+            responders: ClosestNodes::new(target),
 
             inflight_requests: Vec::with_capacity(200),
             visited: HashSet::with_capacity(200),
@@ -52,9 +49,18 @@ impl Query {
 
     // === Getters ===
 
+    pub fn target(&self) -> Id {
+        self.responders.target()
+    }
+
+    /// Closest nodes according to other nodes.
+    pub fn closest(&self) -> &ClosestNodes {
+        &self.closest
+    }
+
     /// Return the closest responding nodes after the query is done.
-    pub fn closest(&self) -> Vec<Node> {
-        self.responders.closest(&self.target)
+    pub fn responders(&self) -> &ClosestNodes {
+        &self.responders
     }
 
     // === Public Methods ===
@@ -76,7 +82,7 @@ impl Query {
     /// Add a candidate node to query on next tick if it is among the closest nodes.
     pub fn add_candidate(&mut self, node: Node) {
         // ready for a ipv6 routing table?
-        self.candidates.add(node);
+        self.closest.add(node);
     }
 
     /// Visit explicitly given addresses, and add them to the visited set.
@@ -88,6 +94,16 @@ impl Query {
 
         let tid = socket.request(address, self.request.clone());
         self.inflight_requests.push(tid);
+
+        let tid = socket.request(
+            address,
+            RequestSpecific {
+                requester_id: Id::random(),
+                request_type: RequestTypeSpecific::Ping,
+            },
+        );
+        self.inflight_requests.push(tid);
+
         self.visited.insert(address);
     }
 
@@ -98,12 +114,12 @@ impl Query {
 
     /// Add a node that responded with a token as a probable storage node.
     pub fn add_responding_node(&mut self, node: Node) {
-        self.responders.add(node.clone());
+        self.responders.add(node)
     }
 
     /// Add received response
     pub fn response(&mut self, from: SocketAddr, response: Response) {
-        let target = self.target;
+        let target = self.target();
 
         debug!(?target, ?response, ?from, "Query got response");
 
@@ -123,10 +139,20 @@ impl Query {
 
         // If no more inflight_requests are inflight in the socket (not timed out),
         // then the query is done.
-        !self
+        let done = !self
             .inflight_requests
             .iter()
-            .any(|&tid| socket.inflight(&tid))
+            .any(|&tid| socket.inflight(&tid));
+
+        if done {
+            for sender in &self.senders {
+                if let ResponseSender::ClosestNodes(s) = sender {
+                    let _ = s.send(self.responders.nodes().to_owned());
+                }
+            }
+        };
+
+        done
     }
 
     // === Private Methods ===
@@ -148,10 +174,17 @@ impl Query {
 
     /// Visit the closest candidates and remove them as candidates
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {
-        for node in self.candidates.closest(&self.target) {
-            if !self.visited.contains(&node.address) {
-                self.visit(socket, node.address);
-            }
+        let to_visit = self
+            .closest
+            .nodes()
+            .iter()
+            .take(MAX_BUCKET_SIZE_K)
+            .filter(|node| !self.visited.contains(&node.address))
+            .map(|node| node.address)
+            .collect::<Vec<_>>();
+
+        for address in to_visit {
+            self.visit(socket, address);
         }
     }
 }
@@ -162,13 +195,17 @@ pub struct PutQuery {
     /// Nodes that confirmed success
     stored_at: u8,
     inflight_requests: Vec<u16>,
-    sender: Option<Sender<PutResult>>,
+    sender: Option<Sender<Result<Id, PutError>>>,
     request: PutRequestSpecific,
     error: Option<ErrorSpecific>,
 }
 
 impl PutQuery {
-    pub fn new(target: Id, request: PutRequestSpecific, sender: Option<Sender<PutResult>>) -> Self {
+    pub fn new(
+        target: Id,
+        request: PutRequestSpecific,
+        sender: Option<Sender<Result<Id, PutError>>>,
+    ) -> Self {
         Self {
             target,
             stored_at: 0,
@@ -179,7 +216,7 @@ impl PutQuery {
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Vec<Node>) {
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Node]) {
         // Already started.
         if !self.inflight_requests.is_empty() {
             panic!("should not call PutQuery.start() twice");
@@ -190,7 +227,7 @@ impl PutQuery {
 
         if let Some(sender) = &self.sender {
             if nodes.is_empty() {
-                let _ = sender.send(Err(Error::NoClosestNodes));
+                let _ = sender.send(Err(PutError::NoClosestNodes));
             }
         }
 
@@ -250,7 +287,7 @@ impl PutQuery {
                     let _ = self
                         .sender
                         .to_owned()
-                        .map(|sender| sender.send(Err(Error::QueryError(error))));
+                        .map(|sender| sender.send(Err(PutError::ErrorResponse(error))));
                 }
             } else {
                 info!(?target, stored_at = ?self.stored_at, "PutQuery Done");
@@ -263,4 +300,23 @@ impl PutQuery {
 
         false
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Query errors
+pub enum PutError {
+    /// Failed to find any nodes close, usually means dht node failed to bootstrap,
+    /// so the routing table is empty. Check the machine's access to UDP socket,
+    /// or find better bootstrapping nodes.
+    #[error("Failed to find any nodes close to store value at")]
+    NoClosestNodes,
+
+    /// Put Query faild to store at any nodes, and got at least one
+    /// 3xx error response
+    #[error("Query Error Response")]
+    ErrorResponse(ErrorSpecific),
+
+    /// [crate::rpc::Rpc::put] query is already inflight to the same target
+    #[error("Put query is already inflight to the same target: {0}")]
+    PutQueryIsInflight(Id),
 }
