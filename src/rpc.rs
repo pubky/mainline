@@ -30,11 +30,10 @@ pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
-pub const DEFAULT_BOOTSTRAP_NODES: [&str; 5] = [
+pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
     "dht.libtorrent.org:25401",
-    "dht.anacrolix.link:42069",
     "relay.pkarr.org:6881",
 ];
 
