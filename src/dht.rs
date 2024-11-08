@@ -385,7 +385,7 @@ pub enum ActorMessage {
 pub struct Info {
     id: Id,
     local_address: Result<SocketAddr, std::io::Error>,
-    dht_size_estimate: (usize, f64),
+    dht_size_estimate: (usize, usize, f64),
 }
 
 impl Info {
@@ -397,13 +397,14 @@ impl Info {
     pub fn local_addr(&self) -> Result<&SocketAddr, &std::io::Error> {
         self.local_address.as_ref()
     }
-    /// Dht size estimate
-    pub fn dht_size_estimate(&self) -> usize {
-        self.dht_size_estimate.0
-    }
-    /// The standard deviation (fraction) from the the [Self::dht_size_estimate]
-    pub fn dht_size_estimate_standard_deviation(&self) -> f64 {
-        self.dht_size_estimate.1
+    /// Returns:
+    ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
+    ///  2. Pessimistic Dht size estimate based only on the nodes responding to our queries.
+    ///  3. Standard deviaiton of both estimations.
+    ///
+    /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
+    pub fn dht_size_estimate(&self) -> (usize, usize, f64) {
+        self.dht_size_estimate
     }
 }
 

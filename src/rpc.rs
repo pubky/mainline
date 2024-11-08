@@ -146,16 +146,20 @@ impl Rpc {
         &self.routing_table
     }
 
-    /// Returns the current Dht size estimate and the expected standard deviation (fraction).
+    /// Returns:
+    ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
+    ///  2. Pessimistic Dht size estimate based only on the nodes responding to our queries.
+    ///  3. Standard deviaiton of both estimations.
     ///
-    /// [Read more](../../docs/dht_size_estimate.md)
-    pub fn dht_size_estimate(&self) -> (usize, f64) {
-        let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
-
-        let estimate =
+    /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
+    pub fn dht_size_estimate(&self) -> (usize, usize, f64) {
+        let normal = self.dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
+        let pessimistic =
             self.responders_based_dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
 
-        (estimate, std_dev)
+        let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
+
+        (normal, pessimistic, std_dev)
     }
 
     // === Public Methods ===
@@ -208,7 +212,7 @@ impl Rpc {
                 let closest = query.closest();
                 let responders = query.responders();
 
-                let (previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
+                let (_, previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
                 let closest_responding_nodes =
                     responders.nodes_until_edk(previous_dht_size_estimate, std_dev);
 

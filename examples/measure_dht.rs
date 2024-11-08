@@ -22,12 +22,13 @@ fn main() {
         let _ = dht.find_node(Id::random()).unwrap();
 
         let info = dht.info().unwrap();
+        let (estimate, _, std_dev) = info.dht_size_estimate();
 
         println!(
-            "Dht size esttimate after {} lookups: {} +-{:.0}% nodes",
+            "Dht size estimate after {} lookups: {} +-{:.0}% nodes",
             lookups,
-            format_number(info.dht_size_estimate()),
-            (info.dht_size_estimate_standard_deviation() * 2.0) * 100.0
+            format_number(estimate),
+            (std_dev * 2.0) * 100.0
         );
     }
 }

@@ -74,7 +74,7 @@ fn main() {
     println!("\nDone.\n");
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is not set");
-    let file_path = std::path::Path::new(&manifest_dir).join("docs/plot.png");
+    let file_path = std::path::Path::new(&manifest_dir).join("../plot.png");
 
     draw_plot(
         dht_size as f64,

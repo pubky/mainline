@@ -2,15 +2,15 @@
 
 All notable changes to mainline dht will be documented in this file.
 
-##  [3.0.0](https://github.com/pubky/mainline/compare/3a4c3312410e69201a287e40cb7b6dbb30c663f2..v3.0.0) - 2024-09-27
+##  [4.0.1](https://github.com/pubky/mainline/compare/3a4c3312410e69201a287e40cb7b6dbb30c663f2..v3.0.0) - 2024-09-27
 
 ### Added
 
 - Export `errors` module containing `PutError` as a part of the response of `Rpc::put`.
-- `Dht::id()` and `AsyncDht::id()` to get the node's Id.
 - `Dht::find_node()` and `AsyncDht::find_node()` to lookup a certain target, without calling `get_peers` and the closest responding nodes.
 - `Dht::info()` and `AsyncDht::info()` some internal information about the node from one method.
 - `Info::dht_size_estimate` to get the ongoing dht size estimate resulting from watching results of all queries.
+- `Info::id` to get the Id of the node.
 - `measure_dht` example to estimate the DHT size.
 
 ### Changed
@@ -31,6 +31,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Node` fields are now all private, with `id()` and `address()` getters.
 - Changed `Settings` to be a the Builder, and make fields private.
 - Replaced `Rpc::new()` with `Settings::build_rpc()`.
+- Update the client version from `RS01` to `RS04`
 
 ### Removed
 

@@ -25,26 +25,58 @@ Similarly, we will not discuss the effect of Sybil attacks on privacy, if one wa
 
 ## Vertical Sybil Attacks
 
-In a DHT, to store or read a piece of information, you need to lookup the closest `k` (usually 20) nodes to that info hash using XOR metric defined in [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html).
+### Challenge
 
-A vertical Sybil attack is an attack where a malicious actor runs enough nodes close to an info hash that a writer or reader only writes or reads to and from the
-attacker nodes, which in turn censors the information that it doesn't want to make available to the network.
+In a DHT, nodes store a piece of information with a redundancy factor `k` (usually 20), meaning that a node tries to find the 
+`k` closest nodes to the info hash using XOR metric defined in [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) before
+storing the data in these nodes.
 
-A vertical Sybil attack is defeated, if at least one honest node is among the closest `k` nodes to an info hash (target).
+This static redundancy factor, opens the room for Vertical Sybil attacks is where a malicious actor runs enough nodes close to an info hash 
+that a writer only writes to the attacker Sybil nodes, making it easy for that attacker to censors that information from the rest of the network.
 
-Our solution is to not choose the closest `k` nodes to publish our data to, but instead we choose all the nodes that are closer to the target than a distance `dk` 
-which is the distance of the `k` node given a specific size of the DHT.
+Consider the following example, with a Dht of size `8` and `k=2`, drawing nodes at their distances to a given target, should look like this:
 
-Why? because if nodes are distributed evenly (uniformly) across the ID space (from 0 to the max ID) then the closest 20th node should be at a distance around 
-`20 * (max ID / number of nodes)`. If instead we found 40 nodes before that `dk` then surely some of these nodes if not half of them are malicious Sybil nodes,
-so if we publish to the 40, we make sure that some honest nodes got the information we need to publish.
+```md
+             (1)    (2)                  (3)    (4)           (5)           (6)           (7)    (8)       
+|------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
+0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
+```
 
-This strategy requires two things:
+So, if an attacker injected two (even closer) nodes, that don't match the distribution of the rest of network (Vertical Sybil as opposed to Horizontal Sybil),
+then you would expect the example above to look like this instead:
 
-1. Enforcing a uniform distribution of nodes (nodes shouldn't have the liberty to choose where to land on the ID space), which is solved using [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html).
-2. An accurate and fresh estimation of the DHT size, which we discuss how we obtain efficiently [here](./dht_size_estimate.md).
+```md
+(s1)  (s2)   (1)    (2)                  (3)    (4)           (5)           (6)           (7)    (8)       
+|------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
+0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
+```
 
-An attacker then can't fool a node to only write to its upnormally close nodes to the target, unless it changes the size of the netire network, aka: horizontal Sybil attack.
+As you can see, if we only store data at the closest `k=2` nodes, the data would be only stored within attacker nodes, thus successefully censored.
+
+### Solution
+
+The solution we use in this Mainline implementation, is to use the `expected distance to k (edk)` instead of `k`.
+
+To understand what does that mean, consider that we have a rough estimation of the DHT size (which we obtain as explained in the 
+documentation of the [Dht Size Estimate](./dht_size_estimate.md)), then we can _expect_ that the closest `k` nodes, are going to be
+within a range `edk`, for example, continuing the example from above, in a Dht of `8` nodes in a `16` ID space, we can expect
+the closest `2` nodes, within distance `4`.
+
+```md
+(s1)  (s2)   (1)    (2)   [edk]          (3)    (4)           (5)           (6)           (7)    (8)       
+|------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
+0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
+```
+
+If we store data in all nodes until `edk` (the expected distance of the first 2 nodes), we would store the data at at least 2 honest nodes.
+
+Because the nature of the Dht queries, we should expect to get a response from at least one of these honest nodes as we query closer and closer nodes to the target info hash.
+
+### Assumptions
+
+This strategy depends on an [accurate and consistent estimate of the DHT size](./dht_size_estimate.md), which itself depends on the assumption of uniform
+distribution of nodes across the ID space. That uniform distribution can be verified separately by crawling the DHT, but it is also can enforced by only storing
+data in (secure nodes) which are nodes whose IDs are generated relatively to their IP address according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html).
 
 ## Horizontal Sybil Attacks
 

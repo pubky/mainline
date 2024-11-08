@@ -1,0 +1,12 @@
+[package]
+name = "sim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.20", features = ["derive"] }
+ctrlc = "3.4.5"
+mainline = { version = "3.0.1", path = "../..", features = ["__private_simulation"] }
+num_cpus = "1.16.0"
+plotters = "0.3.7"
+statrs = "0.17.1"

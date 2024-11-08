@@ -7,7 +7,7 @@ use tracing::{debug, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-const VERSION: [u8; 4] = [82, 83, 0, 1]; // "RS" version 01
+const VERSION: [u8; 4] = [82, 83, 0, 4]; // "RS" version 04
 const MTU: usize = 2048;
 
 pub const DEFAULT_PORT: u16 = 6881;

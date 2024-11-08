@@ -6,7 +6,8 @@ within the context of [Sybil Resistance](./sybil-resistance.md).
 If you want to see a live estimation of the Dht size, you can run (in the root directory):
 
 ```
-cargo run -- example measure_dht
+cd ./simulation
+cargo run 
 ```
 
 ## How does it work?
@@ -22,14 +23,14 @@ Assuming a random but uniform distribution of nodes (which can be measured indep
 you should see nodes distributed somewhat like this:
 
 ```md
-            (1)    (2)                  (3)    (4)           (5)           (6)           (7)      (8)       
+             (1)    (2)                  (3)    (4)           (5)           (6)           (7)    (8)       
 |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
 ```
 
 So if you make a lookup and optained this partial view of the network:
 ```md
-            (1)    (2)                  (3)                                (4)                  (5)       
+             (1)    (2)                  (3)                                (4)                  (5)       
 |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
 ```
@@ -80,6 +81,17 @@ you will miss, and the smaller you will think the Dht is.
 
 This is an error on the side of conservatism. And I can't think of anything in the real world that could distort the results
 expected from this simulation to the direction of overestimating the Dht size.
+
+### See it yourself
+
+You can measure the Dht size yourself by running:
+
+```
+cargo run --example measure_dht
+```
+
+Note that the estimate will be understated if you are using a hostile network to UDP packets or behind a VPN making your requests look like they are coming from the 
+same IP as many other users (causing nodes to rate limit your requests more often).
 
 ## Acknowledgment
 
