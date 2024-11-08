@@ -39,11 +39,6 @@ __private_simulation = []
 
 default = []
 
-[[example]]
-name = "dht_size_estimate"
-path = "examples/dht_size_estimate.rs"
-required-features = ["__private_simulation"]
-
 [package.metadata.docs.rs]
 all-features = true
 
