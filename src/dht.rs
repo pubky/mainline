@@ -120,7 +120,9 @@ impl Dht {
     pub(crate) fn new(settings: Settings) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::unbounded();
 
-        thread::spawn(move || run(settings, receiver));
+        thread::Builder::new()
+            .name("Mainline Dht actor thread".to_string())
+            .spawn(move || run(settings, receiver))?;
 
         let (tx, rx) = flume::bounded(1);
 
@@ -393,7 +395,7 @@ fn run(settings: Settings, receiver: Receiver<ActorMessage>) {
     };
 }
 
-pub enum ActorMessage {
+pub(crate) enum ActorMessage {
     Info(Sender<Info>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
