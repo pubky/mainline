@@ -81,17 +81,12 @@ impl Query {
 
     /// Add a candidate node to query on next tick if it is among the closest nodes.
     pub fn add_candidate(&mut self, node: Rc<Node>) {
-        // ready for a ipv6 routing table?
         self.closest.add(node);
     }
 
     /// Visit explicitly given addresses, and add them to the visited set.
     /// only used from the Rpc when calling bootstrapping nodes.
     pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddr) {
-        if address.is_ipv6() {
-            return;
-        }
-
         let tid = socket.request(address, self.request.clone());
         self.inflight_requests.push(tid);
 

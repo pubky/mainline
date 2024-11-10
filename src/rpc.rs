@@ -21,6 +21,7 @@ use crate::common::{
     MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
+use crate::ipv6_resolve::resolve_ipv6;
 
 use query::{PutQuery, Query};
 use socket::KrpcSocket;
@@ -100,8 +101,21 @@ impl Rpc {
                         .collect(),
                 )
                 .iter()
-                .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
-                .flatten()
+                .flat_map(|s| {
+                    let mut addrs = vec![];
+                    // let mut addrs = s
+                    //     .to_socket_addrs()
+                    //     .map(|addrs| addrs.collect::<Vec<_>>())
+                    //     .unwrap_or(vec![]);
+
+                    if let Some(ipv6_addrs) = resolve_ipv6(s) {
+                        for addr in ipv6_addrs {
+                            addrs.push(addr)
+                        }
+                    };
+
+                    addrs
+                })
                 .collect::<Vec<_>>(),
             socket,
             routing_table: RoutingTable::new().with_id(id),

@@ -191,6 +191,8 @@ impl Server for DefaultServer {
                     ResponseSpecific::FindNode(FindNodeResponseArguments {
                         responder_id: *rpc.id(),
                         nodes: rpc.routing_table().closest(target),
+                        // TODO: return ipv6 addresses
+                        nodes6: None,
                     }),
                 );
             }

@@ -5,7 +5,7 @@
 mod internal;
 
 use std::convert::TryInto;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 
 use bytes::Bytes;
@@ -103,6 +103,7 @@ pub struct FindNodeRequestArguments {
 pub struct FindNodeResponseArguments {
     pub responder_id: Id,
     pub nodes: Vec<Rc<Node>>,
+    pub nodes6: Option<Vec<Rc<Node>>>,
 }
 
 // Get anything
@@ -224,6 +225,12 @@ impl Message {
                             arguments: internal::DHTFindNodeRequestArguments {
                                 id: requester_id.to_vec(),
                                 target: find_node_args.target.to_vec(),
+                                want: Some(
+                                    vec![b"n4", b"n6"]
+                                        .into_iter()
+                                        .map(serde_bytes::ByteBuf::from)
+                                        .collect::<Vec<_>>(),
+                                ),
                             },
                         }
                     }
@@ -310,6 +317,7 @@ impl Message {
                             arguments: internal::DHTFindNodeResponseArguments {
                                 id: find_node_args.responder_id.to_vec(),
                                 nodes: nodes4_to_bytes(&find_node_args.nodes),
+                                nodes6: find_node_args.nodes6.map(|n6| nodes6_to_bytes(&n6)),
                             },
                         }
                     }
@@ -501,9 +509,11 @@ impl Message {
                             })
                         }
                         internal::DHTResponseSpecific::FindNode { arguments } => {
+                            dbg!(&arguments.nodes6);
                             ResponseSpecific::FindNode(FindNodeResponseArguments {
                                 responder_id: Id::from_bytes(&arguments.id)?,
                                 nodes: bytes_to_nodes4(&arguments.nodes)?,
+                                nodes6: arguments.nodes6.map(bytes_to_nodes6).transpose()?,
                             })
                         }
                         internal::DHTResponseSpecific::GetPeers { arguments } => {
@@ -691,16 +701,21 @@ fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr, DecodeMessa
         6 => {
             let ip = Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]);
 
-            let port_bytes_as_array: [u8; 2] = bytes[4..6]
-                .try_into()
-                .map_err(|_| DecodeMessageError::InvalidPortEncoding)?;
-
+            let port_bytes_as_array: [u8; 2] = bytes[4..6].try_into().expect("infallible");
             let port: u16 = u16::from_be_bytes(port_bytes_as_array);
 
             Ok(SocketAddr::new(IpAddr::V4(ip), port))
         }
 
-        18 => Err(DecodeMessageError::Ipv6Unsupported),
+        18 => {
+            let ip_bytes: [u8; 16] = bytes[0..16].try_into().expect("infallible");
+            let ip = Ipv6Addr::from(ip_bytes);
+
+            let port_bytes_as_array: [u8; 2] = bytes[16..18].try_into().expect("infallible");
+            let port: u16 = u16::from_be_bytes(port_bytes_as_array);
+
+            Ok(SocketAddr::new(IpAddr::V6(ip), port))
+        }
 
         _ => Err(DecodeMessageError::InvalidSocketAddrEncodingLength),
     }
@@ -761,6 +776,36 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Rc<Node>>, DecodeMess
     Ok(to_ret)
 }
 
+fn nodes6_to_bytes(nodes: &[Rc<Node>]) -> Vec<u8> {
+    let node4_byte_size: usize = ID_SIZE + 18;
+    let mut vec = Vec::with_capacity(node4_byte_size * nodes.len());
+    for node in nodes {
+        vec.append(&mut node.id.to_vec());
+        vec.append(&mut sockaddr_to_bytes(&node.address));
+    }
+    vec
+}
+
+fn bytes_to_nodes6<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Rc<Node>>, DecodeMessageError> {
+    let bytes = bytes.as_ref();
+    let node4_byte_size: usize = ID_SIZE + 18;
+    if bytes.len() % node4_byte_size != 0 {
+        return Err(DecodeMessageError::InvalidNodes6);
+    }
+
+    let expected_num = bytes.len() / node4_byte_size;
+    let mut to_ret = Vec::with_capacity(expected_num);
+    for i in 0..bytes.len() / node4_byte_size {
+        let i = i * node4_byte_size;
+        let id = Id::from_bytes(&bytes[i..i + ID_SIZE])?;
+        let sockaddr = bytes_to_sockaddr(&bytes[i + ID_SIZE..i + node4_byte_size])?;
+        let node = Node::new(id, sockaddr);
+        to_ret.push(node.into());
+    }
+
+    Ok(to_ret)
+}
+
 fn peers_to_bytes(peers: Vec<SocketAddr>) -> Vec<serde_bytes::ByteBuf> {
     peers
         .iter()
@@ -781,15 +826,12 @@ pub enum DecodeMessageError {
     #[error("Wrong number of bytes for nodes")]
     InvalidNodes4,
 
+    #[error("Wrong number of bytes for nodes6")]
+    InvalidNodes6,
+
     /// Message transaction_id is not two bytes.
     #[error("Invalid transaction_id: {0:?}")]
     InvalidTransactionId(Vec<u8>),
-
-    #[error("wrong number of bytes for port")]
-    InvalidPortEncoding,
-
-    #[error("IPv6 is not yet implemented")]
-    Ipv6Unsupported,
 
     #[error("Wrong number of bytes for sockaddr")]
     InvalidSocketAddrEncodingLength,

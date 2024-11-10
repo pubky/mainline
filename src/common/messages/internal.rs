@@ -161,6 +161,8 @@ pub struct DHTFindNodeRequestArguments {
 
     #[serde(with = "serde_bytes")]
     pub target: Vec<u8>,
+
+    pub want: Option<Vec<serde_bytes::ByteBuf>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -170,6 +172,10 @@ pub struct DHTFindNodeResponseArguments {
 
     #[serde(with = "serde_bytes")]
     pub nodes: Vec<u8>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub nodes6: Option<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -208,7 +214,7 @@ pub struct DHTGetPeersResponseArguments {
     #[serde(default)]
     pub nodes: Option<Vec<u8>>,
 
-    // values are not optional, because if they are missing this missing
+    // values are not optional, because if they are missing
     // we can just treat this as DHTNoValuesResponseArguments
     pub values: Vec<serde_bytes::ByteBuf>,
 }

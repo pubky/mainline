@@ -6,6 +6,7 @@
 // Public modules
 mod common;
 mod dht;
+mod ipv6_resolve;
 
 // Public modules
 #[cfg(feature = "async")]

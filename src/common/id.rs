@@ -4,7 +4,7 @@ use rand::Rng;
 use std::convert::TryInto;
 use std::{
     fmt::{self, Debug, Display, Formatter},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     str::FromStr,
 };
 
@@ -13,6 +13,7 @@ pub const ID_SIZE: usize = 20;
 pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
 
 const IPV4_MASK: u32 = 0x030f3fff;
+const IPV6_MASK: u64 = 0x0103070f1f3f7fff;
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 #[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash)]
@@ -100,24 +101,30 @@ impl Id {
 
     /// Validate that this Id is valid with respect to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn is_valid_for_ip(&self, ip: &IpAddr) -> bool {
+        // TODO: use is_global when it is stable feature.
         match ip {
-            IpAddr::V4(ipv4) => {
-                if ipv4.is_private() {
+            IpAddr::V4(ip) => {
+                if ip.is_private() || ip.is_loopback() || ip.is_link_local() {
                     return true;
                 }
 
-                let expected = first_21_bits(&id_prefix_ipv4(ipv4, self.0[ID_SIZE - 1]));
+                let expected = first_21_bits(&id_prefix_ipv4(ip, self.0[ID_SIZE - 1]));
                 let actual = first_21_bits(&self.0);
 
                 expected == actual
             }
-            IpAddr::V6(_ipv6) => {
-                unimplemented!()
+            IpAddr::V6(ip) => {
+                if ip.is_loopback()
+                    // Check if the IPv6 address is within the ULA range (fc00::/7)
+                    || ip.segments()[0] & 0xFE00 == 0xFC00
+                {
+                    return true;
+                }
 
-                // // For IPv6, checking the ULA range fc00::/7
-                // if (ipv6.segments()[0] & 0xFE00 == 0xFC00) {
-                //     return true;
-                // }
+                let expected = first_21_bits(&id_prefix_ipv6(ip, self.0[ID_SIZE - 1]));
+                let actual = first_21_bits(&self.0);
+
+                expected == actual
             }
         }
     }
@@ -144,18 +151,25 @@ fn from_ipv4_and_r(bytes: [u8; 20], ip: Ipv4Addr, r: u8) -> Id {
 }
 
 fn id_prefix_ipv4(ip: &Ipv4Addr, r: u8) -> [u8; 3] {
-    let r32: u32 = r.into();
-    let ip_int: u32 = u32::from_be_bytes(ip.octets());
-    let masked_ip: u32 = (ip_int & IPV4_MASK) | (r32 << 29);
+    let masked_ip: u32 = (ip.to_bits() & IPV4_MASK) | ((r as u32) << 29);
 
     let mut digest = CASTAGNOLI.digest();
     digest.update(&masked_ip.to_be_bytes());
 
     let crc = digest.finalize();
 
-    crc.to_be_bytes()[..3]
-        .try_into()
-        .expect("Failed to convert bytes 0-2 of the crc into a 3-byte array")
+    crc.to_be_bytes()[..3].try_into().expect("infallible")
+}
+
+fn id_prefix_ipv6(ip: &Ipv6Addr, r: u8) -> [u8; 3] {
+    let masked_ip: u64 = ((ip.to_bits() >> 64) as u64 & IPV6_MASK) | ((r as u64) << 61);
+
+    let mut digest = CASTAGNOLI.digest();
+    digest.update(&masked_ip.to_be_bytes());
+
+    let crc: u32 = digest.finalize();
+
+    crc.to_be_bytes()[..3].try_into().expect("infallible")
 }
 
 impl Display for Id {
