@@ -56,11 +56,11 @@ impl ClosestNodes {
     /// Get the closest [K][MAX_BUCKET_SIZE_K] nodes or all the nodes until the
     /// expected distance of the Kth node, given a DHT size estimation.
     pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize, std_dev: f64) -> &[Rc<Node>] {
-        // TODO: Write a unit test to prove we are ignoring Sybil.
         let mut until_edk = 0;
 
-        let expected_dk =
-            ((1.0 / (previous_dht_size_estimate as f64 + 1.0)) * (1.0 + (std_dev * 2.0))) as u128;
+        let expected_dht_size = (previous_dht_size_estimate as f64 * (1.0 - std_dev * 2.0)) + 1.0;
+        let expected_d1 = u128::MAX as f64 / expected_dht_size;
+        let expected_dk = (20.0 * expected_d1) as u128;
 
         for node in &self.nodes {
             let distance = distance(&self.target, node);
@@ -167,6 +167,36 @@ mod tests {
         closest_nodes.add(secure.clone());
 
         assert_eq!(closest_nodes.nodes(), vec![secure, unsecure])
+    }
+
+    #[test]
+    fn counter_vertical_sybil_attack() {
+        let target = Id::random();
+        let dht_size_estimate = 200;
+
+        let mut closest_nodes = ClosestNodes::new(target);
+
+        let target_bytes = target.as_bytes();
+
+        for _ in 0..dht_size_estimate {
+            closest_nodes.add(Node::random().into());
+        }
+
+        let mut sybil = ClosestNodes::new(target);
+
+        for _ in 0..20 {
+            let mut bytes = target_bytes.to_vec();
+            bytes[18..].copy_from_slice(&Id::random().as_bytes()[18..]);
+            let id = Id::from_bytes(bytes).unwrap();
+            let node = Rc::new(Node::random().with_id(id));
+
+            sybil.add(node.clone());
+            closest_nodes.add(node);
+        }
+
+        let closest = closest_nodes.nodes_until_edk(dht_size_estimate, 0.0);
+
+        assert!((closest.len() - sybil.nodes().len()) > 10);
     }
 
     #[test]
