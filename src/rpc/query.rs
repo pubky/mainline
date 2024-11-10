@@ -1,7 +1,7 @@
 //! Manage iterative queries and their corresponding request/response.
 
-use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::{collections::HashSet, rc::Rc};
 
 use flume::Sender;
 use tracing::{debug, error, info, trace, warn};
@@ -80,7 +80,7 @@ impl Query {
     }
 
     /// Add a candidate node to query on next tick if it is among the closest nodes.
-    pub fn add_candidate(&mut self, node: Node) {
+    pub fn add_candidate(&mut self, node: Rc<Node>) {
         // ready for a ipv6 routing table?
         self.closest.add(node);
     }
@@ -113,7 +113,7 @@ impl Query {
     }
 
     /// Add a node that responded with a token as a probable storage node.
-    pub fn add_responding_node(&mut self, node: Node) {
+    pub fn add_responding_node(&mut self, node: Rc<Node>) {
         self.responders.add(node)
     }
 
@@ -147,7 +147,13 @@ impl Query {
         if done {
             for sender in &self.senders {
                 if let ResponseSender::ClosestNodes(s) = sender {
-                    let _ = s.send(self.responders.nodes().to_owned());
+                    let _ = s.send(
+                        self.responders
+                            .nodes()
+                            .iter()
+                            .map(|n| n.as_ref().clone())
+                            .collect::<Vec<_>>(),
+                    );
                 }
             }
         };
@@ -216,7 +222,7 @@ impl PutQuery {
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Node]) {
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Rc<Node>]) {
         // Already started.
         if !self.inflight_requests.is_empty() {
             panic!("should not call PutQuery.start() twice");

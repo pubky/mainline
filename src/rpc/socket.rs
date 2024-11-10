@@ -319,42 +319,47 @@ mod test {
 
     #[test]
     fn recv_response() {
-        let mut server = KrpcSocket::new(true, None, None).unwrap();
-        let server_address = server.local_addr().unwrap();
+        let (tx, rx) = flume::bounded(1);
 
         let mut client = KrpcSocket::new(true, None, None).unwrap();
-
         let client_address = client.local_addr().unwrap();
 
-        server.inflight_requests.push(InflightRequest {
-            tid: 8,
-            to: client_address,
-            sent_at: Instant::now(),
-        });
+        let responder_id = Id::random();
+        let response = ResponseSpecific::Ping(PingResponseArguments { responder_id });
 
-        let response = ResponseSpecific::Ping(PingResponseArguments {
-            responder_id: Id::random(),
-        });
+        let server_thread = thread::spawn(move || {
+            let mut server = KrpcSocket::new(true, None, None).unwrap();
+            let server_address = server.local_addr().unwrap();
+            tx.send(server_address).unwrap();
 
-        let expected_response = response.clone();
+            loop {
+                server.inflight_requests.push(InflightRequest {
+                    tid: 8,
+                    to: client_address,
+                    sent_at: Instant::now(),
+                });
 
-        let server_thread = thread::spawn(move || loop {
-            if let Some((message, from)) = server.recv_from() {
-                assert_eq!(from.port(), client_address.port());
-                assert_eq!(message.transaction_id, 8);
-                assert!(message.read_only, "Read-only should be true");
-                assert_eq!(
-                    message.version,
-                    Some(VERSION.to_vec()),
-                    "Version should be 'RS'"
-                );
-                assert_eq!(
-                    message.message_type,
-                    MessageType::Response(expected_response)
-                );
-                break;
+                if let Some((message, from)) = server.recv_from() {
+                    assert_eq!(from.port(), client_address.port());
+                    assert_eq!(message.transaction_id, 8);
+                    assert!(message.read_only, "Read-only should be true");
+                    assert_eq!(
+                        message.version,
+                        Some(VERSION.to_vec()),
+                        "Version should be 'RS'"
+                    );
+                    assert_eq!(
+                        message.message_type,
+                        MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                            responder_id,
+                        }))
+                    );
+                    break;
+                }
             }
         });
+
+        let server_address = rx.recv().unwrap();
 
         client.response(server_address, 8, response);
 

@@ -107,10 +107,10 @@ fn simulate(dht: &BTreeMap<Id, Node>, lookups: usize) -> usize {
             let mut closest_nodes = ClosestNodes::new(target);
 
             for (_, node) in dht.range(target..).take(200) {
-                closest_nodes.add(node.clone())
+                closest_nodes.add(node.clone().into())
             }
             for (_, node) in dht.range(..target).rev().take(200) {
-                closest_nodes.add(node.clone())
+                closest_nodes.add(node.clone().into())
             }
 
             let estimate = closest_nodes.dht_size_estimate();

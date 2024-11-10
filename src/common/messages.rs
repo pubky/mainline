@@ -6,6 +6,7 @@ mod internal;
 
 use std::convert::TryInto;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::rc::Rc;
 
 use bytes::Bytes;
 
@@ -101,7 +102,7 @@ pub struct FindNodeRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FindNodeResponseArguments {
     pub responder_id: Id,
-    pub nodes: Vec<Node>,
+    pub nodes: Vec<Rc<Node>>,
 }
 
 // Get anything
@@ -120,7 +121,7 @@ pub struct GetValueRequestArguments {
 pub struct NoValuesResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
-    pub nodes: Option<Vec<Node>>,
+    pub nodes: Option<Vec<Rc<Node>>>,
 }
 
 // === Get Peers ===
@@ -135,7 +136,7 @@ pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
     pub values: Vec<SocketAddr>,
-    pub nodes: Option<Vec<Node>>,
+    pub nodes: Option<Vec<Rc<Node>>>,
 }
 
 // === Announce Peer ===
@@ -153,7 +154,7 @@ pub struct AnnouncePeerRequestArguments {
 pub struct GetImmutableResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
-    pub nodes: Option<Vec<Node>>,
+    pub nodes: Option<Vec<Rc<Node>>>,
     pub v: Vec<u8>,
 }
 
@@ -163,7 +164,7 @@ pub struct GetImmutableResponseArguments {
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
-    pub nodes: Option<Vec<Node>>,
+    pub nodes: Option<Vec<Rc<Node>>>,
     pub v: Vec<u8>,
     pub k: Vec<u8>,
     pub seq: i64,
@@ -174,7 +175,7 @@ pub struct GetMutableResponseArguments {
 pub struct NoMoreRecentValueResponseArguments {
     pub responder_id: Id,
     pub token: Vec<u8>,
-    pub nodes: Option<Vec<Node>>,
+    pub nodes: Option<Vec<Rc<Node>>>,
     pub seq: i64,
 }
 
@@ -632,16 +633,16 @@ impl Message {
     }
 
     /// If the response contains a closer nodes to the target, return that!
-    pub fn get_closer_nodes(&self) -> Option<Vec<Node>> {
+    pub fn get_closer_nodes(&self) -> Option<&Vec<Rc<Node>>> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(_) => None,
-                ResponseSpecific::FindNode(arguments) => Some(arguments.nodes.clone()),
-                ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_ref().cloned(),
-                ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_ref().cloned(),
-                ResponseSpecific::GetImmutable(arguments) => arguments.nodes.as_ref().cloned(),
-                ResponseSpecific::NoValues(arguments) => arguments.nodes.as_ref().cloned(),
-                ResponseSpecific::NoMoreRecentValue(arguments) => arguments.nodes.as_ref().cloned(),
+                ResponseSpecific::FindNode(arguments) => Some(&arguments.nodes),
+                ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_ref(),
+                ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_ref(),
+                ResponseSpecific::GetImmutable(arguments) => arguments.nodes.as_ref(),
+                ResponseSpecific::NoValues(arguments) => arguments.nodes.as_ref(),
+                ResponseSpecific::NoMoreRecentValue(arguments) => arguments.nodes.as_ref(),
             },
             _ => None,
         }
@@ -730,7 +731,7 @@ pub fn sockaddr_to_bytes(sockaddr: &SocketAddr) -> Vec<u8> {
     bytes
 }
 
-fn nodes4_to_bytes(nodes: &[Node]) -> Vec<u8> {
+fn nodes4_to_bytes(nodes: &[Rc<Node>]) -> Vec<u8> {
     let node4_byte_size: usize = ID_SIZE + 6;
     let mut vec = Vec::with_capacity(node4_byte_size * nodes.len());
     for node in nodes {
@@ -740,7 +741,7 @@ fn nodes4_to_bytes(nodes: &[Node]) -> Vec<u8> {
     vec
 }
 
-fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>, DecodeMessageError> {
+fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Rc<Node>>, DecodeMessageError> {
     let bytes = bytes.as_ref();
     let node4_byte_size: usize = ID_SIZE + 6;
     if bytes.len() % node4_byte_size != 0 {
@@ -754,7 +755,7 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Node>, DecodeMessageE
         let id = Id::from_bytes(&bytes[i..i + ID_SIZE])?;
         let sockaddr = bytes_to_sockaddr(&bytes[i + ID_SIZE..i + node4_byte_size])?;
         let node = Node::new(id, sockaddr);
-        to_ret.push(node);
+        to_ret.push(node.into());
     }
 
     Ok(to_ret)
@@ -913,7 +914,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::FindNode(
                 FindNodeResponseArguments {
                     responder_id: Id::random(),
-                    nodes: vec![Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap())],
+                    nodes: vec![Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap()).into()],
                 },
             )),
         };
@@ -969,7 +970,8 @@ mod tests {
                     nodes: Some(vec![Node::new(
                         Id::random(),
                         "49.50.52.52:5354".parse().unwrap(),
-                    )]),
+                    )
+                    .into()]),
                 },
             )),
         };
