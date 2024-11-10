@@ -1,7 +1,7 @@
 //! Simplified Kademlia routing table
 
-use std::collections::BTreeMap;
 use std::slice::Iter;
+use std::{collections::BTreeMap, rc::Rc};
 
 use crate::common::{Id, Node, MAX_DISTANCE};
 
@@ -69,7 +69,7 @@ impl RoutingTable {
 
     /// Return the closest nodes to the target while prioritizing secure nodes,
     /// as defined in [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
-    pub fn closest(&self, target: &Id) -> Vec<Node> {
+    pub fn closest(&self, target: &Id) -> Vec<Rc<Node>> {
         let mut result = Vec::with_capacity(MAX_BUCKET_SIZE_K);
         let mut unsecure = Vec::with_capacity(MAX_BUCKET_SIZE_K);
 
@@ -123,8 +123,8 @@ impl RoutingTable {
     }
 
     /// Returns all nodes in the routing_table.
-    pub fn to_vec(&self) -> Vec<Node> {
-        let mut nodes: Vec<Node> = vec![];
+    pub fn to_vec(&self) -> Vec<Rc<Node>> {
+        let mut nodes = vec![];
 
         for bucket in self.buckets.values() {
             for node in &bucket.nodes {
@@ -161,7 +161,7 @@ impl Default for RoutingTable {
 #[derive(Debug, Clone)]
 pub struct KBucket {
     /// Nodes in the k-bucket, sorted by the least recently seen.
-    nodes: Vec<Node>,
+    nodes: Vec<Rc<Node>>,
 }
 
 impl KBucket {
@@ -189,19 +189,19 @@ impl KBucket {
             // is the correct one anyways.
             if self.nodes[index].same_adress(&incoming) || incoming.is_secure() {
                 self.nodes.remove(index);
-                self.nodes.push(incoming);
+                self.nodes.push(incoming.into());
 
                 true
             } else {
                 false
             }
         } else if self.nodes.len() < MAX_BUCKET_SIZE_K {
-            self.nodes.push(incoming);
+            self.nodes.push(incoming.into());
             true
         } else if self.nodes[0].is_stale() {
             // Remove the least recently seen node and add the new one
             self.nodes.remove(0);
-            self.nodes.push(incoming);
+            self.nodes.push(incoming.into());
 
             true
         } else {
@@ -221,7 +221,7 @@ impl KBucket {
         self.nodes.len() >= MAX_BUCKET_SIZE_K
     }
 
-    pub fn iter(&self) -> Iter<'_, Node> {
+    pub fn iter(&self) -> Iter<'_, Rc<Node>> {
         self.nodes.iter()
     }
 
@@ -239,8 +239,8 @@ impl Default for KBucket {
 
 #[cfg(test)]
 mod test {
-    use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::{net::SocketAddr, rc::Rc};
 
     use crate::common::{Id, KBucket, Node, RoutingTable, MAX_BUCKET_SIZE_K};
 
@@ -257,14 +257,14 @@ mod test {
     fn to_vec() {
         let mut table = RoutingTable::new();
 
-        let mut expected_nodes: Vec<Node> = vec![];
+        let mut expected_nodes: Vec<Rc<Node>> = vec![];
 
         for _ in 0..MAX_BUCKET_SIZE_K {
-            expected_nodes.push(Node::random());
+            expected_nodes.push(Node::random().into());
         }
 
         for node in &expected_nodes {
-            table.add(node.clone());
+            table.add(node.as_ref().clone());
         }
 
         let mut sorted_table = table.to_vec();

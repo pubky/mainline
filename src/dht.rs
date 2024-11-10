@@ -118,17 +118,17 @@ impl Dht {
     /// Could return an error if it failed to bind to the specified
     /// port or other io errors while binding the udp socket.
     pub(crate) fn new(settings: Settings) -> Result<Self, std::io::Error> {
-        let (sender, receiver) = flume::bounded(32);
+        let (sender, receiver) = flume::unbounded();
 
-        let rpc = settings.build_rpc()?;
+        thread::spawn(move || run(settings, receiver));
 
-        let address = rpc.local_addr()?;
+        let (tx, rx) = flume::bounded(1);
 
-        info!(?address, "Mainline DHT listening");
+        sender
+            .send(ActorMessage::Check(tx))
+            .expect("actor thread unexpectedly shutdown");
 
-        let mut server = settings.server;
-
-        thread::spawn(move || run(rpc, &mut server, receiver));
+        rx.recv().expect("infallible")?;
 
         Ok(Dht(sender))
     }
@@ -332,46 +332,65 @@ impl Dht {
     }
 }
 
-fn run(mut rpc: Rpc, server: &mut Option<Box<dyn Server>>, receiver: Receiver<ActorMessage>) {
-    loop {
-        if let Ok(actor_message) = receiver.try_recv() {
-            match actor_message {
-                ActorMessage::Shutdown(sender) => {
-                    drop(receiver);
-                    let _ = sender.send(());
-                    break;
-                }
-                ActorMessage::Info(sender) => {
-                    let local_address = rpc.local_addr();
+fn run(settings: Settings, receiver: Receiver<ActorMessage>) {
+    match settings.build_rpc() {
+        Ok(mut rpc) => {
+            let mut server = settings.server;
 
-                    let _ = sender.send(Info {
-                        id: *rpc.id(),
-                        local_address,
-                        dht_size_estimate: rpc.dht_size_estimate(),
-                    });
+            let address = rpc
+                .local_addr()
+                .expect("local address should be available after building the Rpc correctly");
+            info!(?address, "Mainline DHT listening");
+
+            loop {
+                if let Ok(actor_message) = receiver.try_recv() {
+                    match actor_message {
+                        ActorMessage::Shutdown(sender) => {
+                            drop(receiver);
+                            let _ = sender.send(());
+                            break;
+                        }
+                        ActorMessage::Check(sender) => {
+                            let _ = sender.send(Ok(()));
+                        }
+                        ActorMessage::Info(sender) => {
+                            let local_address = rpc.local_addr();
+
+                            let _ = sender.send(Info {
+                                id: *rpc.id(),
+                                local_address,
+                                dht_size_estimate: rpc.dht_size_estimate(),
+                            });
+                        }
+                        ActorMessage::Put(target, request, sender) => {
+                            rpc.put(target, request, Some(sender));
+                        }
+                        ActorMessage::Get(target, request, sender) => {
+                            rpc.get(target, request, Some(sender), None)
+                        }
+                    }
                 }
-                ActorMessage::Put(target, request, sender) => {
-                    rpc.put(target, request, Some(sender));
-                }
-                ActorMessage::Get(target, request, sender) => {
-                    rpc.get(target, request, Some(sender), None)
-                }
+
+                let report = rpc.tick();
+
+                // Handle incoming request with the default Server logic.
+                if let Some(ReceivedFrom {
+                    from,
+                    message: ReceivedMessage::Request((transaction_id, request_specific)),
+                }) = report.received_from
+                {
+                    if let Some(server) = &mut server {
+                        server.handle_request(&mut rpc, from, transaction_id, &request_specific);
+                    }
+                };
             }
         }
-
-        let report = rpc.tick();
-
-        // Handle incoming request with the default Server logic.
-        if let Some(ReceivedFrom {
-            from,
-            message: ReceivedMessage::Request((transaction_id, request_specific)),
-        }) = report.received_from
-        {
-            if let Some(server) = server {
-                server.handle_request(&mut rpc, from, transaction_id, &request_specific);
+        Err(err) => {
+            if let Ok(ActorMessage::Check(sender)) = receiver.try_recv() {
+                let _ = sender.send(Err(err));
             }
-        };
-    }
+        }
+    };
 }
 
 pub enum ActorMessage {
@@ -379,6 +398,7 @@ pub enum ActorMessage {
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
+    Check(Sender<Result<(), std::io::Error>>),
 }
 
 /// Information and statistics about this [Dht] node.
@@ -475,7 +495,9 @@ mod test {
     fn shutdown() {
         let mut dht = Dht::client().unwrap();
 
-        dht.info().unwrap().local_address.unwrap();
+        let info = dht.info().unwrap();
+
+        info.local_addr().unwrap();
 
         let a = dht.clone();
 

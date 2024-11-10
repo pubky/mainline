@@ -7,6 +7,7 @@ mod socket;
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::num::NonZeroUsize;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -61,7 +62,7 @@ pub struct Rpc {
     /// Closest responding nodes to specific target
     ///
     /// as well as the dht size estimate based on closest claimed nodes, and closest responding nodes.
-    closest_nodes: LruCache<Id, (Vec<Node>, f64, f64)>,
+    closest_nodes: LruCache<Id, (Vec<Rc<Node>>, f64, f64)>,
 
     // Active Queries
     queries: HashMap<Id, Query>,
@@ -232,7 +233,7 @@ impl Rpc {
                 self.closest_nodes.put(
                     *id,
                     (
-                        closest_responding_nodes.to_vec(),
+                        closest_responding_nodes.into(),
                         closest.dht_size_estimate(),
                         responders.dht_size_estimate(),
                     ),
@@ -450,15 +451,19 @@ impl Rpc {
         {
             if let Some(nodes) = message.get_closer_nodes() {
                 for node in nodes {
-                    query.add_candidate(node);
+                    query.add_candidate(node.clone());
                 }
             }
 
             if let Some((responder_id, token)) = message.get_token() {
-                query.add_responding_node(Node::new(responder_id, from).with_token(token.clone()));
+                query.add_responding_node(
+                    Node::new(responder_id, from)
+                        .with_token(token.clone())
+                        .into(),
+                );
             } else if let Some(responder_id) = message.get_author_id() {
                 // update responding nodes even for FIND_NODE queries.
-                query.add_responding_node(Node::new(responder_id, from));
+                query.add_responding_node(Node::new(responder_id, from).into());
             }
 
             let target = query.target();

@@ -1,4 +1,4 @@
-use std::{convert::TryInto, vec::IntoIter};
+use std::{convert::TryInto, rc::Rc};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
@@ -8,7 +8,7 @@ use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 /// Useful to estimate the Dht size.
 pub struct ClosestNodes {
     target: Id,
-    nodes: Vec<Node>,
+    nodes: Vec<Rc<Node>>,
 }
 
 impl ClosestNodes {
@@ -25,13 +25,13 @@ impl ClosestNodes {
         self.target
     }
 
-    pub fn nodes(&self) -> &[Node] {
+    pub fn nodes(&self) -> &[Rc<Node>] {
         &self.nodes
     }
 
     // === Public Methods ===
 
-    pub fn add(&mut self, node: Node) {
+    pub fn add(&mut self, node: Rc<Node>) {
         let seek = node.id.xor(&self.target);
 
         if let Err(pos) = self.nodes.binary_search_by(|prope| {
@@ -55,7 +55,7 @@ impl ClosestNodes {
 
     /// Get the closest [K][MAX_BUCKET_SIZE_K] nodes or all the nodes until the
     /// expected distance of the Kth node, given a DHT size estimation.
-    pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize, std_dev: f64) -> &[Node] {
+    pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize, std_dev: f64) -> &[Rc<Node>] {
         // TODO: Write a unit test to prove we are ignoring Sybil.
         let mut until_edk = 0;
 
@@ -119,24 +119,6 @@ where
     lsq_constant * u128::MAX as f64 / sum
 }
 
-impl IntoIterator for ClosestNodes {
-    type Item = Node;
-    type IntoIter = IntoIter<Node>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.nodes.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a ClosestNodes {
-    type Item = &'a Node;
-    type IntoIter = std::slice::Iter<'a, Node>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.nodes.iter()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{collections::BTreeMap, net::Ipv4Addr, str::FromStr, time::Instant};
@@ -150,7 +132,7 @@ mod tests {
         let mut closest_nodes = ClosestNodes::new(target);
 
         for _ in 0..100 {
-            let node = Node::random();
+            let node = Rc::new(Node::random());
             closest_nodes.add(node.clone());
             closest_nodes.add(node);
         }
@@ -171,13 +153,13 @@ mod tests {
 
     #[test]
     fn order_by_secure_id() {
-        let unsecure = Node::random();
-        let secure = Node {
+        let unsecure = Rc::new(Node::random());
+        let secure = Rc::new(Node {
             id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
             address: (Ipv4Addr::new(21, 75, 31, 124), 0).into(),
             token: None,
             last_seen: Instant::now(),
-        };
+        });
 
         let mut closest_nodes = ClosestNodes::new(*unsecure.id());
 
@@ -219,10 +201,10 @@ mod tests {
                 let mut closest_nodes = ClosestNodes::new(target);
 
                 for (_, node) in nodes.range(target..).take(100) {
-                    closest_nodes.add(node.clone())
+                    closest_nodes.add(node.clone().into())
                 }
                 for (_, node) in nodes.range(..target).rev().take(100) {
-                    closest_nodes.add(node.clone())
+                    closest_nodes.add(node.clone().into())
                 }
 
                 let estimate = closest_nodes.dht_size_estimate();
