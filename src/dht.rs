@@ -356,11 +356,9 @@ fn run(settings: Settings, receiver: Receiver<ActorMessage>) {
                             let _ = sender.send(Ok(()));
                         }
                         ActorMessage::Info(sender) => {
-                            let local_address = rpc.local_addr();
-
                             let _ = sender.send(Info {
                                 id: *rpc.id(),
-                                local_address,
+                                local_addr: rpc.local_addr(),
                                 dht_size_estimate: rpc.dht_size_estimate(),
                             });
                         }
@@ -406,7 +404,7 @@ pub(crate) enum ActorMessage {
 /// Information and statistics about this [Dht] node.
 pub struct Info {
     id: Id,
-    local_address: Result<SocketAddr, std::io::Error>,
+    local_addr: Result<SocketAddr, std::io::Error>,
     dht_size_estimate: (usize, usize, f64),
 }
 
@@ -416,8 +414,10 @@ impl Info {
         &self.id
     }
     /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn local_addr(&self) -> Result<&SocketAddr, &std::io::Error> {
-        self.local_address.as_ref()
+    pub fn local_addr(&self) -> Result<&SocketAddr, std::io::Error> {
+        self.local_addr
+            .as_ref()
+            .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
     }
     /// Returns:
     ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
@@ -449,7 +449,7 @@ impl Testnet {
                 let addr = node
                     .info()
                     .expect("node should not be shutdown in Testnet")
-                    .local_address
+                    .local_addr
                     .expect("node should not be shutdown in Testnet");
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
@@ -514,7 +514,7 @@ mod test {
     fn bind_twice() {
         let a = Dht::client().unwrap();
         let result = Dht::builder()
-            .port(a.info().unwrap().local_address.unwrap().port())
+            .port(a.info().unwrap().local_addr().unwrap().port())
             .server()
             .build();
 
