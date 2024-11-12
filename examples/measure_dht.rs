@@ -1,15 +1,5 @@
-use clap::Parser;
 use mainline::{Dht, Id};
 use tracing::Level;
-
-const DEFAULT_SAMPLES: usize = 20;
-
-#[derive(Parser)]
-struct Cli {
-    /// Number of samples to take across the keyspace
-    #[arg(short, long, default_value_t = DEFAULT_SAMPLES)]
-    samples: usize,
-}
 
 fn main() {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
