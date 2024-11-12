@@ -46,7 +46,7 @@ So, if an attacker injected two (even closer) nodes, that don't match the distri
 then you would expect the example above to look like this instead:
 
 ```md
-(s1)  (s2)   (1)    (2)                  (3)    (4)          (5)           (6)           (7)    (8)       
+(s1)  (s2)   (1)    (2)                  (3)    (4)           (5)           (6)           (7)    (8)       
 |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
 ```
