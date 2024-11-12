@@ -6,14 +6,14 @@ One of the main criticism against distributed hash tables are their susceptibili
 and by extension censorship. This document is an overview over the problem and how this implementation minimizes this risk.
 
 [Real-World Sybil Attacks in BitTorrent Mainline DHT](https://www.cl.cam.ac.uk/~lw525/publications/security.pdf) paper divides Sybil attacks 
-into “horizontal”, and “vertical”, the former tries to flood the entire network with Sybil nodes, while the later tries to target specific region of
+into “horizontal”, and “vertical”, the former tries to flood the entire network with Sybil nodes, while the later tries to target specific regions of
 the ID space, to censor specific info-hashes.
 
 Our strategy in this document is to first: explain how can we transform all vertical attacks to horizontal attacks by necessity, and second: explore the
 cost of such horizontal attacks and the cost of resisting such attacks, and we consider the system resistant to censorship, if the cost of resistance to
 horizontal Sybil attacks are much lower than the cost of sustaining such attacks for extended periods of time.
 
-### Non goals
+### Non Goals
 
 For the sake of this document we will NOT discuss extreme forms of censorship like filtering out UDP packets that look like Bittorrent messages at the ISP level.
 Or filtering out packets that includes specific info hashes. This form of censorship apply to more than just DHTs, including DNS queries and more. And are better
@@ -21,7 +21,7 @@ handled using VPNs and other firewall circumvention solutions. Including HTTPs r
 
 We will focus on how to keep DHTs resistant to vulnerabilities that are inherint to their nature as open networks without a central reputation auhtority.
 
-Similarly, we will not discuss the effect of Sybil attacks on privacy, if one wants to keep their queries private, they are also advised to use a VPN or a trusted HTTPs server to relay their queries.
+Similarly, we will not discuss the effect of Sybil attacks on privacy, if one wants to keep their queries private, they are advised to use a VPN or a trusted HTTPs server to relay their queries.
 
 ## Vertical Sybil Attacks
 
@@ -46,7 +46,7 @@ So, if an attacker injected two (even closer) nodes, that don't match the distri
 then you would expect the example above to look like this instead:
 
 ```md
-(s1)  (s2)   (1)    (2)                  (3)    (4)           (5)           (6)           (7)    (8)       
+(s1)  (s2)   (1)    (2)                  (3)    (4)          (5)           (6)           (7)    (8)       
 |------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
 ```
@@ -55,11 +55,14 @@ As you can see, if we only store data at the closest `k=2` nodes, the data would
 
 ### Solution
 
-The solution we use in this Mainline implementation, is to use the `expected distance to k (edk)` instead of `k`.
+This library uses [BEP0042](https://www.bittorrent.org/beps/bep_0042.html) by default to counter sybil attacks by forcing every node to choose their ID verifiably based on
+their IP address. This way, every IP address is only able to generate 8 random IDs.
 
-To understand what does that mean, consider that we have a rough estimation of the DHT size (which we obtain as explained in the 
+Another solution is to use the `expected distance to k (edk)` instead of `k`.
+
+To understand what that means, consider that we have a rough estimation of the DHT size (which we obtain as explained in the 
 documentation of the [Dht Size Estimate](./dht_size_estimate.md)), then we can _expect_ that the closest `k` nodes, are going to be
-within a range `edk`, for example, continuing the example from above, in a Dht of `8` nodes in a `16` ID space, we can expect
+within a range `edk`. For example, continuing the example from above, in a Dht of `8` nodes in a `16` ID space, we can expect
 the closest `2` nodes, within distance `4`.
 
 ```md
@@ -75,12 +78,12 @@ Because the nature of the Dht queries, we should expect to get a response from a
 ### Assumptions
 
 This strategy depends on an [accurate and consistent estimate of the DHT size](./dht_size_estimate.md), which itself depends on the assumption of uniform
-distribution of nodes across the ID space. That uniform distribution can be verified separately by crawling the DHT, but it is also can enforced by only storing
+distribution of nodes across the ID space. That uniform distribution can be verified separately by crawling the DHT, but it is also enforced by only storing
 data in (secure nodes) which are nodes whose IDs are generated relatively to their IP address according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html).
 
 ## Horizontal Sybil Attacks
 
-So if an attacker can't perform a vertical Sybil attack, it has to run > 20 times the number of current honest nodes to have a good chance of taking over an info hash,
+If an attacker can't perform a vertical Sybil attack, it has to run > 20 times the number of current honest nodes to have a good chance of taking over an info hash,
 i.e being in control of all 20 closest nodes to a target.
 
 Firstly, because we have a good way to estimate the dht size, we can all see the DHT size suddenly increasing 20x, which at least gives us all a chance to react to such extreme attack.
