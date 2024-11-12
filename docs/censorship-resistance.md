@@ -73,7 +73,7 @@ the closest `2` nodes, within distance `4`.
 
 If we store data in all nodes until `edk` (the expected distance of the first 2 nodes), we would store the data at at least 2 honest nodes.
 
-Because the nature of the Dht queries, we should expect to get a response from at least one of these honest nodes as we query closer and closer nodes to the target info hash.
+Because the nature of the DHT queries, we should expect to get a response from at least one of these honest nodes as we query closer and closer nodes to the target info hash.
 
 ### Assumptions
 
