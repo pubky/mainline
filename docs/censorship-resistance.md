@@ -55,7 +55,7 @@ As you can see, if we only store data at the closest `k=2` nodes, the data would
 
 ### Solution
 
-This library uses [BEP0042](https://www.bittorrent.org/beps/bep_0042.html) by default to counter sybil attacks by forcing every node to choose their ID verifiably based on
+This library uses [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html) by default to counter sybil attacks by forcing every node to choose their ID verifiably based on
 their IP address. This way, every IP address is only able to generate 8 random IDs.
 
 Another solution is to use the `expected distance to k (edk)` instead of `k`.
@@ -88,9 +88,9 @@ i.e being in control of all 20 closest nodes to a target.
 
 Firstly, because we have a good way to estimate the dht size, we can all see the DHT size suddenly increasing 20x, which at least gives us all a chance to react to such extreme attack.
 
-Secondly, because of [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html), an IPv4 can't have any more than 8 nodes, so an attacker needs to at least have control of millions of IP addresses.
+Secondly, because of BEP_0042, an IPv4 can't have any more than 8 nodes, so an attacker needs to at least have control of millions of IP addresses.
 
-Thirdly, the current DHT size estimate seems to be near the limits enforced by [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html) (~10 million nodes), which means an attacker will
+Thirdly, the current DHT size estimate seems to be near the limits enforced by BEP_0042 (~10 million nodes), which means an attacker will
 need to create more than 9 million nodes and try to replace already running nodes with their Sybil nodes, except that [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) favors older nodes
 than newer ones.
 
