@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::{collections::HashSet, rc::Rc};
 
 use flume::Sender;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
@@ -296,7 +296,7 @@ impl PutQuery {
                         .map(|sender| sender.send(Err(PutError::ErrorResponse(error))));
                 }
             } else {
-                info!(?target, stored_at = ?self.stored_at, "PutQuery Done");
+                debug!(?target, stored_at = ?self.stored_at, "PutQuery Done");
 
                 let _ = self.sender.to_owned().map(|sender| sender.send(Ok(target)));
             }
