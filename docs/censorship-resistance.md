@@ -53,12 +53,15 @@ then you would expect the example above to look like this instead:
 
 As you can see, if we only store data at the closest `k=2` nodes, the data would be only stored within attacker nodes, thus successefully censored.
 
+### Uniform Distribution
+
+The example above and the solution explained next, both assume a uniform distribution of nodes over the ID space,
+besides the fact that such distribution can empirically observed, it is also enforced with security extension [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html) 
+that limits the number of nodes to 8 for each IP, and uniformly disrtibute these 8 nodes over the entire ID space.
+
 ### Solution
 
-This library uses [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html) by default to counter sybil attacks by forcing every node to choose their ID verifiably based on
-their IP address. This way, every IP address is only able to generate 8 random IDs.
-
-Another solution is to use the `expected distance to k (edk)` instead of `k`.
+The solution used in this implementation is to store data to all nodes closer to the target than the `expected distance to k (edk)` instead of just the closest `k` nodes.
 
 To understand what that means, consider that we have a rough estimation of the DHT size (which we obtain as explained in the 
 documentation of the [Dht Size Estimate](./dht_size_estimate.md)), then we can _expect_ that the closest `k` nodes, are going to be
@@ -71,15 +74,11 @@ the closest `2` nodes, within distance `4`.
 0      1      2      3      4      5      6      7      8      9      10     11     12     13     14     15
 ```
 
-If we store data in all nodes until `edk` (the expected distance of the first 2 nodes), we would store the data at at least 2 honest nodes.
+This is similar but a bit more accurate than the average distance of the `k`th nodes from previous queries.
+
+If we store data in all nodes until `edk` (the expected distance of the first 2 nodes in this example), we would store the data at at least 2 honest nodes.
 
 Because the nature of the DHT queries, we should expect to get a response from at least one of these honest nodes as we query closer and closer nodes to the target info hash.
-
-### Assumptions
-
-This strategy depends on an [accurate and consistent estimate of the DHT size](./dht_size_estimate.md), which itself depends on the assumption of uniform
-distribution of nodes across the ID space. That uniform distribution can be verified separately by crawling the DHT, but it is also enforced by only storing
-data in (secure nodes) which are nodes whose IDs are generated relatively to their IP address according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html).
 
 ## Horizontal Sybil Attacks
 
