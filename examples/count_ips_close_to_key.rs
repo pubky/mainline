@@ -1,7 +1,7 @@
 use std::{collections::HashSet, net::IpAddr};
 
 use mainline::{rpc::DEFAULT_BOOTSTRAP_NODES, Dht, Id, Node};
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{random, seq::SliceRandom, thread_rng};
 use tracing::Level;
 
 
@@ -18,6 +18,15 @@ fn get_random_boostrap_nodes(all: &HashSet<String>) -> Vec<String> {
     slice
 }
 
+fn get_random_boostrap_nodes2() -> Vec<String> {
+    let mut dht = Dht::client().unwrap();
+    let nodes = dht.find_node(Id::random()).unwrap();
+    dht.shutdown();
+    let mut addrs: Vec<String> = nodes.into_iter().map(|node| node.address().to_string()).collect();
+    let slice: Vec<String> = addrs[..8].into_iter().map(|va| va.clone()).collect();
+    slice
+}
+
 
 fn main() {
     tracing_subscriber::fmt().with_max_level(Level::WARN).init();
@@ -25,29 +34,40 @@ fn main() {
     let k = 20; // Not really k but we take the k closest nodes into account.
     let target = Id::random();
     let mut all_ips: HashSet<IpAddr> = HashSet::new();
-    let mut all_sockets: HashSet<String> = HashSet::new();
+    let MAX_DISTANCE = 150;
 
-    println!("Count all IP addresses around a random target_key={target} k={k}. Each lookup round starts with a clear routing table and a new DHT Id.");
+    println!("Count all IP addresses around a random target_key={target} k={k} max_distance={MAX_DISTANCE}.");
 
+    let mut last_nodes: HashSet<IpAddr> = HashSet::new();
     for lookups in 1.. {
-        let bootstrap = get_random_boostrap_nodes(&all_sockets);
+        let bootstrap = get_random_boostrap_nodes2();
         let mut dht = Dht::builder().bootstrap(&bootstrap).build().unwrap();
         let nodes = dht.find_node(target).unwrap();
+        let nodes: Vec<Node> = nodes.into_iter().filter(|node| target.distance(node.id()) < MAX_DISTANCE).collect();
         let closest_nodes: Vec<Node> = nodes.into_iter().take(k).collect();
-        let sockets = closest_nodes.iter().map(|node| node.address());
-        for socket in sockets {
-            all_ips.insert(socket.ip());
-            let socket_str = socket.to_string();
-            all_sockets.insert(socket_str);
+        let sockets: HashSet<IpAddr> = closest_nodes.iter().map(|node| node.address().ip()).collect();
+        for socket in sockets.iter() {
+            all_ips.insert(socket.clone());
         }
 
-        let closest_node = closest_nodes.first().expect("Closest node not found.");
+        if closest_nodes.is_empty() {
+            continue;
+        }
+        let closest_node = closest_nodes.first().unwrap();
         let closest_distance = target.distance(closest_node.id());
+        let furthest_node = closest_nodes.last().unwrap();
+        let furthest_distance = target.distance(furthest_node.id());
+
+        let overlap_with_last_lookup: HashSet<IpAddr> = sockets.intersection(&last_nodes).map(|ip| ip.clone()).collect();
+        let overlap = overlap_with_last_lookup.len() as f64/k as f64;
+        last_nodes = sockets;
         println!(
-            "lookup={} Ips found {}. Closest node distance: {}",
+            "lookup={} Ips found {}. Closest node distance: {}, furthest node distance: {}, overlap with previous lookup {}%",
             lookups,
             all_ips.len(),
-            closest_distance
+            closest_distance,
+            furthest_distance,
+            (overlap*100 as f64) as usize
         );
         dht.shutdown();
     }
