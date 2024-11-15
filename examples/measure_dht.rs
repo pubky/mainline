@@ -12,7 +12,7 @@ fn main() {
         let _ = dht.find_node(Id::random()).unwrap();
 
         let info = dht.info().unwrap();
-        let (estimate, _, std_dev) = info.dht_size_estimate();
+        let (estimate, std_dev) = info.dht_size_estimate();
 
         println!(
             "Dht size estimate after {} lookups: {} +-{:.0}% nodes",

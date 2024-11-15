@@ -148,18 +148,16 @@ impl Rpc {
 
     /// Returns:
     ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
-    ///  2. Pessimistic Dht size estimate based only on the nodes responding to our queries.
-    ///  3. Standard deviaiton of both estimations.
+    ///  2. Standard deviaiton as a function of the number of samples used in this estimate.
     ///
     /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
-    pub fn dht_size_estimate(&self) -> (usize, usize, f64) {
+    pub fn dht_size_estimate(&self) -> (usize, f64) {
         let normal = self.dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
-        let pessimistic =
-            self.responders_based_dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
 
+        // See https://github.com/pubky/mainline/blob/main/docs/standard-deviation-vs-lookups.png
         let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
 
-        (normal, pessimistic, std_dev)
+        (normal, std_dev)
     }
 
     // === Public Methods ===
@@ -212,9 +210,10 @@ impl Rpc {
                 let closest = query.closest();
                 let responders = query.responders();
 
-                let (_, previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
-                let closest_responding_nodes =
-                    responders.nodes_until_edk(previous_dht_size_estimate, std_dev);
+                let closest_responding_nodes = responders.nodes_until_edk(
+                    self.responders_based_dht_size_estimates_sum as usize
+                        / self.closest_nodes.len().max(1),
+                );
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
                     if let Some((_, (_, closest, responding))) = self.closest_nodes.pop_lru() {
@@ -592,10 +591,10 @@ impl Rpc {
                     });
                 }
                 // Ping response is already handled in add_node()
-                MessageType::Response(ResponseSpecific::Ping(_))
                 // FindNode response is already handled in query.add_candidate()
-                | MessageType::Response(ResponseSpecific::FindNode(_)) 
-                // Requests are handled elsewhere 
+                // Requests are handled elsewhere
+                MessageType::Response(ResponseSpecific::Ping(_))
+                | MessageType::Response(ResponseSpecific::FindNode(_))
                 | MessageType::Request(_) => {}
             };
         };
