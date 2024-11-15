@@ -161,6 +161,10 @@ impl Dht {
     // === Find nodes ===
 
     /// Returns the closest 20 [secure](Node::is_secure) nodes to a target [Id].
+    ///
+    /// Mostly useful to crawl the DHT. You might need to ping them to confirm they exist,
+    /// and responsive, or if you want to learn more about them like the client they are using,
+    /// or if they support a given BEP.
     pub fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 

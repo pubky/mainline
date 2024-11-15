@@ -148,7 +148,7 @@ impl Query {
             for sender in &self.senders {
                 if let ResponseSender::ClosestNodes(s) = sender {
                     let _ = s.send(
-                        self.responders
+                        self.closest
                             .nodes()
                             .iter()
                             .take(MAX_BUCKET_SIZE_K)

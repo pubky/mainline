@@ -16,11 +16,10 @@ use lru::LruCache;
 use tracing::{debug, error};
 
 use crate::common::{
-    validate_immutable, ErrorSpecific, FindNodeRequestArguments, FindNodeResponseArguments,
-    GetImmutableResponseArguments, GetMutableResponseArguments, GetPeersResponseArguments,
-    GetValueRequestArguments, Id, Message, MessageType, MutableItem,
-    NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node, PutRequestSpecific,
-    RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
+    validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
+    GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
+    MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
+    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
 use query::{PutQuery, Query};
@@ -584,15 +583,6 @@ impl Rpc {
                         "No values"
                     );
                 }
-                MessageType::Response(ResponseSpecific::FindNode(FindNodeResponseArguments {
-                    responder_id,
-                    ..
-                })) => {
-                    // nodes in the response is already handled with query.add_candidate() earlier.
-
-                    // update responding nodes even for FIND_NODE queries.
-                    query.add_responding_node(Node::new(*responder_id, from).into());
-                }
                 MessageType::Error(error) => {
                     debug!(?error, ?message, from_version = ?message.version, "Get query got error response");
 
@@ -602,7 +592,11 @@ impl Rpc {
                     });
                 }
                 // Ping response is already handled in add_node()
-                _ => {}
+                MessageType::Response(ResponseSpecific::Ping(_))
+                // FindNode response is already handled in query.add_candidate()
+                | MessageType::Response(ResponseSpecific::FindNode(_)) 
+                // Requests are handled elsewhere 
+                | MessageType::Request(_) => {}
             };
         };
 
