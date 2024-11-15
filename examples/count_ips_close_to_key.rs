@@ -23,7 +23,7 @@ fn main() {
     let target = Id::random();
     let mut all_ips: HashSet<IpAddr> = HashSet::new();
 
-    println!("Sloppyness test - Counting all IP addresses around a random target_key={target} k={k}. Each lookup round starts with a clear routing table and a new DHT Id.");
+    println!("Count all IP addresses around a random target_key={target} k={k}. Each lookup round starts with a clear routing table and a new DHT Id.");
 
     for lookups in 1.. {
         let mut dht = Dht::client().unwrap();
