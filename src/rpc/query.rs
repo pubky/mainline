@@ -151,6 +151,7 @@ impl Query {
                         self.responders
                             .nodes()
                             .iter()
+                            .take(MAX_BUCKET_SIZE_K)
                             .map(|n| n.as_ref().clone())
                             .collect::<Vec<_>>(),
                     );

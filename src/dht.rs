@@ -160,6 +160,7 @@ impl Dht {
 
     // === Find nodes ===
 
+    /// Returns the closest 20 [secure](Node::is_secure) nodes to a target [Id].
     pub fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 
