@@ -1,20 +1,9 @@
 use std::{collections::HashSet, net::IpAddr};
 
-use flume::Iter;
 use mainline::{Dht, Id, Node};
 use tracing::Level;
 
 
-fn distance(target: Id, node: &Node) -> u8 {
-    target.distance(node.id())
-}
-
-fn print_distances(nodes: &Vec<Node>, target: Id) {
-    for node in nodes.iter() {
-        let distance = target.distance(node.id());
-        println!("Distance: {}, {}", distance, node.id());
-    }
-}
 
 fn main() {
     tracing_subscriber::fmt().with_max_level(Level::WARN).init();
@@ -35,7 +24,7 @@ fn main() {
         }
 
         let closest_node = closest_nodes.first().expect("Closest node not found.");
-        let closest_distance = distance(target, closest_node);
+        let closest_distance = target.distance(closest_node.id());
         println!(
             "lookup={} Ips found {}. Closest node distance: {}",
             lookups,
