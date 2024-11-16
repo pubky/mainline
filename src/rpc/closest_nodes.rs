@@ -29,6 +29,10 @@ impl ClosestNodes {
         &self.nodes
     }
 
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     // === Public Methods ===
 
     pub fn add(&mut self, node: Rc<Node>) {
