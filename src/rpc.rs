@@ -246,26 +246,24 @@ impl Rpc {
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
-        let received_from = self.socket.recv_from().and_then(|(message, from)| {
-            // Add a node to our routing table on any incoming request or response.
-            self.add_node(&message, from);
-
-            match &message.message_type {
-                MessageType::Request(request_specific) => Some(ReceivedFrom {
-                    from,
-                    message: ReceivedMessage::Request((
-                        message.transaction_id,
-                        request_specific.clone(),
-                    )),
-                }),
-                _ => self
-                    .handle_response(from, &message)
-                    .map(|response| ReceivedFrom {
-                        message: ReceivedMessage::QueryResponse(response),
+        let received_from =
+            self.socket
+                .recv_from()
+                .and_then(|(message, from)| match &message.message_type {
+                    MessageType::Request(request_specific) => Some(ReceivedFrom {
                         from,
+                        message: ReceivedMessage::Request((
+                            message.transaction_id,
+                            request_specific.clone(),
+                        )),
                     }),
-            }
-        });
+                    _ => self
+                        .handle_response(from, &message)
+                        .map(|response| ReceivedFrom {
+                            message: ReceivedMessage::QueryResponse(response),
+                            from,
+                        }),
+                });
 
         RpcTickReport {
             done_get_queries,
@@ -419,6 +417,11 @@ impl Rpc {
     // === Private Methods ===
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<QueryResponse> {
+        // If someone claims to be readonly, then let's not store anything even if they respond.
+        if message.read_only {
+            return None;
+        };
+
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
         if let Some(query) = self
             .put_queries
@@ -437,10 +440,7 @@ impl Rpc {
             return None;
         }
 
-        // If someone claims to be readonly, then let's not store anything even if they respond.
-        if message.read_only {
-            return None;
-        };
+        let mut should_add_node = false;
 
         // Get corresponing query for message.transaction_id
         if let Some(query) = self
@@ -448,6 +448,9 @@ impl Rpc {
             .values_mut()
             .find(|query| query.inflight(message.transaction_id))
         {
+            // KrpcSocket would not give us a response from the wrong address for the transaction_id
+            should_add_node = true;
+
             if let Some(nodes) = message.get_closer_nodes() {
                 for node in nodes {
                     query.add_candidate(node.clone());
@@ -599,14 +602,15 @@ impl Rpc {
             };
         };
 
+        if should_add_node {
+            // Add a node to our routing table on any expected incoming response.
+            self.add_node(message, from);
+        }
+
         None
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
-        if message.read_only {
-            return;
-        }
-
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }

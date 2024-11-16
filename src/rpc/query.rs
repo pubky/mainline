@@ -157,6 +157,8 @@ impl Query {
                     );
                 }
             }
+
+            debug!(id=?self.target(), candidates = ?self.closest.len(), visited = ?self.visited.len(), responders = ? self.responders.len(), "Done query");
         };
 
         done

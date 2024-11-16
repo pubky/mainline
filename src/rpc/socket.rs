@@ -141,6 +141,11 @@ impl KrpcSocket {
         if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
             let bytes = &buf[..amt];
 
+            if from.port() == 0 {
+                trace!("Response from port 0");
+                return None;
+            }
+
             match Message::from_bytes(bytes) {
                 Ok(message) => {
                     // Parsed correctly.

@@ -87,8 +87,8 @@ fn main() {
 /// Build a Dht with `size` number of nodes, uniformly distributed across the key space.
 fn build_dht(size: usize) -> Arc<BTreeMap<Id, Node>> {
     let mut dht = BTreeMap::new();
-    for _ in 0..size {
-        let node = Node::random();
+    for i in 0..size {
+        let node = Node::unique(i);
         dht.insert(*node.id(), node);
     }
 

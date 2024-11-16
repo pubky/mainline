@@ -29,10 +29,18 @@ impl ClosestNodes {
         &self.nodes
     }
 
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     // === Public Methods ===
 
     pub fn add(&mut self, node: Rc<Node>) {
         let seek = node.id.xor(&self.target);
+
+        if node.already_exists(&self.nodes) {
+            return;
+        }
 
         if let Err(pos) = self.nodes.binary_search_by(|prope| {
             if prope.is_secure() && !node.is_secure() {
@@ -132,8 +140,8 @@ mod tests {
 
         let mut closest_nodes = ClosestNodes::new(target);
 
-        for _ in 0..100 {
-            let node = Rc::new(Node::random());
+        for i in 0..100 {
+            let node = Rc::new(Node::unique(i));
             closest_nodes.add(node.clone());
             closest_nodes.add(node);
         }
@@ -179,8 +187,9 @@ mod tests {
 
         let target_bytes = target.as_bytes();
 
-        for _ in 0..dht_size_estimate {
-            closest_nodes.add(Node::random().into());
+        for i in 0..dht_size_estimate {
+            let node = Rc::new(Node::unique(i));
+            closest_nodes.add(node);
         }
 
         let mut sybil = ClosestNodes::new(target);
@@ -220,8 +229,8 @@ mod tests {
 
     fn simulate(dht_size: usize, lookups: usize) -> usize {
         let mut nodes = BTreeMap::new();
-        for _ in 0..dht_size {
-            let node = Node::random();
+        for i in 0..dht_size {
+            let node = Node::unique(i);
             nodes.insert(node.id, node);
         }
 
