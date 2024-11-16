@@ -1,51 +1,14 @@
+use dashmap::DashSet;
 use mainline::{Dht, Id};
+use rayon::prelude::*;
 use std::collections::HashSet;
-use tracing::Level;
+use std::sync::Arc;
+use tracing::{debug, info, Level};
 
-/// Configuration parameters for the DHT size estimation.
-struct Config {
-    /// Incremental sample size to add in each iteration.
-    incremental_sample_size: usize,
-    /// Minimum required overlap to proceed with estimation.
-    min_overlap: usize,
-    /// Maximum number of iterations to prevent infinite loops.
-    max_iterations: usize,
-    /// Progress display interval.
-    progress_interval: usize,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            incremental_sample_size: 100,
-            min_overlap: 100, // Adjust. A bigger overlap leads to more accurate estimates, but sampling will take longer.
-            max_iterations: 100,
-            progress_interval: 10,
-        }
-    }
-}
-
-fn main() {
-    // Initialize the logger.
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
-
-    // Set up the configuration.
-    let config = Config::default();
-
-    println!("Estimating DHT size using Mark-Recapture with iterative sampling for both sets...");
-
-    // Initialize the DHT client.
-    let dht = Dht::client().expect("Failed to create DHT client");
-
-    // Collect samples from the DHT.
-    let (marked_sample, recapture_sample) = collect_iterative_samples(&dht, &config);
-
-    // Compute DHT size estimate from the accumulated samples.
-    let estimate = compute_estimate(&marked_sample, &recapture_sample);
-
-    // Display the final statistics.
-    display_estimate(estimate);
-}
+/// Adjust as needed. Default will take about ~6 hours
+const MIN_OVERLAP: usize = 10_000; // Minimum number of overlapping nodes to stop sampling.
+const MAX_RANDOM_NODE_IDS: usize = 100_000; // Maximum number of sampling rounds before stopping. Avoid infinite loops.
+const BATCH_SIZE: usize = 16; // Number of parallel lookups. Display progress every N.
 
 /// Represents the DHT size estimation result.
 struct EstimateResult {
@@ -55,110 +18,123 @@ struct EstimateResult {
     upper_bound: f64,
 }
 
-/// Collects and accumulates samples for both marked and recapture sets iteratively until sufficient overlap is found.
-///
-/// # Arguments
-///
-/// * `dht` - Reference to the DHT client.
-/// * `config` - Configuration parameters.
-///
-/// # Returns
-///
-/// A tuple containing the marked sample and the recapture sample.
-fn collect_iterative_samples(dht: &Dht, config: &Config) -> (HashSet<Id>, HashSet<Id>) {
-    let mut marked_sample = HashSet::new();
-    let mut recapture_sample = HashSet::new();
-
-    // Step 1: Collect initial samples for both marked and recapture sets.
-    println!("\nCollecting initial marked sample...");
-    perform_sampling(
-        dht,
-        config.incremental_sample_size,
-        &mut marked_sample,
-        config.progress_interval,
-    );
-
-    println!("\nCollecting initial recapture sample...");
-    perform_sampling(
-        dht,
-        config.incremental_sample_size,
-        &mut recapture_sample,
-        config.progress_interval,
-    );
-
-    // Step 2: Iteratively add to both samples.
-    let mut iterations = 0;
-    let mut overlap = marked_sample.intersection(&recapture_sample).count();
-
-    println!("Initial overlap size: {}", overlap);
-
-    while iterations < config.max_iterations && overlap < config.min_overlap {
-        iterations += 1;
+impl EstimateResult {
+    fn display(&self) {
+        println!("\nFinal Estimate:");
         println!(
-            "\nIteration {}: Adding more samples to both sets...",
-            iterations
+            "Estimated DHT Size: {} nodes",
+            format_number(self.estimate as usize)
         );
-
-        // Add to marked sample.
-        perform_sampling(
-            dht,
-            config.incremental_sample_size,
-            &mut marked_sample,
-            config.progress_interval,
+        println!(
+            "95% Confidence Interval: {} - {} nodes",
+            format_number(self.lower_bound as usize),
+            format_number(self.upper_bound as usize)
         );
-
-        // Add to recapture sample.
-        perform_sampling(
-            dht,
-            config.incremental_sample_size,
-            &mut recapture_sample,
-            config.progress_interval,
+        println!(
+            "Standard Error: {} nodes",
+            format_number(self.standard_error as usize)
         );
-
-        // Update overlap.
-        overlap = marked_sample.intersection(&recapture_sample).count();
-        println!("Current overlap size: {}", overlap);
-
-        if overlap >= config.min_overlap {
-            println!("Sufficient overlap achieved.");
-            break;
-        } else {
-            println!("Overlap not sufficient yet. Continuing sampling...");
-        }
     }
+}
+fn main() {
+    // Initialize the logger.
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    if iterations >= config.max_iterations {
-        println!("Maximum number of iterations reached.");
+    println!("Estimating DHT size using Mark-Recapture with continuous sampling...");
+    println!(
+        "Stopping at {} overlapped nodes or {} max random node id lookup iterations.",
+        format_number(MIN_OVERLAP),
+        format_number(MAX_RANDOM_NODE_IDS)
+    );
+
+    // Initialize the DHT client wrapped in Arc for thread safety.
+    let dht = Arc::new(Dht::client().expect("Failed to create DHT client"));
+
+    // Collect samples from the DHT.
+    let (marked_sample, recapture_sample) = collect_samples(&dht, MIN_OVERLAP, MAX_RANDOM_NODE_IDS);
+
+    // Display the final statistics.
+    if let Some(estimate) = compute_estimate(&marked_sample, &recapture_sample) {
+        estimate.display();
+    } else {
+        println!("Unable to calculate the DHT size estimate due to insufficient overlap.");
     }
-
-    (marked_sample, recapture_sample)
 }
 
-/// Performs sampling by querying the DHT with random target IDs and adds node IDs to the provided sample.
-///
-/// # Arguments
-///
-/// * `dht` - Reference to the DHT client.
-/// * `sample_size` - Number of random IDs to query.
-/// * `sample` - Mutable reference to the sample to which node IDs will be added.
-/// * `progress_interval` - Interval at which progress is displayed.
-fn perform_sampling(
-    dht: &Dht,
-    sample_size: usize,
-    sample: &mut HashSet<Id>,
-    progress_interval: usize,
-) {
-    for i in 0..sample_size {
-        if i % progress_interval == 0 {
-            println!("Sampled {} random IDs of {}", i, sample_size);
+fn collect_samples(
+    dht: &Arc<Dht>,
+    min_overlap: usize,
+    max_unique_random_node_ids: usize,
+) -> (HashSet<Id>, HashSet<Id>) {
+    let marked_sample = DashSet::new();
+    let recapture_sample = DashSet::new();
+    let mut total_iterations = 0;
+
+    let mut size = 0.0;
+    let mut confidence = 0.0;
+
+    loop {
+        if total_iterations >= max_unique_random_node_ids {
+            break;
         }
-        let random_id = Id::random();
-        if let Ok(nodes) = dht.find_node(random_id) {
-            for node in nodes {
-                sample.insert(*node.id());
+
+        // Sample for marked_sample in parallel.
+        let random_ids: Vec<_> = (0..BATCH_SIZE).map(|_| Id::random()).collect();
+        random_ids.par_iter().for_each(|random_id| {
+            if let Ok(nodes) = dht.find_node(*random_id) {
+                for node in nodes {
+                    marked_sample.insert(*node.id());
+                }
             }
+        });
+
+        // Sample for recapture_sample in parallel.
+        let random_ids: Vec<_> = (0..BATCH_SIZE).map(|_| Id::random()).collect();
+        random_ids.par_iter().for_each(|random_id| {
+            if let Ok(nodes) = dht.find_node(*random_id) {
+                for node in nodes {
+                    recapture_sample.insert(*node.id());
+                }
+            }
+        });
+
+        total_iterations += BATCH_SIZE;
+
+        // Compute overlap.
+        let overlap = marked_sample
+            .iter()
+            .filter(|id| recapture_sample.contains(id))
+            .count();
+
+        if let Some(estimate) = compute_estimate(
+            &marked_sample.clone().into_iter().collect(),
+            &recapture_sample.clone().into_iter().collect(),
+        ) {
+            size = estimate.estimate;
+            confidence = estimate.standard_error * 1.96;
+        }
+
+        info!(
+            "Sampled {}/{} random IDs. Found {}/{} overlapping nodes. Estimate is {}±{}",
+            format_number(total_iterations),
+            format_number(max_unique_random_node_ids),
+            format_number(overlap),
+            format_number(min_overlap),
+            format_number(size as usize),
+            format_number(confidence as usize)
+        );
+
+        if overlap >= min_overlap {
+            println!("Sufficient overlap achieved.");
+            break;
         }
     }
+
+    // Convert DashSets to HashSets.
+    let marked_sample: HashSet<Id> = marked_sample.into_iter().collect();
+    let recapture_sample: HashSet<Id> = recapture_sample.into_iter().collect();
+
+    (marked_sample, recapture_sample)
 }
 
 /// Computes the DHT size estimate using the Chapman estimator.
@@ -177,20 +153,20 @@ fn compute_estimate(
 ) -> Option<EstimateResult> {
     let n1 = marked_sample.len() as f64;
     let n2 = recapture_sample.len() as f64;
-    let m2 = marked_sample.intersection(recapture_sample).count() as f64;
+    let m = marked_sample.intersection(recapture_sample).count() as f64;
 
-    println!("\nComputing estimate with:");
-    println!("Marked sample size (n1): {}", n1);
-    println!("Recapture sample size (n2): {}", n2);
-    println!("Overlap size (m2): {}", m2);
+    debug!("\nComputing estimate with:");
+    debug!("Marked sample size (n1): {}", n1);
+    debug!("Recapture sample size (n2): {}", n2);
+    debug!("Overlap size (m): {}", m);
 
-    if m2 > 0.0 {
+    if m > 0.0 {
         // Chapman estimator formula.
-        let estimate = ((n1 + 1.0) * (n2 + 1.0) / (m2 + 1.0)) - 1.0;
+        let estimate = ((n1 + 1.0) * (n2 + 1.0) / (m + 1.0)) - 1.0;
 
         // Calculate variance and standard error.
         let variance =
-            ((n1 + 1.0) * (n2 + 1.0) * (n1 - m2) * (n2 - m2)) / ((m2 + 1.0).powi(2) * (m2 + 2.0));
+            ((n1 + 1.0) * (n2 + 1.0) * (n1 - m) * (n2 - m)) / ((m + 1.0).powi(2) * (m + 2.0));
         let standard_error = variance.sqrt();
 
         // 95% confidence interval.
@@ -207,24 +183,6 @@ fn compute_estimate(
         })
     } else {
         None
-    }
-}
-
-fn display_estimate(estimate: Option<EstimateResult>) {
-    if let Some(estimate) = estimate {
-        println!("\nFinal Estimate:");
-        println!(
-            "Estimated DHT Size: {} nodes",
-            format_number(estimate.estimate as usize)
-        );
-        println!(
-            "95% Confidence Interval: {} - {} nodes",
-            format_number(estimate.lower_bound as usize),
-            format_number(estimate.upper_bound as usize)
-        );
-        println!("Standard Error: {:.2}", estimate.standard_error);
-    } else {
-        println!("Unable to calculate the DHT size estimate due to insufficient overlap.");
     }
 }
 
