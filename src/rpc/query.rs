@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::{collections::HashSet, rc::Rc};
 
 use flume::Sender;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
@@ -158,7 +158,7 @@ impl Query {
                 }
             }
 
-            info!(id=?self.target(), candidates = ?self.closest.len(), visited = ?self.visited.len(), responders = ? self.responders.len(), "Done query");
+            debug!(id=?self.target(), candidates = ?self.closest.len(), visited = ?self.visited.len(), responders = ? self.responders.len(), "Done query");
         };
 
         done
