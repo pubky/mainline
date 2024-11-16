@@ -1,14 +1,64 @@
+//! # DHT Size Estimation using Mark-Recapture Method
+//!
+//! This example demonstrates how to estimate the size of a Distributed Hash Table (DHT)
+//! using the Mark-Recapture method, specifically the Chapman estimator.
+//!
+//! The program continuously samples nodes from the DHT, marking and recapturing nodes
+//! to estimate the total population size (i.e., the total number of nodes in the DHT).
+//! It stops sampling when a minimum overlap between the marked and recaptured samples is achieved
+//! or when a maximum number of random node ID lookups is reached.
+//!
+//! ## Why Run This Example?
+//!
+//! - **Educational Purpose**: To understand how the methods of the `mainline` crate can be applied
+//!   to estimate the size of a DHT or other distributed systems without any implicit assumption of
+//!   node id distributions.
+//!
+//! - **Alternative Estimation Method**: While there are more time and data-efficient methods
+//!   to measure mainline DHT size (see `measure_dht.rs`), this example provides an alternative
+//!   approach that might be useful in certain scenarios or for comparison purposes.
+//!
+//! - **Practical Application**: For developers and researchers working with DHTs who are
+//!   interested in estimating the network size without requiring global knowledge of the network.
+//!
+//! ## Notes
+//!
+//! - The default parameters are set to take about ~2 hours to complete.
+//! - Adjust the constants `MIN_OVERLAP`, `MAX_RANDOM_NODE_IDS`, and `BATCH_SIZE`
+//!   as needed to balance between accuracy and computation time.
+//!
+//! ## How It Works
+//!
+//! 1. **Marking Phase**: Random node IDs are generated, and the nodes closest to these IDs
+//!    are collected as the "marked" sample.
+//!
+//! 2. **Recapture Phase**: Another set of random node IDs are generated, and the nodes
+//!    closest to these IDs are collected as the "recapture" sample.
+//!
+//! 3. **Estimation**: The overlap between the marked and recaptured samples is used to
+//!    estimate the total population size using the Chapman estimator.
+//!
+//! ## Limitations
+//!
+//! - The estimation accuracy depends on the overlap between the samples.
+//! - The method assumes that the DHT is stable during the sampling period.
+//! - More efficient methods exist for measuring DHT size, and this method may not be suitable
+//!   for large-scale or time-sensitive applications.
+//!
+
 use dashmap::DashSet;
 use mainline::{Dht, Id};
-use rayon::prelude::*;
-use std::collections::HashSet;
+use rayon::{prelude::*, ThreadPoolBuilder};
 use std::sync::Arc;
 use tracing::{debug, info, Level};
 
-/// Adjust as needed. Default will take about ~6 hours
-const MIN_OVERLAP: usize = 10_000; // Minimum number of overlapping nodes to stop sampling.
-const MAX_RANDOM_NODE_IDS: usize = 100_000; // Maximum number of sampling rounds before stopping. Avoid infinite loops.
-const BATCH_SIZE: usize = 16; // Number of parallel lookups. Display progress every N.
+/// Adjust as needed. Default will take about ~2 hours
+// Minimum number of overlapping nodes to stop sampling.
+const MIN_OVERLAP: usize = 10_000;
+// Maximum number of sampling rounds before stopping. Avoid infinite loops.
+const MAX_RANDOM_NODE_IDS: usize = 100_000;
+// Number of parallel lookups. Ideally not bigger than number of threads available. Display progress every N.
+const BATCH_SIZE: usize = 16;
 
 /// Represents the DHT size estimation result.
 struct EstimateResult {
@@ -36,6 +86,7 @@ impl EstimateResult {
         );
     }
 }
+
 fn main() {
     // Initialize the logger.
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
@@ -47,25 +98,34 @@ fn main() {
         format_number(MAX_RANDOM_NODE_IDS)
     );
 
-    // Initialize the DHT client wrapped in Arc for thread safety.
-    let dht = Arc::new(Dht::client().expect("Failed to create DHT client"));
+    // Configure the Rayon thread pool with a same num of threads as batch size
+    let pool = ThreadPoolBuilder::new()
+        .num_threads(BATCH_SIZE)
+        .build()
+        .expect("Failed to build Rayon thread pool");
 
-    // Collect samples from the DHT.
-    let (marked_sample, recapture_sample) = collect_samples(&dht, MIN_OVERLAP, MAX_RANDOM_NODE_IDS);
+    pool.install(|| {
+        // Initialize the DHT client wrapped in Arc for thread safety.
+        let dht = Arc::new(Dht::client().expect("Failed to create DHT client"));
 
-    // Display the final statistics.
-    if let Some(estimate) = compute_estimate(&marked_sample, &recapture_sample) {
-        estimate.display();
-    } else {
-        println!("Unable to calculate the DHT size estimate due to insufficient overlap.");
-    }
+        // Collect samples from the DHT.
+        let (marked_sample, recapture_sample) =
+            collect_samples(&dht, MIN_OVERLAP, MAX_RANDOM_NODE_IDS);
+
+        // Display the final statistics.
+        if let Some(estimate) = compute_estimate(&marked_sample, &recapture_sample) {
+            estimate.display();
+        } else {
+            println!("Unable to calculate the DHT size estimate due to insufficient overlap.");
+        }
+    });
 }
 
 fn collect_samples(
     dht: &Arc<Dht>,
     min_overlap: usize,
     max_unique_random_node_ids: usize,
-) -> (HashSet<Id>, HashSet<Id>) {
+) -> (DashSet<Id>, DashSet<Id>) {
     let marked_sample = DashSet::new();
     let recapture_sample = DashSet::new();
     let mut total_iterations = 0;
@@ -106,10 +166,7 @@ fn collect_samples(
             .filter(|id| recapture_sample.contains(id))
             .count();
 
-        if let Some(estimate) = compute_estimate(
-            &marked_sample.clone().into_iter().collect(),
-            &recapture_sample.clone().into_iter().collect(),
-        ) {
+        if let Some(estimate) = compute_estimate(&marked_sample, &recapture_sample) {
             size = estimate.estimate;
             confidence = estimate.standard_error * 1.96;
         }
@@ -130,10 +187,6 @@ fn collect_samples(
         }
     }
 
-    // Convert DashSets to HashSets.
-    let marked_sample: HashSet<Id> = marked_sample.into_iter().collect();
-    let recapture_sample: HashSet<Id> = recapture_sample.into_iter().collect();
-
     (marked_sample, recapture_sample)
 }
 
@@ -141,19 +194,24 @@ fn collect_samples(
 ///
 /// # Arguments
 ///
-/// * `marked_sample` - The marked sample.
-/// * `recapture_sample` - The recapture sample.
+/// * `marked_sample` - The marked sample as a DashSet.
+/// * `recapture_sample` - The recapture sample as a DashSet.
 ///
 /// # Returns
 ///
 /// An `Option<EstimateResult>` containing the estimate and statistical data.
 fn compute_estimate(
-    marked_sample: &HashSet<Id>,
-    recapture_sample: &HashSet<Id>,
+    marked_sample: &DashSet<Id>,
+    recapture_sample: &DashSet<Id>,
 ) -> Option<EstimateResult> {
     let n1 = marked_sample.len() as f64;
     let n2 = recapture_sample.len() as f64;
-    let m = marked_sample.intersection(recapture_sample).count() as f64;
+
+    // Compute overlap (m).
+    let m = marked_sample
+        .iter()
+        .filter(|id| recapture_sample.contains(id))
+        .count() as f64;
 
     debug!("\nComputing estimate with:");
     debug!("Marked sample size (n1): {}", n1);
