@@ -603,7 +603,7 @@ impl Rpc {
         };
 
         if should_add_node {
-            // Add a node to our routing table on any incoming response.
+            // Add a node to our routing table on any expected incoming response.
             self.add_node(&message, from);
         }
 
@@ -611,10 +611,6 @@ impl Rpc {
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
-        if message.read_only {
-            return;
-        }
-
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }

@@ -1,5 +1,6 @@
 //! Simplified Kademlia routing table
 
+use std::net::SocketAddr;
 use std::slice::Iter;
 use std::{collections::BTreeMap, rc::Rc};
 
@@ -53,6 +54,16 @@ impl RoutingTable {
             // Do not add self to the routing_table
             return false;
         }
+
+        // Do NOT add more than one non-secure node to the routing table
+        if !node.is_secure()
+            && self
+                .buckets()
+                .values()
+                .any(|bucket| bucket.contains_ip(node.address))
+        {
+            return false;
+        };
 
         let bucket = self.buckets.entry(distance).or_default();
 
@@ -223,6 +234,10 @@ impl KBucket {
 
     pub fn iter(&self) -> Iter<'_, Rc<Node>> {
         self.nodes.iter()
+    }
+
+    fn contains_ip(&self, addrs: SocketAddr) -> bool {
+        self.iter().any(|node| node.address.ip() == addrs.ip())
     }
 
     #[cfg(test)]
