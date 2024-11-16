@@ -54,11 +54,11 @@ impl RoutingTable {
             return false;
         }
 
-        if self.buckets().values().any(|bucket| {
-            bucket
-                .iter()
-                .any(|existing| node.already_exists_in_routing_table(existing))
-        }) {
+        if self
+            .buckets()
+            .values()
+            .any(|bucket| node.already_exists(&bucket.nodes))
+        {
             return false;
         };
 
@@ -276,12 +276,7 @@ mod test {
         let mut expected_nodes: Vec<Rc<Node>> = vec![];
 
         for i in 0..MAX_BUCKET_SIZE_K {
-            expected_nodes.push(
-                Node::random()
-                    // avoid the same address
-                    .with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
-                    .into(),
-            );
+            expected_nodes.push(Node::unique(i).into());
         }
 
         for node in &expected_nodes {
@@ -555,10 +550,7 @@ mod test {
             .enumerate()
             .map(|(i, str)| {
                 let id = Id::from_str(str).unwrap();
-                Node::random()
-                    // avoid the same address
-                    .with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
-                    .with_id(id)
+                Node::unique(i).with_id(id)
             })
             .collect();
 

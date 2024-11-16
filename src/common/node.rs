@@ -2,6 +2,7 @@
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -63,6 +64,14 @@ impl Node {
         }
     }
 
+    #[cfg(any(test, feature = "__private_simulation"))]
+    /// Create a node that is unique per `i` as it has a random Id and sets IP and port to `i`
+    pub fn unique(i: usize) -> Node {
+        use std::net::Ipv4Addr;
+
+        Node::random().with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
+    }
+
     pub fn with_id(mut self, id: Id) -> Self {
         self.id = id;
         self
@@ -109,25 +118,17 @@ impl Node {
         self.id.is_valid_for_ip(&self.address.ip())
     }
 
-    /// Returns true if:
-    /// - This node is not [secure](Node::is_secure), but  existing node is.
-    /// - Both nodes are not secure, and they have the same IP.
-    /// - Both nodes are secure and they share the same IP, and the first 21
-    ///     bits, in their Ids.
+    /// Returns true if Any of the existing nodes:
+    ///  - Have the same IP as this node, And:
+    ///     = The existing nodes is Not secure.
+    ///     = The existing nodes is secure And shares the same first 21 bits.
     ///
-    /// Effectively, allows only One non-secure node or Eight secure nodes from the same IP, in the routing table.
-    pub(crate) fn already_exists_in_routing_table(&self, existing: &Self) -> bool {
-        if self.is_secure() {
-            if existing.is_secure()
-                && self.same_ip(existing)
-                && (self.id().first_21_bits() == existing.id().first_21_bits())
-            {
-                return true;
-            }
-        } else if existing.is_secure() || self.same_ip(existing) {
-            return true;
-        }
-
-        false
+    /// Effectively, allows only One non-secure node or Eight secure nodes from the same IP, in the routing table or ClosestNodes.
+    pub(crate) fn already_exists(&self, nodes: &[Rc<Self>]) -> bool {
+        nodes.iter().any(|existing| {
+            self.same_ip(existing)
+                && (!existing.is_secure()
+                    || self.id().first_21_bits() == existing.id().first_21_bits())
+        })
     }
 }
