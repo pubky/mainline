@@ -53,7 +53,7 @@ impl Node {
         &self.address
     }
 
-    /// Creates a random node for testing purposes.
+    /// Creates a node with random Id for testing purposes.
     pub fn random() -> Node {
         Node {
             id: Id::random(),
@@ -92,9 +92,14 @@ impl Node {
         self.last_seen.elapsed() > MIN_PING_BACKOFF_INTERVAL
     }
 
-    /// Returns true if both nodes have the same id and address
+    /// Returns true if both nodes have the same ip and port
     pub fn same_adress(&self, other: &Self) -> bool {
         self.address == other.address
+    }
+
+    /// Returns true if both nodes have the same ip
+    pub fn same_ip(&self, other: &Self) -> bool {
+        self.address.ip() == other.address.ip()
     }
 
     /// Node [Id] is valid for its IP address.
@@ -102,5 +107,27 @@ impl Node {
     /// Check [BEP0042](https://www.bittorrent.org/beps/bep_0042.html).
     pub fn is_secure(&self) -> bool {
         self.id.is_valid_for_ip(&self.address.ip())
+    }
+
+    /// Returns true if:
+    /// - This node is not [secure](Node::is_secure), but  existing node is.
+    /// - Both nodes are not secure, and they have the same IP.
+    /// - Both nodes are secure and they share the same IP, and the first 21
+    ///     bits, in their Ids.
+    ///
+    /// Effectively, allows only One non-secure node or Eight secure nodes from the same IP, in the routing table.
+    pub(crate) fn already_exists_in_routing_table(&self, existing: &Self) -> bool {
+        if self.is_secure() {
+            if existing.is_secure()
+                && self.same_ip(existing)
+                && (self.id().first_21_bits() == existing.id().first_21_bits())
+            {
+                return true;
+            }
+        } else if existing.is_secure() || self.same_ip(existing) {
+            return true;
+        }
+
+        false
     }
 }

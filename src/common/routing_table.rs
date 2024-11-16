@@ -54,13 +54,13 @@ impl RoutingTable {
             return false;
         }
 
-        // if self.buckets().values().any(|bucket| {
-        //     bucket
-        //         .iter()
-        //         .any(|existing| node.already_exists_in_routing_table(existing))
-        // }) {
-        //     // return false;
-        // };
+        if self.buckets().values().any(|bucket| {
+            bucket
+                .iter()
+                .any(|existing| node.already_exists_in_routing_table(existing))
+        }) {
+            return false;
+        };
 
         let bucket = self.buckets.entry(distance).or_default();
 
@@ -275,8 +275,13 @@ mod test {
 
         let mut expected_nodes: Vec<Rc<Node>> = vec![];
 
-        for _ in 0..MAX_BUCKET_SIZE_K {
-            expected_nodes.push(Node::random().into());
+        for i in 0..MAX_BUCKET_SIZE_K {
+            expected_nodes.push(
+                Node::random()
+                    // avoid the same address
+                    .with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
+                    .into(),
+            );
         }
 
         for node in &expected_nodes {
@@ -380,14 +385,14 @@ mod test {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, SocketAddr::from(([0, 0, 0, 0], 1)));
+            let node2 = Node::new(node1.id, SocketAddr::from((node1.address.ip(), 1)));
 
             bucket.add(node1.clone());
             bucket.add(Node::random());
 
             assert_ne!(bucket.nodes[1].id, node1.id);
 
-            bucket.add(node2);
+            bucket.add(node2.clone());
 
             assert_eq!(bucket.nodes.len(), 2);
             assert_eq!(bucket.nodes[1].id, node1.id);
@@ -547,9 +552,13 @@ mod test {
 
         let nodes: Vec<Node> = ids
             .iter()
-            .map(|str| {
+            .enumerate()
+            .map(|(i, str)| {
                 let id = Id::from_str(str).unwrap();
-                Node::random().with_id(id)
+                Node::random()
+                    // avoid the same address
+                    .with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
+                    .with_id(id)
             })
             .collect();
 

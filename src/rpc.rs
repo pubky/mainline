@@ -604,7 +604,7 @@ impl Rpc {
 
         if should_add_node {
             // Add a node to our routing table on any expected incoming response.
-            self.add_node(&message, from);
+            self.add_node(message, from);
         }
 
         None
