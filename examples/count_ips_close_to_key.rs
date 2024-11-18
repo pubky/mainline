@@ -6,7 +6,7 @@ use tracing::Level;
 
 const k: usize = 20; // Not really k but we take the k closest nodes into account.
 const MAX_DISTANCE: u8 = 150; // Health check to not include outrageously distant nodes.
-const USE_RANDOM_BOOTSTRAP_NODES: bool = false;
+const USE_RANDOM_BOOTSTRAP_NODES: bool = true;
 
 
 fn main() {
@@ -76,38 +76,19 @@ fn main() {
 }
 
 
-fn get_random_boostrap_nodes2() -> Vec<String> {
-    let mut dht = Dht::client().unwrap();
-    let nodes = dht.find_node(Id::random()).unwrap();
-    dht.shutdown();
-    let addrs: Vec<String> = nodes.into_iter().map(|node| node.address().to_string()).collect();
-    let slice: Vec<String> = addrs[..8].into_iter().map(|va| va.clone()).collect();
-    slice
-}
-
-fn init_dht(use_random_boostrap_nodes: bool) -> Dht {
-    if use_random_boostrap_nodes {
-        let bootstrap = get_random_boostrap_nodes2();
-        return Dht::builder().bootstrap(&bootstrap).build().unwrap();
-    } else {
-        Dht::client().unwrap()
-    }
-}
-
-
 /*
 Prints a histogram with the collected nodes
-First column are the buckets indicate the hit rate. 84 .. 93 summerizes the nodes that get hit 3 to 12% of each lookup.
+First column are the buckets indicating the hit rate. 3 .. 12 summerizes the nodes that get hit with a probability of 3 to 12% in each lookup.
 Second column indicates the number of nodes that this bucket contains. [19] means 19 nodes got hit with a probability of 3 to 12%.
 Third column is a visualization of the number of nodes [19].
 
-Example1: 
-84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
-Within one lookup, 15 nodes got hit in 84 to 93% of the cases. These nodes are therefore foud in almost all lookups.
-
-Example2:
+Example1:
  3 .. 12 [ 19 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
 Within one lookup, 19 nodes got hit in 3 to 12% of the cases. These are rarely found therefore.
+
+Example2: 
+84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
+Within one lookup, 15 nodes got hit in 84 to 93% of the cases. These nodes are therefore found in almost all lookups.
 
 Full example:
  3 .. 12 [ 19 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
@@ -138,3 +119,22 @@ fn print_histogram(hits: HashMap<IpAddr, u16>, lookup_count: usize)  {
 
     println!("{}", histogram);
 }
+
+fn get_random_boostrap_nodes2() -> Vec<String> {
+    let mut dht = Dht::client().unwrap();
+    let nodes = dht.find_node(Id::random()).unwrap();
+    dht.shutdown();
+    let addrs: Vec<String> = nodes.into_iter().map(|node| node.address().to_string()).collect();
+    let slice: Vec<String> = addrs[..8].into_iter().map(|va| va.clone()).collect();
+    slice
+}
+
+fn init_dht(use_random_boostrap_nodes: bool) -> Dht {
+    if use_random_boostrap_nodes {
+        let bootstrap = get_random_boostrap_nodes2();
+        return Dht::builder().bootstrap(&bootstrap).build().unwrap();
+    } else {
+        Dht::client().unwrap()
+    }
+}
+
