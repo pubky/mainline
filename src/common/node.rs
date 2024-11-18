@@ -2,6 +2,7 @@
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddr,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -53,7 +54,7 @@ impl Node {
         &self.address
     }
 
-    /// Creates a random node for testing purposes.
+    /// Creates a node with random Id for testing purposes.
     pub fn random() -> Node {
         Node {
             id: Id::random(),
@@ -61,6 +62,14 @@ impl Node {
             token: None,
             last_seen: Instant::now(),
         }
+    }
+
+    #[cfg(any(test, feature = "__private_simulation"))]
+    /// Create a node that is unique per `i` as it has a random Id and sets IP and port to `i`
+    pub fn unique(i: usize) -> Node {
+        use std::net::Ipv4Addr;
+
+        Node::random().with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
     }
 
     pub fn with_id(mut self, id: Id) -> Self {
@@ -92,9 +101,14 @@ impl Node {
         self.last_seen.elapsed() > MIN_PING_BACKOFF_INTERVAL
     }
 
-    /// Returns true if both nodes have the same id and address
+    /// Returns true if both nodes have the same ip and port
     pub fn same_adress(&self, other: &Self) -> bool {
         self.address == other.address
+    }
+
+    /// Returns true if both nodes have the same ip
+    pub fn same_ip(&self, other: &Self) -> bool {
+        self.address.ip() == other.address.ip()
     }
 
     /// Node [Id] is valid for its IP address.
@@ -102,5 +116,19 @@ impl Node {
     /// Check [BEP0042](https://www.bittorrent.org/beps/bep_0042.html).
     pub fn is_secure(&self) -> bool {
         self.id.is_valid_for_ip(&self.address.ip())
+    }
+
+    /// Returns true if Any of the existing nodes:
+    ///  - Have the same IP as this node, And:
+    ///     = The existing nodes is Not secure.
+    ///     = The existing nodes is secure And shares the same first 21 bits.
+    ///
+    /// Effectively, allows only One non-secure node or Eight secure nodes from the same IP, in the routing table or ClosestNodes.
+    pub(crate) fn already_exists(&self, nodes: &[Rc<Self>]) -> bool {
+        nodes.iter().any(|existing| {
+            self.same_ip(existing)
+                && (!existing.is_secure()
+                    || self.id().first_21_bits() == existing.id().first_21_bits())
+        })
     }
 }

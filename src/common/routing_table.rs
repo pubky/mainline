@@ -54,6 +54,14 @@ impl RoutingTable {
             return false;
         }
 
+        if self
+            .buckets()
+            .values()
+            .any(|bucket| node.already_exists(&bucket.nodes))
+        {
+            return false;
+        };
+
         let bucket = self.buckets.entry(distance).or_default();
 
         bucket.add(node)
@@ -181,13 +189,19 @@ impl KBucket {
 
     pub fn add(&mut self, incoming: Node) -> bool {
         if let Some(index) = self.iter().position(|n| n.id == incoming.id) {
-            // If it is the same socket address too, remove the old node,
-            // and add the incoming one, effectively updating the node's
-            // `last_seen` and moving it to the end of the bucket.
+            let existing = self.nodes[index].clone();
+
+            // If the incoming node is secure, then we trust its IP address for this Id,
+            // and even if it changed its port number, we should accept it.
             //
-            // If the incoming node is secure, then the new socket address (if it differs)
-            // is the correct one anyways.
-            if self.nodes[index].same_adress(&incoming) || incoming.is_secure() {
+            // If neither nodes are secure for this Id, but the incoming is the same IP,
+            // then add the incoming one, effectively updating the node's
+            // `last_seen` and moving it to the end of the bucket.
+            // Possibly also updating the port, which is a good thing, instead of waiting
+            // for the old port to timeout (not responding to Pings).
+            //
+            // Using same ip instead of same address, allow
+            if incoming.is_secure() || (!existing.is_secure() && existing.same_ip(&incoming)) {
                 self.nodes.remove(index);
                 self.nodes.push(incoming.into());
 
@@ -239,7 +253,9 @@ impl Default for KBucket {
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv4Addr;
     use std::str::FromStr;
+    use std::time::Instant;
     use std::{net::SocketAddr, rc::Rc};
 
     use crate::common::{Id, KBucket, Node, RoutingTable, MAX_BUCKET_SIZE_K};
@@ -259,8 +275,8 @@ mod test {
 
         let mut expected_nodes: Vec<Rc<Node>> = vec![];
 
-        for _ in 0..MAX_BUCKET_SIZE_K {
-            expected_nodes.push(Node::random().into());
+        for i in 0..MAX_BUCKET_SIZE_K {
+            expected_nodes.push(Node::unique(i).into());
         }
 
         for node in &expected_nodes {
@@ -359,12 +375,57 @@ mod test {
             assert_eq!(bucket.nodes[1].id, node1.id);
         }
 
-        // Different address
+        // Different port
         {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, SocketAddr::from(([0, 0, 0, 0], 1)));
+            let node2 = Node::new(node1.id, SocketAddr::from((node1.address.ip(), 1)));
+
+            bucket.add(node1.clone());
+            bucket.add(Node::random());
+
+            assert_ne!(bucket.nodes[1].id, node1.id);
+
+            bucket.add(node2.clone());
+
+            assert_eq!(bucket.nodes.len(), 2);
+            assert_eq!(bucket.nodes[1].id, node1.id);
+        }
+
+        {
+            let mut bucket = KBucket::new();
+
+            let secure = Node {
+                id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
+                address: (Ipv4Addr::new(21, 75, 31, 124), 0).into(),
+                token: None,
+                last_seen: Instant::now(),
+            };
+
+            let unsecure = Node::new(secure.id, SocketAddr::from(([0, 0, 0, 0], 1)));
+
+            {
+                bucket.add(unsecure.clone());
+                bucket.add(secure.clone());
+
+                assert_eq!(bucket.nodes[0].address, secure.address)
+            }
+
+            {
+                bucket.add(secure.clone());
+                bucket.add(unsecure.clone());
+
+                assert_eq!(bucket.nodes[0].address, secure.address)
+            }
+        }
+
+        // Different ip
+        {
+            let mut bucket = KBucket::new();
+
+            let node1 = Node::random();
+            let node2 = Node::new(node1.id, SocketAddr::from(([0, 0, 0, 1], 1)));
 
             bucket.add(node1.clone());
             bucket.add(Node::random());
@@ -486,9 +547,10 @@ mod test {
 
         let nodes: Vec<Node> = ids
             .iter()
-            .map(|str| {
+            .enumerate()
+            .map(|(i, str)| {
                 let id = Id::from_str(str).unwrap();
-                Node::random().with_id(id)
+                Node::unique(i).with_id(id)
             })
             .collect();
 

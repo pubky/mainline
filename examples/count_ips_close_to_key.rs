@@ -4,7 +4,7 @@ use mainline::{Dht, Id, Node};
 use tracing::Level;
 
 
-const k: usize = 20; // Not really k but we take the k closest nodes into account.
+const K: usize = 20; // Not really k but we take the k closest nodes into account.
 const MAX_DISTANCE: u8 = 150; // Health check to not include outrageously distant nodes.
 const USE_RANDOM_BOOTSTRAP_NODES: bool = true;
 
@@ -17,7 +17,7 @@ fn main() {
     let (tx_interrupted, rx_interrupted) = channel();
 
 
-    println!("Count all IP addresses around a random target_key={target} k={k} max_distance={MAX_DISTANCE} random_boostrap={USE_RANDOM_BOOTSTRAP_NODES}.");
+    println!("Count all IP addresses around a random target_key={target} k={K} max_distance={MAX_DISTANCE} random_boostrap={USE_RANDOM_BOOTSTRAP_NODES}.");
     println!("Press CTRL+C to show the histogram");
     println!();
 
@@ -34,7 +34,7 @@ fn main() {
         let mut dht = init_dht(USE_RANDOM_BOOTSTRAP_NODES);
         let nodes = dht.find_node(target).unwrap();
         let nodes: Vec<Node> = nodes.into_iter().filter(|node| target.distance(node.id()) < MAX_DISTANCE).collect();
-        let closest_nodes: Vec<Node> = nodes.into_iter().take(k).collect();
+        let closest_nodes: Vec<Node> = nodes.into_iter().take(K).collect();
         let sockets: HashSet<IpAddr> = closest_nodes.iter().map(|node| node.address().ip()).collect();
         for socket in sockets.iter() {
             let previous = ip_hits.get(socket);
@@ -57,7 +57,7 @@ fn main() {
         let furthest_distance = target.distance(furthest_node.id());
 
         let overlap_with_last_lookup: HashSet<IpAddr> = sockets.intersection(&last_nodes).map(|ip| ip.clone()).collect();
-        let overlap = overlap_with_last_lookup.len() as f64/k as f64;
+        let overlap = overlap_with_last_lookup.len() as f64/K as f64;
         last_nodes = sockets;
         println!(
             "lookup={:02} Ips found {}. Closest node distance: {}, furthest node distance: {}, overlap with previous lookup {}%",

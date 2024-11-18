@@ -29,10 +29,18 @@ impl ClosestNodes {
         &self.nodes
     }
 
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     // === Public Methods ===
 
     pub fn add(&mut self, node: Rc<Node>) {
         let seek = node.id.xor(&self.target);
+
+        if node.already_exists(&self.nodes) {
+            return;
+        }
 
         if let Err(pos) = self.nodes.binary_search_by(|prope| {
             if prope.is_secure() && !node.is_secure() {
@@ -55,12 +63,13 @@ impl ClosestNodes {
 
     /// Get the closest [K][MAX_BUCKET_SIZE_K] nodes or all the nodes until the
     /// expected distance of the Kth node, given a DHT size estimation.
-    pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize, std_dev: f64) -> &[Rc<Node>] {
+    pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize) -> &[Rc<Node>] {
         let mut until_edk = 0;
 
-        let expected_dht_size = (previous_dht_size_estimate as f64 * (1.0 - std_dev * 2.0)) + 1.0;
-        let expected_d1 = u128::MAX as f64 / expected_dht_size;
-        let expected_dk = (20.0 * expected_d1) as u128;
+        // 20 / dht_size_estimate == expected_dk / ID space
+        // so expected_dk = 20 * ID space / dht_size_estimate
+        let expected_dk =
+            (20.0 * u128::MAX as f64 / (previous_dht_size_estimate as f64 + 1.0)) as u128;
 
         for node in &self.nodes {
             let distance = distance(&self.target, node);
@@ -131,8 +140,8 @@ mod tests {
 
         let mut closest_nodes = ClosestNodes::new(target);
 
-        for _ in 0..100 {
-            let node = Rc::new(Node::random());
+        for i in 0..100 {
+            let node = Rc::new(Node::unique(i));
             closest_nodes.add(node.clone());
             closest_nodes.add(node);
         }
@@ -178,8 +187,9 @@ mod tests {
 
         let target_bytes = target.as_bytes();
 
-        for _ in 0..dht_size_estimate {
-            closest_nodes.add(Node::random().into());
+        for i in 0..dht_size_estimate {
+            let node = Rc::new(Node::unique(i));
+            closest_nodes.add(node);
         }
 
         let mut sybil = ClosestNodes::new(target);
@@ -194,7 +204,7 @@ mod tests {
             closest_nodes.add(node);
         }
 
-        let closest = closest_nodes.nodes_until_edk(dht_size_estimate, 0.0);
+        let closest = closest_nodes.nodes_until_edk(dht_size_estimate);
 
         assert!((closest.len() - sybil.nodes().len()) > 10);
     }
@@ -219,8 +229,8 @@ mod tests {
 
     fn simulate(dht_size: usize, lookups: usize) -> usize {
         let mut nodes = BTreeMap::new();
-        for _ in 0..dht_size {
-            let node = Node::random();
+        for i in 0..dht_size {
+            let node = Node::unique(i);
             nodes.insert(node.id, node);
         }
 

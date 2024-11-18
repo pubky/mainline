@@ -160,6 +160,11 @@ impl Dht {
 
     // === Find nodes ===
 
+    /// Returns the closest 20 [secure](Node::is_secure) nodes to a target [Id].
+    ///
+    /// Mostly useful to crawl the DHT. You might need to ping them to confirm they exist,
+    /// and responsive, or if you want to learn more about them like the client they are using,
+    /// or if they support a given BEP.
     pub fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 
@@ -405,7 +410,7 @@ pub(crate) enum ActorMessage {
 pub struct Info {
     id: Id,
     local_addr: Result<SocketAddr, std::io::Error>,
-    dht_size_estimate: (usize, usize, f64),
+    dht_size_estimate: (usize, f64),
 }
 
 impl Info {
@@ -421,11 +426,10 @@ impl Info {
     }
     /// Returns:
     ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
-    ///  2. Pessimistic Dht size estimate based only on the nodes responding to our queries.
-    ///  3. Standard deviaiton of both estimations.
+    ///  2. Standard deviaiton as a function of the number of samples used in this estimate.
     ///
     /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
-    pub fn dht_size_estimate(&self) -> (usize, usize, f64) {
+    pub fn dht_size_estimate(&self) -> (usize, f64) {
         self.dht_size_estimate
     }
 }

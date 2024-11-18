@@ -107,9 +107,8 @@ impl Id {
                 }
 
                 let expected = first_21_bits(&id_prefix_ipv4(ipv4, self.0[ID_SIZE - 1]));
-                let actual = first_21_bits(&self.0);
 
-                expected == actual
+                self.first_21_bits() == expected
             }
             IpAddr::V6(_ipv6) => {
                 unimplemented!()
@@ -120,6 +119,10 @@ impl Id {
                 // }
             }
         }
+    }
+
+    pub(crate) fn first_21_bits(&self) -> [u8; 3] {
+        first_21_bits(&self.0)
     }
 }
 

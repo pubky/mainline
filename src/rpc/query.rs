@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::{collections::HashSet, rc::Rc};
 
 use flume::Sender;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
@@ -148,14 +148,17 @@ impl Query {
             for sender in &self.senders {
                 if let ResponseSender::ClosestNodes(s) = sender {
                     let _ = s.send(
-                        self.responders
+                        self.closest
                             .nodes()
                             .iter()
+                            .take(MAX_BUCKET_SIZE_K)
                             .map(|n| n.as_ref().clone())
                             .collect::<Vec<_>>(),
                     );
                 }
             }
+
+            debug!(id=?self.target(), candidates = ?self.closest.len(), visited = ?self.visited.len(), responders = ? self.responders.len(), "Done query");
         };
 
         done
@@ -296,7 +299,7 @@ impl PutQuery {
                         .map(|sender| sender.send(Err(PutError::ErrorResponse(error))));
                 }
             } else {
-                info!(?target, stored_at = ?self.stored_at, "PutQuery Done");
+                debug!(?target, stored_at = ?self.stored_at, "PutQuery Done");
 
                 let _ = self.sender.to_owned().map(|sender| sender.send(Ok(target)));
             }

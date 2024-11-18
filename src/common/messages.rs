@@ -602,6 +602,14 @@ impl Message {
     }
 
     pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Message, DecodeMessageError> {
+        let bytes = bytes.as_ref();
+
+        if bytes.len() < 15 {
+            return Err(DecodeMessageError::TooShort);
+        } else if bytes[0] != 100 {
+            return Err(DecodeMessageError::NotBencodeDictionary);
+        }
+
         Message::from_serde_message(internal::DHTMessage::from_bytes(bytes)?)
     }
 
@@ -778,6 +786,12 @@ fn bytes_to_peers<T: AsRef<[serde_bytes::ByteBuf]>>(
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
 pub enum DecodeMessageError {
+    #[error("Expected message to be longer than 15 characters")]
+    TooShort,
+
+    #[error("Expected message to start with 'd'")]
+    NotBencodeDictionary,
+
     #[error("Wrong number of bytes for nodes")]
     InvalidNodes4,
 

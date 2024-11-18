@@ -148,18 +148,16 @@ impl Rpc {
 
     /// Returns:
     ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
-    ///  2. Pessimistic Dht size estimate based only on the nodes responding to our queries.
-    ///  3. Standard deviaiton of both estimations.
+    ///  2. Standard deviaiton as a function of the number of samples used in this estimate.
     ///
     /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
-    pub fn dht_size_estimate(&self) -> (usize, usize, f64) {
+    pub fn dht_size_estimate(&self) -> (usize, f64) {
         let normal = self.dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
-        let pessimistic =
-            self.responders_based_dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
 
+        // See https://github.com/pubky/mainline/blob/main/docs/standard-deviation-vs-lookups.png
         let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
 
-        (normal, pessimistic, std_dev)
+        (normal, std_dev)
     }
 
     // === Public Methods ===
@@ -212,9 +210,10 @@ impl Rpc {
                 let closest = query.closest();
                 let responders = query.responders();
 
-                let (_, previous_dht_size_estimate, std_dev) = self.dht_size_estimate();
-                let closest_responding_nodes =
-                    responders.nodes_until_edk(previous_dht_size_estimate, std_dev);
+                let closest_responding_nodes = responders.nodes_until_edk(
+                    self.responders_based_dht_size_estimates_sum as usize
+                        / self.closest_nodes.len().max(1),
+                );
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
                     if let Some((_, (_, closest, responding))) = self.closest_nodes.pop_lru() {
@@ -247,26 +246,24 @@ impl Rpc {
         // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
         self.maintain_routing_table();
 
-        let received_from = self.socket.recv_from().and_then(|(message, from)| {
-            // Add a node to our routing table on any incoming request or response.
-            self.add_node(&message, from);
-
-            match &message.message_type {
-                MessageType::Request(request_specific) => Some(ReceivedFrom {
-                    from,
-                    message: ReceivedMessage::Request((
-                        message.transaction_id,
-                        request_specific.clone(),
-                    )),
-                }),
-                _ => self
-                    .handle_response(from, &message)
-                    .map(|response| ReceivedFrom {
-                        message: ReceivedMessage::QueryResponse(response),
+        let received_from =
+            self.socket
+                .recv_from()
+                .and_then(|(message, from)| match &message.message_type {
+                    MessageType::Request(request_specific) => Some(ReceivedFrom {
                         from,
+                        message: ReceivedMessage::Request((
+                            message.transaction_id,
+                            request_specific.clone(),
+                        )),
                     }),
-            }
-        });
+                    _ => self
+                        .handle_response(from, &message)
+                        .map(|response| ReceivedFrom {
+                            message: ReceivedMessage::QueryResponse(response),
+                            from,
+                        }),
+                });
 
         RpcTickReport {
             done_get_queries,
@@ -420,6 +417,11 @@ impl Rpc {
     // === Private Methods ===
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<QueryResponse> {
+        // If someone claims to be readonly, then let's not store anything even if they respond.
+        if message.read_only {
+            return None;
+        };
+
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
         if let Some(query) = self
             .put_queries
@@ -438,10 +440,7 @@ impl Rpc {
             return None;
         }
 
-        // If someone claims to be readonly, then let's not store anything even if they respond.
-        if message.read_only {
-            return None;
-        };
+        let mut should_add_node = false;
 
         // Get corresponing query for message.transaction_id
         if let Some(query) = self
@@ -449,6 +448,9 @@ impl Rpc {
             .values_mut()
             .find(|query| query.inflight(message.transaction_id))
         {
+            // KrpcSocket would not give us a response from the wrong address for the transaction_id
+            should_add_node = true;
+
             if let Some(nodes) = message.get_closer_nodes() {
                 for node in nodes {
                     query.add_candidate(node.clone());
@@ -461,9 +463,6 @@ impl Rpc {
                         .with_token(token.clone())
                         .into(),
                 );
-            } else if let Some(responder_id) = message.get_author_id() {
-                // update responding nodes even for FIND_NODE queries.
-                query.add_responding_node(Node::new(responder_id, from).into());
             }
 
             let target = query.target();
@@ -596,18 +595,22 @@ impl Rpc {
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
-                _ => {}
+                // Requests are handled elsewhere
+                MessageType::Response(ResponseSpecific::Ping(_))
+                | MessageType::Response(ResponseSpecific::FindNode(_))
+                | MessageType::Request(_) => {}
             };
         };
+
+        if should_add_node {
+            // Add a node to our routing table on any expected incoming response.
+            self.add_node(message, from);
+        }
 
         None
     }
 
     fn add_node(&mut self, message: &Message, from: SocketAddr) {
-        if message.read_only {
-            return;
-        }
-
         if let Some(id) = message.get_author_id() {
             self.routing_table.add(Node::new(id, from));
         }
