@@ -1,4 +1,4 @@
-use std::{convert::TryInto, rc::Rc};
+use std::{collections::HashMap, convert::TryInto, rc::Rc};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
@@ -63,7 +63,7 @@ impl ClosestNodes {
 
     /// Get the closest [K][MAX_BUCKET_SIZE_K] nodes or all the nodes until the
     /// expected distance of the Kth node, given a DHT size estimation.
-    pub fn nodes_until_edk(&self, previous_dht_size_estimate: usize) -> &[Rc<Node>] {
+    pub fn take_until_edk(&self, previous_dht_size_estimate: usize) -> &[Rc<Node>] {
         let mut until_edk = 0;
 
         // 20 / dht_size_estimate == expected_dk / ID space
@@ -81,7 +81,11 @@ impl ClosestNodes {
             until_edk += 1;
         }
 
-        &self.nodes[0..until_edk.max(MAX_BUCKET_SIZE_K).min(self.nodes().len())]
+        let nodes = &self.nodes[0..until_edk.max(MAX_BUCKET_SIZE_K).min(self.nodes().len())];
+
+        dbg!(least_six_blocks(nodes));
+
+        nodes
     }
 
     /// An estimation of the Dht from the distribution of closest nodes
@@ -96,6 +100,32 @@ impl ClosestNodes {
                 .map(|node| distance(&self.target, node)),
         )
     }
+}
+
+const SIX_BLOCK_MASK: u32 = 0b1111_1100 << 24;
+
+fn least_six_blocks(nodes: &[Rc<Node>]) -> usize {
+    if nodes.is_empty() {
+        return 20;
+    }
+
+    // Group values by their prefix
+    let mut prefix_count = HashMap::new();
+
+    for node in nodes.iter().take(20) {
+        let ip = match node.address().ip() {
+            std::net::IpAddr::V4(ip) => ip.to_bits(),
+            _ => unimplemented!(),
+        };
+
+        let prefix = ip & SIX_BLOCK_MASK;
+        *prefix_count.entry(prefix).or_insert(0) += 1;
+    }
+
+    // Number of buckets
+    dbg!(prefix_count.keys().len());
+
+    prefix_count.keys().len()
 }
 
 fn distance(target: &Id, node: &Node) -> u128 {
@@ -204,7 +234,7 @@ mod tests {
             closest_nodes.add(node);
         }
 
-        let closest = closest_nodes.nodes_until_edk(dht_size_estimate);
+        let closest = closest_nodes.take_until_edk(dht_size_estimate);
 
         assert!((closest.len() - sybil.nodes().len()) > 10);
     }

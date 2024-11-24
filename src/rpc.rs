@@ -210,7 +210,7 @@ impl Rpc {
                 let closest = query.closest();
                 let responders = query.responders();
 
-                let closest_responding_nodes = responders.nodes_until_edk(
+                let closest_responding_nodes = responders.take_until_edk(
                     self.responders_based_dht_size_estimates_sum as usize
                         / self.closest_nodes.len().max(1),
                 );
