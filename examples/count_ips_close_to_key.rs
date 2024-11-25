@@ -1,3 +1,35 @@
+/**
+ * Counts all IP addresses around a random target ID and counts the number of hits, each IP gets. 
+ * Does this by initializing a new DHT node for each lookups to reach the target from different directions.
+ * 
+ * The result shows how sloppy the lookup algorithms are.
+ * 
+Prints a histogram with the collected nodes
+First column are the buckets indicating the hit rate. 3 .. 12 summerizes the nodes that get hit with a probability of 3 to 12% in each lookup.
+Second column indicates the number of nodes that this bucket contains. [19] means 19 nodes got hit with a probability of 3 to 12%.
+Third column is a visualization of the number of nodes [19].
+
+Example1:
+3 .. 12 [ 19 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
+Within one lookup, 19 nodes got hit in 3 to 12% of the cases. These are rarely found therefore.
+
+Example2:
+84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
+Within one lookup, 15 nodes got hit in 84 to 93% of the cases. These nodes are therefore found in almost all lookups.
+
+Full example:
+3 .. 12 [ 19 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
+12 .. 21 [  2 ]: ∎∎
+21 .. 30 [  3 ]: ∎∎∎
+30 .. 39 [  2 ]: ∎∎
+39 .. 48 [  3 ]: ∎∎∎
+48 .. 57 [  0 ]:
+57 .. 66 [  0 ]:
+66 .. 75 [  0 ]:
+75 .. 84 [  1 ]: ∎
+84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
+*/
+
 use histo::Histogram;
 use mainline::{Dht, Id, Node};
 use std::{
@@ -86,32 +118,7 @@ fn main() {
     print_histogram(ip_hits, lookup_count);
 }
 
-/*
-Prints a histogram with the collected nodes
-First column are the buckets indicating the hit rate. 3 .. 12 summerizes the nodes that get hit with a probability of 3 to 12% in each lookup.
-Second column indicates the number of nodes that this bucket contains. [19] means 19 nodes got hit with a probability of 3 to 12%.
-Third column is a visualization of the number of nodes [19].
 
-Example1:
- 3 .. 12 [ 19 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
-Within one lookup, 19 nodes got hit in 3 to 12% of the cases. These are rarely found therefore.
-
-Example2:
-84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
-Within one lookup, 15 nodes got hit in 84 to 93% of the cases. These nodes are therefore found in almost all lookups.
-
-Full example:
- 3 .. 12 [ 19 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
-12 .. 21 [  2 ]: ∎∎
-21 .. 30 [  3 ]: ∎∎∎
-30 .. 39 [  2 ]: ∎∎
-39 .. 48 [  3 ]: ∎∎∎
-48 .. 57 [  0 ]:
-57 .. 66 [  0 ]:
-66 .. 75 [  0 ]:
-75 .. 84 [  1 ]: ∎
-84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
-*/
 fn print_histogram(hits: HashMap<IpAddr, u16>, lookup_count: usize) {
     /*
 
