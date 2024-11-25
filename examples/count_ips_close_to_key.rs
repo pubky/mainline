@@ -6,7 +6,7 @@ use tracing::Level;
 
 const K: usize = 20; // Not really k but we take the k closest nodes into account.
 const MAX_DISTANCE: u8 = 150; // Health check to not include outrageously distant nodes.
-const USE_RANDOM_BOOTSTRAP_NODES: bool = true;
+const USE_RANDOM_BOOTSTRAP_NODES: bool = false;
 
 
 fn main() {
