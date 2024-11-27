@@ -1,9 +1,9 @@
 /**
- * Counts all IP addresses around a random target ID and counts the number of hits, each IP gets. 
+ * Counts all IP addresses around a random target ID and counts the number of hits, each IP gets.
  * Does this by initializing a new DHT node for each lookups to reach the target from different directions.
- * 
+ *
  * The result shows how sloppy the lookup algorithms are.
- * 
+ *
 Prints a histogram with the collected nodes
 First column are the buckets indicating the hit rate. 3 .. 12 summerizes the nodes that get hit with a probability of 3 to 12% in each lookup.
 Second column indicates the number of nodes that this bucket contains. [19] means 19 nodes got hit with a probability of 3 to 12%.
@@ -29,7 +29,6 @@ Full example:
 75 .. 84 [  1 ]: ∎
 84 .. 93 [ 15 ]: ∎∎∎∎∎∎∎∎∎∎∎∎∎∎∎
 */
-
 use histo::Histogram;
 use mainline::{Dht, Id, Node};
 use std::{
@@ -117,7 +116,6 @@ fn main() {
     println!("Histogram");
     print_histogram(ip_hits, lookup_count);
 }
-
 
 fn print_histogram(hits: HashMap<IpAddr, u16>, lookup_count: usize) {
     /*
