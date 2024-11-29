@@ -61,7 +61,10 @@ that limits the number of nodes to 8 for each IP, and uniformly disrtibute these
 
 ### Solution
 
-The solution used in this implementation is to store data to all nodes closer to the target than the `expected distance to k (edk)` instead of just the closest `k` nodes.
+To circumvent vertical sybil attack, we make sure to store data to as many of the closest nodes -that responded to our GET query- as necessary
+to satisfy both the following requirements:
+
+#### One or more nodes are further from the target than the `expected distance to k (edk)`.
 
 To understand what that means, consider that we have a rough estimation of the DHT size (which we obtain as explained in the 
 documentation of the [Dht Size Estimate](./dht_size_estimate.md)), then we can _expect_ that the closest `k` nodes, are going to be
@@ -79,6 +82,39 @@ This is similar but a bit more accurate than the average distance of the `k`th n
 If we store data in all nodes until `edk` (the expected distance of the first 2 nodes in this example), we would store the data at at least 2 honest nodes.
 
 Because the nature of the DHT queries, we should expect to get a response from at least one of these honest nodes as we query closer and closer nodes to the target info hash.
+
+#### Minimum number of unique subnets with 6 bits prefix.
+
+An extreme, and unlikely, but possible way to defeat our `edk` approach to detect vertical sybil attacks, is to DDoS all the honest nodes
+and replace them with enough nodes owned by the attacker. 
+
+To find enough nodes to replace the nodes until `edk` the attacker needs ~4 `/8` blocks, or a single `/6` block.
+
+However, we can make this much more expensive, by keeping track of the number of unique `6 bit prefixes` in each GET query response, 
+and store data to enough nodes that have enough unique prefixes to match the average from previous queries.
+
+At the time of writing, this usually means the attacker needs to control up to 12 `/6` blocks.
+
+## Extreme Vertical Sybil Attacks
+
+While we are satisfied that this static metrics to circumvent Sybil attacks make them prohibitively expensive, let's consider what 
+happens in the very unlikely event that an attacker has enough resources and motivation to brute force them both.
+
+In this case, an attacker acquires a so many Ips in so many subnets that they can both DDoS all the nodes until the expected distance to the 20th node,
+and inject at least 20 nodes with as many unique `6 bit` prefix in their IPs as the average of the rest of the network.
+
+Eventually, the writer will notice that reads after writes (GET after PUT, resolving after publishing) doesn't work for them, which can only be explained
+by an extreme targeted censorship attack.
+
+Once the writer notices this, they can manuaully start publishing to more and more nodes around the target, for example, instead of publishing to closest 20 nodes,
+start publishing to closest 200, or 2000, where readers, without any manual intervention will be likely to find the data as they are approaching the target.
+
+The writer can do that, by making GET queries to random targets that share enough prefix bits with their target, to find more and more nodes around their target, 
+then store their data to these responding nodes.
+
+It is unfortunate that the writer needs to react manuaully at all, but given how extreme this attack is, we are satisfied with
+the defese being way cheaper than the attack, making the attack not only unsustainable, but also unlikely to happen, given that the attacker knows
+it won't be sustainable.
 
 ## Horizontal Sybil Attacks
 
