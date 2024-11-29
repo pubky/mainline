@@ -65,7 +65,7 @@ pub struct Rpc {
     /// 1. dht size estimate based on closest claimed nodes,
     /// 2. dht size estimate based on closest responding nodes.
     /// 3. number of subnets with unique 6 bits prefix in ipv4
-    closest_nodes: LruCache<Id, (Vec<Rc<Node>>, f64, f64, u8)>,
+    closest_nodes: LruCache<Id, CachedGetQuery>,
 
     // Active Queries
     queries: HashMap<Id, Query>,
@@ -224,20 +224,28 @@ impl Rpc {
                 );
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
-                    if let Some((_, (_, closest, responding, subnets))) =
-                        self.closest_nodes.pop_lru()
+                    if let Some((
+                        _,
+                        CachedGetQuery {
+                            dht_size_estimate,
+                            responders_dht_size_estimate,
+                            subnets,
+                            ..
+                        },
+                    )) = self.closest_nodes.pop_lru()
                     {
-                        self.dht_size_estimates_sum -= closest;
-                        self.responders_based_dht_size_estimates_sum -= responding;
+                        self.dht_size_estimates_sum -= dht_size_estimate;
+                        self.responders_based_dht_size_estimates_sum -=
+                            responders_dht_size_estimate;
                         self.subnets -= subnets as usize
                     };
                 }
 
-                let closest_dht_size_estimate = closest.dht_size_estimate();
+                let dht_size_estimate = closest.dht_size_estimate();
                 let responders_dht_size_estimate = responders.dht_size_estimate();
                 let subnets_count = closest.subnets_count();
 
-                self.dht_size_estimates_sum += closest_dht_size_estimate;
+                self.dht_size_estimates_sum += dht_size_estimate;
                 self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
                 self.subnets += subnets_count as usize;
 
@@ -247,12 +255,12 @@ impl Rpc {
 
                 self.closest_nodes.put(
                     *id,
-                    (
-                        closest_responding_nodes.into(),
-                        closest_dht_size_estimate,
+                    CachedGetQuery {
+                        closest_nodes: closest_responding_nodes.into(),
+                        dht_size_estimate,
                         responders_dht_size_estimate,
-                        subnets_count,
-                    ),
+                        subnets: subnets_count,
+                    },
                 );
             };
         }
@@ -331,10 +339,13 @@ impl Rpc {
 
         let mut query = PutQuery::new(target, request.clone(), sender);
 
-        if let Some((closest_nodes, _, _, _)) = self
+        if let Some(closest_nodes) = self
             .closest_nodes
             .get(&target)
-            .filter(|(nodes, _, _, _)| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
+            .map(|cached| &cached.closest_nodes)
+            .filter(|closest_nodes| {
+                !closest_nodes.is_empty() && closest_nodes.iter().any(|n| n.valid_token())
+            })
         {
             query.start(&mut self.socket, closest_nodes)
         } else {
@@ -419,8 +430,8 @@ impl Rpc {
             query.add_candidate(node)
         }
 
-        if let Some((cached_closest, _, _, _)) = self.closest_nodes.get(&target) {
-            for node in cached_closest {
+        if let Some(CachedGetQuery { closest_nodes, .. }) = self.closest_nodes.get(&target) {
+            for node in closest_nodes {
                 query.add_candidate(node.clone())
             }
         }
@@ -690,6 +701,13 @@ impl Drop for Rpc {
     fn drop(&mut self) {
         debug!("Dropped Mainline::Rpc");
     }
+}
+
+struct CachedGetQuery {
+    closest_nodes: Vec<Rc<Node>>,
+    dht_size_estimate: f64,
+    responders_dht_size_estimate: f64,
+    subnets: u8,
 }
 
 /// Any received message and done queries in the [Rpc::tick].
