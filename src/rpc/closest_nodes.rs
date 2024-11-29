@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, rc::Rc};
+use std::{collections::HashSet, convert::TryInto, rc::Rc};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
@@ -61,31 +61,57 @@ impl ClosestNodes {
         self.nodes.is_empty()
     }
 
-    /// Get the closest [K][MAX_BUCKET_SIZE_K] nodes or all the nodes until the
-    /// expected distance of the Kth node, given a DHT size estimation.
-    pub fn take_until_edk(&self, previous_dht_size_estimate: usize) -> &[Rc<Node>] {
-        let mut until_edk = 0;
+    /// Take enough nodes closest to the target, until the following are satisfied:
+    /// 1. At least the closest [k][MAX_BUCKET_SIZE_K].
+    /// 2. The last node should be at a distance `edk` which is the expected distance of the 20th
+    ///    node given previous estimations of the DHT size.
+    /// 3. The number of subnets with uniqu e6 bits prefix in nodes ipv4 addresses match or exceeds
+    ///     the average from previous queries.
+    ///
+    /// If one or more of these conditions are not met, then we just take all responding nodes
+    /// and store data at them.
+    pub fn take_until_secure(
+        &self,
+        previous_dht_size_estimate: usize,
+        average_subnets: usize,
+    ) -> &[Rc<Node>] {
+        let mut until_secure = 0;
 
         // 20 / dht_size_estimate == expected_dk / ID space
         // so expected_dk = 20 * ID space / dht_size_estimate
         let expected_dk =
             (20.0 * u128::MAX as f64 / (previous_dht_size_estimate as f64 + 1.0)) as u128;
 
+        let mut subnets = HashSet::new();
+
         for node in &self.nodes {
             let distance = distance(&self.target, node);
 
-            if distance >= expected_dk {
+            subnets.insert(subnet(node));
+
+            if distance >= expected_dk && subnets.len() >= average_subnets {
                 break;
             }
 
-            until_edk += 1;
+            until_secure += 1;
         }
 
-        let nodes = &self.nodes[0..until_edk.max(MAX_BUCKET_SIZE_K).min(self.nodes().len())];
+        &self.nodes[0..until_secure.max(MAX_BUCKET_SIZE_K).min(self.nodes().len())]
+    }
 
-        dbg!(least_six_blocks(nodes));
+    /// Count the number of subnets with unique 6 bits prefix in ipv4
+    pub fn subnets_count(&self) -> u8 {
+        if self.nodes.is_empty() {
+            return 20;
+        }
 
-        nodes
+        let mut subnets = HashSet::new();
+
+        for node in self.nodes.iter().take(MAX_BUCKET_SIZE_K) {
+            subnets.insert(subnet(node));
+        }
+
+        subnets.len() as u8
     }
 
     /// An estimation of the Dht from the distribution of closest nodes
@@ -102,30 +128,11 @@ impl ClosestNodes {
     }
 }
 
-const SIX_BLOCK_MASK: u32 = 0b1111_1100 << 24;
-
-fn least_six_blocks(nodes: &[Rc<Node>]) -> usize {
-    if nodes.is_empty() {
-        return 20;
+fn subnet(node: &Rc<Node>) -> u8 {
+    match node.address().ip() {
+        std::net::IpAddr::V4(ip) => ((ip.to_bits() >> 26) & 0b0011_1111) as u8,
+        _ => unimplemented!(),
     }
-
-    // Group values by their prefix
-    let mut prefix_count = HashMap::new();
-
-    for node in nodes.iter().take(20) {
-        let ip = match node.address().ip() {
-            std::net::IpAddr::V4(ip) => ip.to_bits(),
-            _ => unimplemented!(),
-        };
-
-        let prefix = ip & SIX_BLOCK_MASK;
-        *prefix_count.entry(prefix).or_insert(0) += 1;
-    }
-
-    // Number of buckets
-    dbg!(prefix_count.keys().len());
-
-    prefix_count.keys().len()
 }
 
 fn distance(target: &Id, node: &Node) -> u128 {
@@ -209,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn counter_vertical_sybil_attack() {
+    fn take_until_expected_distance_to_20th_node() {
         let target = Id::random();
         let dht_size_estimate = 200;
 
@@ -234,7 +241,7 @@ mod tests {
             closest_nodes.add(node);
         }
 
-        let closest = closest_nodes.take_until_edk(dht_size_estimate);
+        let closest = closest_nodes.take_until_secure(dht_size_estimate, 0);
 
         assert!((closest.len() - sybil.nodes().len()) > 10);
     }

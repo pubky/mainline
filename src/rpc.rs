@@ -61,8 +61,11 @@ pub struct Rpc {
     last_table_ping: Instant,
     /// Closest responding nodes to specific target
     ///
-    /// as well as the dht size estimate based on closest claimed nodes, and closest responding nodes.
-    closest_nodes: LruCache<Id, (Vec<Rc<Node>>, f64, f64)>,
+    /// as well as the:
+    /// 1. dht size estimate based on closest claimed nodes,
+    /// 2. dht size estimate based on closest responding nodes.
+    /// 3. number of subnets with unique 6 bits prefix in ipv4
+    closest_nodes: LruCache<Id, (Vec<Rc<Node>>, f64, f64, u8)>,
 
     // Active Queries
     queries: HashMap<Id, Query>,
@@ -74,6 +77,8 @@ pub struct Rpc {
     dht_size_estimates_sum: f64,
     /// Sum of Dht size estimates from closest _responding_ nodes from get queries.
     responders_based_dht_size_estimates_sum: f64,
+    /// Sum of the number of subnets with 6 bits prefix in the closest nodes ipv4
+    subnets: usize,
 }
 
 impl Rpc {
@@ -117,7 +122,9 @@ impl Rpc {
             last_table_ping: Instant::now(),
 
             dht_size_estimates_sum: 0.0,
-            responders_based_dht_size_estimates_sum: 0.0,
+            // Don't store to too many nodes just because you are in a cold start.
+            responders_based_dht_size_estimates_sum: 1_000_000.0,
+            subnets: 20,
         })
     }
 
@@ -210,20 +217,29 @@ impl Rpc {
                 let closest = query.closest();
                 let responders = query.responders();
 
-                let closest_responding_nodes = responders.take_until_edk(
+                let closest_responding_nodes = responders.take_until_secure(
                     self.responders_based_dht_size_estimates_sum as usize
                         / self.closest_nodes.len().max(1),
+                    self.subnets / self.closest_nodes.len().max(1),
                 );
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
-                    if let Some((_, (_, closest, responding))) = self.closest_nodes.pop_lru() {
+                    if let Some((_, (_, closest, responding, subnets))) =
+                        self.closest_nodes.pop_lru()
+                    {
                         self.dht_size_estimates_sum -= closest;
                         self.responders_based_dht_size_estimates_sum -= responding;
+                        self.subnets -= subnets as usize
                     };
                 }
 
-                self.dht_size_estimates_sum += closest.dht_size_estimate();
-                self.responders_based_dht_size_estimates_sum += responders.dht_size_estimate();
+                let closest_dht_size_estimate = closest.dht_size_estimate();
+                let responders_dht_size_estimate = responders.dht_size_estimate();
+                let subnets_count = closest.subnets_count();
+
+                self.dht_size_estimates_sum += closest_dht_size_estimate;
+                self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
+                self.subnets += subnets_count as usize;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
                     put_query.start(&mut self.socket, closest_responding_nodes)
@@ -233,8 +249,9 @@ impl Rpc {
                     *id,
                     (
                         closest_responding_nodes.into(),
-                        closest.dht_size_estimate(),
-                        responders.dht_size_estimate(),
+                        closest_dht_size_estimate,
+                        responders_dht_size_estimate,
+                        subnets_count,
                     ),
                 );
             };
@@ -314,10 +331,10 @@ impl Rpc {
 
         let mut query = PutQuery::new(target, request.clone(), sender);
 
-        if let Some((closest_nodes, _, _)) = self
+        if let Some((closest_nodes, _, _, _)) = self
             .closest_nodes
             .get(&target)
-            .filter(|(nodes, _, _)| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
+            .filter(|(nodes, _, _, _)| !nodes.is_empty() && nodes.iter().any(|n| n.valid_token()))
         {
             query.start(&mut self.socket, closest_nodes)
         } else {
@@ -402,7 +419,7 @@ impl Rpc {
             query.add_candidate(node)
         }
 
-        if let Some((cached_closest, _, _)) = self.closest_nodes.get(&target) {
+        if let Some((cached_closest, _, _, _)) = self.closest_nodes.get(&target) {
             for node in cached_closest {
                 query.add_candidate(node.clone())
             }
