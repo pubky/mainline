@@ -416,7 +416,11 @@ impl Rpc {
         // Seed the query either with the closest nodes from the routing table, or the
         // bootstrapping nodes if the closest nodes are not enough.
 
-        let routing_table_closest = self.routing_table.closest(&target);
+        let routing_table_closest = self.routing_table.closest_secure(
+            &target,
+            self.responders_based_dht_size_estimates_sum as usize / self.closest_nodes.len().max(1),
+            self.subnets_sum / self.closest_nodes.len().max(1),
+        );
 
         // If we don't have enough or any closest nodes, call the bootstraping nodes.
         if routing_table_closest.is_empty() || routing_table_closest.len() < self.bootstrap.len() {

@@ -3,7 +3,8 @@
 use std::slice::Iter;
 use std::{collections::BTreeMap, rc::Rc};
 
-use crate::common::{Id, Node, MAX_DISTANCE};
+use crate::common::{Id, Node};
+use crate::rpc::ClosestNodes;
 
 /// K = the default maximum size of a k-bucket.
 pub const MAX_BUCKET_SIZE_K: usize = 20;
@@ -78,46 +79,31 @@ impl RoutingTable {
     /// Return the closest nodes to the target while prioritizing secure nodes,
     /// as defined in [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
     pub fn closest(&self, target: &Id) -> Vec<Rc<Node>> {
-        let mut result = Vec::with_capacity(MAX_BUCKET_SIZE_K);
-        let mut unsecure = Vec::with_capacity(MAX_BUCKET_SIZE_K);
+        let mut closest = ClosestNodes::new(*target);
 
-        let distance = self.id.distance(target);
-
-        for i in
-            // First search in closest nodes
-            (distance..=MAX_DISTANCE)
-                // if we don't have enough close nodes, populate from other buckets
-                .chain((0..distance).rev())
-        {
-            match &self.buckets.get(&i) {
-                Some(bucket) => {
-                    for node in bucket.iter() {
-                        if result.len() < MAX_BUCKET_SIZE_K {
-                            if node.is_secure() {
-                                result.push(node.clone());
-                            } else {
-                                unsecure.push(node.clone())
-                            }
-                        } else {
-                            return result;
-                        }
-                    }
-                }
-                None => continue,
-            }
+        for node in self.to_vec() {
+            closest.add(node);
         }
 
-        if result.len() < MAX_BUCKET_SIZE_K {
-            for node in unsecure {
-                if result.len() < MAX_BUCKET_SIZE_K {
-                    result.push(node);
-                } else {
-                    break;
-                }
-            }
+        closest.nodes()[..MAX_BUCKET_SIZE_K].to_vec()
+    }
+
+    /// Secure version of [Self::closest] that tries to circumvent sybil attacks.
+    pub fn closest_secure(
+        &self,
+        target: &Id,
+        dht_size_estimate: usize,
+        subnets: usize,
+    ) -> Vec<Rc<Node>> {
+        let mut closest = ClosestNodes::new(*target);
+
+        for node in self.to_vec() {
+            closest.add(node);
         }
 
-        result
+        closest
+            .take_until_secure(dht_size_estimate, subnets)
+            .to_vec()
     }
 
     pub fn is_empty(&self) -> bool {
