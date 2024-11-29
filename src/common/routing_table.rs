@@ -81,11 +81,13 @@ impl RoutingTable {
     pub fn closest(&self, target: &Id) -> Vec<Rc<Node>> {
         let mut closest = ClosestNodes::new(*target);
 
-        for node in self.to_vec() {
-            closest.add(node);
+        for bucket in self.buckets.values() {
+            for node in &bucket.nodes {
+                closest.add(node.clone());
+            }
         }
 
-        closest.nodes()[..MAX_BUCKET_SIZE_K].to_vec()
+        closest.nodes()[..MAX_BUCKET_SIZE_K.min(closest.len())].to_vec()
     }
 
     /// Secure version of [Self::closest] that tries to circumvent sybil attacks.
@@ -550,13 +552,13 @@ mod test {
 
         {
             let expected_closest_ids: Vec<_> = [
-                "81d394b44403315f9845c3da6f018b8daedd89ef",
-                "81f038cabb8a845f39da0d40716bf0707da55187",
-                "833843b1f33e720c17bccfb75647a49040861b4c",
-                "84325dd6fbd9a93f4ab61d091a9562a6c6111df4",
                 "897457b33c4eb1ffcab08331877108cbf3fac6de",
                 "907fdf0aa137200b395bc210763ed947b03dfc2e",
+                "9230a2f8ac81e73f16c63dd60adb030328fbc983",
+                "93b0cb01befc90b65a0026acf85bea2fefec7d44",
+                "93cb2977e536a680c043b158345254c14b946d52",
                 "9465e80d80f707b222c4ae6ee81c02b62f607629",
+                "9481589ddec9a6d9ad2cee7f73e8319aab3f1e95",
                 "94d2037bbc534a5f1d672ce3e3350576c2b78ed1",
                 "98805a55523458c56d59339266bdcecc82370ecd",
                 "99719dfc220b145e2aac71d6b3e276731d85be1c",
