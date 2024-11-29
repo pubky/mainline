@@ -61,7 +61,10 @@ that limits the number of nodes to 8 for each IP, and uniformly disrtibute these
 
 ### Solution
 
-The solution used in this implementation is to store data to all nodes closer to the target than the `expected distance to k (edk)` instead of just the closest `k` nodes.
+To circumvent vertical sybil attack, we make sure to store data to as many of the closest nodes -that responded to our GET query- as necessary
+to satisfy both the following requirements:
+
+#### One or more nodes are further from the target than the `expected distance to k (edk)`.
 
 To understand what that means, consider that we have a rough estimation of the DHT size (which we obtain as explained in the 
 documentation of the [Dht Size Estimate](./dht_size_estimate.md)), then we can _expect_ that the closest `k` nodes, are going to be
@@ -79,6 +82,23 @@ This is similar but a bit more accurate than the average distance of the `k`th n
 If we store data in all nodes until `edk` (the expected distance of the first 2 nodes in this example), we would store the data at at least 2 honest nodes.
 
 Because the nature of the DHT queries, we should expect to get a response from at least one of these honest nodes as we query closer and closer nodes to the target info hash.
+
+#### Minimum number of unique subnets with 6 bits prefix.
+
+An extreme, and unlikely, but possible way to defeat our `edk` approach to detect vertical sybil attacks, is to DDoS all the honest nodes
+and replace them with enough nodes owned by the attacker. 
+
+To find enough nodes to replace the nodes until `edk` the attacker needs ~4 `/8` blocks, or a single `/6` block.
+
+However, we can make this much more expensive, by keeping track of the number of unique `6 bit prefixes` in each GET query response, 
+and store data to enough nodes that have enough unique prefixes to match the average from previous queries.
+
+At the time of writing, this usually means the attacker needs to control up to 12 `/6` blocks.
+
+To recap, the attacker needs to do all the following:
+1. DDoS all closest nodes until expected distance to the 20th node.
+2. Own or control at least 20 IP addresses that are hashed to IDs closer to the target than the expected distance to the 20th node.
+3. Make sure the 20 IPs from above belong to at least 12 different `/6` subnets.
 
 ## Horizontal Sybil Attacks
 
