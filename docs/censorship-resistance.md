@@ -95,10 +95,26 @@ and store data to enough nodes that have enough unique prefixes to match the ave
 
 At the time of writing, this usually means the attacker needs to control up to 12 `/6` blocks.
 
-To recap, the attacker needs to do all the following:
-1. DDoS all closest nodes until expected distance to the 20th node.
-2. Own or control at least 20 IP addresses that are hashed to IDs closer to the target than the expected distance to the 20th node.
-3. Make sure the 20 IPs from above belong to at least 12 different `/6` subnets.
+## Extreme Vertical Sybil Attacks
+
+While we are satisfied that this static metrics to circumvent Sybil attacks make them prohibitively expensive, let's consider what 
+happens in the very unlikely event that an attacker has enough resources and motivation to brute force them both.
+
+In this case, an attacker acquires a so many Ips in so many subnets that they can both DDoS all the nodes until the expected distance to the 20th node,
+and inject at least 20 nodes with as many unique `6 bit` prefix in their IPs as the average of the rest of the network.
+
+Eventually, the writer will notice that reads after writes (GET after PUT, resolving after publishing) doesn't work for them, which can only be explained
+by an extreme targeted censorship attack.
+
+Once the writer notices this, they can manuaully start publishing to more and more nodes around the target, for example, instead of publishing to closest 20 nodes,
+start publishing to closest 200, or 2000, where readers, without any manual intervention will be likely to find the data as they are approaching the target.
+
+The writer can do that, by making GET queries to random targets that share enough prefix bits with their target, to find more and more nodes around their target, 
+then store their data to these responding nodes.
+
+It is unfortunate that the writer needs to react manuaully at all, but given how extreme this attack is, we are satisfied with
+the defese being way cheaper than the attack, making the attack not only unsustainable, but also unlikely to happen, given that the attacker knows
+it won't be sustainable.
 
 ## Horizontal Sybil Attacks
 
