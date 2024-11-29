@@ -64,7 +64,6 @@ impl Node {
         }
     }
 
-    #[cfg(any(test, feature = "__private_simulation"))]
     /// Create a node that is unique per `i` as it has a random Id and sets IP and port to `i`
     pub fn unique(i: usize) -> Node {
         use std::net::Ipv4Addr;

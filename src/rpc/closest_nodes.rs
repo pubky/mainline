@@ -62,7 +62,7 @@ impl ClosestNodes {
     }
 
     /// Take enough nodes closest to the target, until the following are satisfied:
-    /// 1. At least the closest [k][MAX_BUCKET_SIZE_K].
+    /// 1. At least the closest `k` nodes (20).
     /// 2. The last node should be at a distance `edk` which is the expected distance of the 20th
     ///    node given previous estimations of the DHT size.
     /// 3. The number of subnets with uniqu e6 bits prefix in nodes ipv4 addresses match or exceeds

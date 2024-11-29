@@ -38,9 +38,6 @@ dashmap = "6.1"
 ## Enable [Dht::as_async()] to use [async_dht::AsyncDht]
 async = ["flume/async"]
 
-## Private feature to export ClosestNodes struct. Not a public API.
-__private_simulation = []
-
 default = []
 
 [package.metadata.docs.rs]
