@@ -78,7 +78,7 @@ pub struct Rpc {
     /// Sum of Dht size estimates from closest _responding_ nodes from get queries.
     responders_based_dht_size_estimates_sum: f64,
     /// Sum of the number of subnets with 6 bits prefix in the closest nodes ipv4
-    subnets: usize,
+    subnets_sum: usize,
 }
 
 impl Rpc {
@@ -124,7 +124,7 @@ impl Rpc {
             dht_size_estimates_sum: 0.0,
             // Don't store to too many nodes just because you are in a cold start.
             responders_based_dht_size_estimates_sum: 1_000_000.0,
-            subnets: 20,
+            subnets_sum: 20,
         })
     }
 
@@ -220,7 +220,7 @@ impl Rpc {
                 let closest_responding_nodes = responders.take_until_secure(
                     self.responders_based_dht_size_estimates_sum as usize
                         / self.closest_nodes.len().max(1),
-                    self.subnets / self.closest_nodes.len().max(1),
+                    self.subnets_sum / self.closest_nodes.len().max(1),
                 );
 
                 if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
@@ -237,7 +237,7 @@ impl Rpc {
                         self.dht_size_estimates_sum -= dht_size_estimate;
                         self.responders_based_dht_size_estimates_sum -=
                             responders_dht_size_estimate;
-                        self.subnets -= subnets as usize
+                        self.subnets_sum -= subnets as usize
                     };
                 }
 
@@ -246,8 +246,14 @@ impl Rpc {
                 let subnets_count = closest.subnets_count();
 
                 self.dht_size_estimates_sum += dht_size_estimate;
-                self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
-                self.subnets += subnets_count as usize;
+
+                // Don't count the responders from non GET queries, as they will always be 0.
+                if let RequestTypeSpecific::GetValue(_) | RequestTypeSpecific::GetPeers(_) =
+                    query.request.request_type
+                {
+                    self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
+                }
+                self.subnets_sum += subnets_count as usize;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
                     put_query.start(&mut self.socket, closest_responding_nodes)
