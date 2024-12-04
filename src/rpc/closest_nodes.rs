@@ -117,7 +117,7 @@ impl ClosestNodes {
     /// An estimation of the Dht from the distribution of closest nodes
     /// responding to a query.
     ///
-    /// [Read more](../../docs/dht_size_estimate.md)
+    /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> f64 {
         dht_size_estimate(
             self.nodes

@@ -9,6 +9,7 @@ license = "MIT"
 keywords = ["bittorrent", "torrent", "dht", "kademlia", "mainline"]
 categories = ["network-programming"]
 repository = "https://github.com/pubky/mainline"
+exclude = ["/docs/*", "/clippy.toml"]
 
 [dependencies]
 rand = "0.8.5"
@@ -45,3 +46,4 @@ all-features = true
 
 [lints.clippy]
 unwrap_used = "deny"
+
