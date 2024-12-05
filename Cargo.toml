@@ -9,6 +9,7 @@ license = "MIT"
 keywords = ["bittorrent", "torrent", "dht", "kademlia", "mainline"]
 categories = ["network-programming"]
 repository = "https://github.com/pubky/mainline"
+resolver = "2"
 
 [dependencies]
 rand = "0.8.5"
@@ -24,6 +25,7 @@ bytes = "1.9.0"
 tracing = "0.1"
 lru = { version = "0.12.5", default-features = false }
 document-features = "0.2.10"
+getrandom = { version = "0.2", features = [ "js" ], optional = true }
 
 [dev-dependencies]
 clap = { version = "4.5.21", features = ["derive"] }
@@ -37,6 +39,7 @@ dashmap = "6.1"
 [features]
 ## Enable [Dht::as_async()] to use [async_dht::AsyncDht]
 async = ["flume/async"]
+js = ["getrandom"]
 
 default = []
 
