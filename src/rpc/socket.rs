@@ -36,7 +36,7 @@ pub struct InflightRequest {
 impl KrpcSocket {
     pub(crate) fn new(
         read_only: bool,
-        request_timeout: Option<Duration>,
+        request_timeout: Duration,
         port: Option<u16>,
     ) -> Result<Self, std::io::Error> {
         let socket = if let Some(port) = port {
@@ -54,12 +54,22 @@ impl KrpcSocket {
             socket,
             next_tid: 0,
             read_only,
-            request_timeout: request_timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT),
+            request_timeout,
             inflight_requests: Vec::with_capacity(u16::MAX as usize),
         })
     }
 
-    // === Options ===
+    #[cfg(test)]
+    pub(crate) fn server() -> Result<Self, std::io::Error> {
+        Self::new(false, DEFAULT_REQUEST_TIMEOUT, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_only() -> Result<Self, std::io::Error> {
+        Self::new(true, DEFAULT_REQUEST_TIMEOUT, None)
+    }
+
+    // === Getters ===
 
     /// Returns the address the server is listening to.
     #[inline]
@@ -274,7 +284,7 @@ mod test {
 
     #[test]
     fn tid() {
-        let mut socket = KrpcSocket::new(false, None, None).unwrap();
+        let mut socket = KrpcSocket::server().unwrap();
 
         assert_eq!(socket.tid(), 0);
         assert_eq!(socket.tid(), 1);
@@ -288,10 +298,10 @@ mod test {
 
     #[test]
     fn recv_request() {
-        let mut server = KrpcSocket::new(false, None, None).unwrap();
+        let mut server = KrpcSocket::server().unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(true, None, None).unwrap();
+        let mut client = KrpcSocket::read_only().unwrap();
         client.next_tid = 120;
 
         let client_address = client.local_addr().unwrap();
@@ -326,14 +336,14 @@ mod test {
     fn recv_response() {
         let (tx, rx) = flume::bounded(1);
 
-        let mut client = KrpcSocket::new(true, None, None).unwrap();
+        let mut client = KrpcSocket::read_only().unwrap();
         let client_address = client.local_addr().unwrap();
 
         let responder_id = Id::random();
         let response = ResponseSpecific::Ping(PingResponseArguments { responder_id });
 
         let server_thread = thread::spawn(move || {
-            let mut server = KrpcSocket::new(true, None, None).unwrap();
+            let mut server = KrpcSocket::read_only().unwrap();
             let server_address = server.local_addr().unwrap();
             tx.send(server_address).unwrap();
 
@@ -373,10 +383,10 @@ mod test {
 
     #[test]
     fn ignore_response_from_wrong_address() {
-        let mut server = KrpcSocket::new(true, None, None).unwrap();
+        let mut server = KrpcSocket::read_only().unwrap();
         let server_address = server.local_addr().unwrap();
 
-        let mut client = KrpcSocket::new(true, None, None).unwrap();
+        let mut client = KrpcSocket::read_only().unwrap();
 
         let client_address = client.local_addr().unwrap();
 

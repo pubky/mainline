@@ -14,7 +14,7 @@ pub mod rpc;
 pub mod server;
 
 pub use crate::common::{Id, MutableItem, Node};
-pub use dht::{Dht, Settings, Testnet};
+pub use dht::{Config, Dht, Testnet};
 pub use rpc::ClosestNodes;
 
 pub use bytes::Bytes;

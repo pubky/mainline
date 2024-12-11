@@ -1,6 +1,11 @@
 //! Dht node.
 
-use std::{fmt::Formatter, net::SocketAddr, thread, time::Duration};
+use std::{
+    fmt::Formatter,
+    net::{SocketAddr, ToSocketAddrs},
+    thread,
+    time::Duration,
+};
 
 use bytes::Bytes;
 use flume::{Receiver, Sender};
@@ -14,7 +19,10 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc},
+    rpc::{
+        PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc, DEFAULT_BOOTSTRAP_NODES,
+        DEFAULT_REQUEST_TIMEOUT,
+    },
     server::{DefaultServer, Server},
     Node,
 };
@@ -23,60 +31,78 @@ use crate::{
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
-#[derive(Debug, Default)]
-/// Dht settings
-pub struct Settings {
-    /// Defaults to [crate::rpc::DEFAULT_BOOTSTRAP_NODES]
-    pub(crate) bootstrap: Option<Vec<String>>,
+#[derive(Debug)]
+/// Dht Configurations
+pub struct Config {
+    /// Bootstrap nodes
+    ///
+    /// Defaults to [DEFAULT_BOOTSTRAP_NODES]
+    pub bootstrap: Vec<String>,
+    /// Explicit port to listen on.
+    ///
     /// Defaults to None
-    pub(crate) server: Option<Box<dyn Server>>,
-    /// Defaults to [crate::rpc::DEFAULT_PORT]
-    pub(crate) port: Option<u16>,
-    /// Defaults to [crate::rpc::DEFAULT_REQUEST_TIMEOUT]
-    pub(crate) request_timeout: Option<Duration>,
+    pub port: Option<u16>,
+    /// UDP requests timeout
+    ///
+    /// Defaults to [DEFAULT_REQUEST_TIMEOUT]
+    pub request_timeout: Duration,
+    /// Server to respond to incoming Requests
+    ///
+    /// Defaults to None
+    pub server: Option<Box<dyn Server>>,
 }
 
-impl Settings {
-    /// Create a Dht node.
-    pub fn build(self) -> Result<Dht, std::io::Error> {
-        Dht::new(self)
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            bootstrap: DEFAULT_BOOTSTRAP_NODES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            port: None,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            server: None,
+        }
     }
+}
 
-    /// Build an [Rpc] instance that you intend to manage in an Actor thread yourself.
-    pub fn build_rpc(&self) -> Result<Rpc, std::io::Error> {
-        Rpc::new(
-            &self.bootstrap,
-            self.server.is_none(),
-            self.request_timeout,
-            self.port,
-        )
-    }
+#[derive(Debug, Default)]
+pub struct DhtBuilder(Config);
 
+impl DhtBuilder {
     // Returns the configured custom server.
     pub fn into_server(self) -> Option<Box<dyn Server>> {
-        self.server
+        self.0.server
     }
 
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
-        self.server = Some(Box::<DefaultServer>::default());
+        self.0.server = Some(Box::<DefaultServer>::default());
+
         self
     }
 
     pub fn custom_server(mut self, custom_server: Box<dyn Server>) -> Self {
-        self.server = Some(custom_server);
+        self.0.server = Some(custom_server);
+
         self
     }
 
     /// Set bootstrapping nodes
     pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
-        self.bootstrap = Some(bootstrap.to_vec());
+        self.0.bootstrap = bootstrap.to_vec();
+
         self
     }
 
-    /// Set the port to listen on.
+    /// Set an explicit port to listen on.
+    ///
+    /// Defaults to None in which case it will attempt to
+    /// connect to [DEFAULT_PORT] and if it fails it will
+    /// bind to a random port.
     pub fn port(mut self, port: u16) -> Self {
-        self.port = Some(port);
+        self.0.port = Some(port);
+
         self
     }
 
@@ -88,15 +114,21 @@ impl Settings {
     ///
     /// Defaults to 2 seconds.
     pub fn request_timeout(mut self, request_timeout: Duration) -> Self {
-        self.request_timeout = Some(request_timeout);
+        self.0.request_timeout = request_timeout;
+
         self
+    }
+
+    /// Create a Dht node.
+    pub fn build(self) -> Result<Dht, std::io::Error> {
+        Dht::new(self.0)
     }
 }
 
 impl Dht {
     /// Returns a builder to edit settings before creating a Dht node.
-    pub fn builder() -> Settings {
-        Settings::default()
+    pub fn builder() -> DhtBuilder {
+        DhtBuilder::default()
     }
 
     /// Create a new DHT client with default bootstrap nodes.
@@ -117,12 +149,12 @@ impl Dht {
     ///
     /// Could return an error if it failed to bind to the specified
     /// port or other io errors while binding the udp socket.
-    pub(crate) fn new(settings: Settings) -> Result<Self, std::io::Error> {
+    pub(crate) fn new(config: Config) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::unbounded();
 
         thread::Builder::new()
             .name("Mainline Dht actor thread".to_string())
-            .spawn(move || run(settings, receiver))?;
+            .spawn(move || run(config, receiver))?;
 
         let (tx, rx) = flume::bounded(1);
 
@@ -339,10 +371,23 @@ impl Dht {
     }
 }
 
-fn run(settings: Settings, receiver: Receiver<ActorMessage>) {
-    match settings.build_rpc() {
+fn run(config: Config, receiver: Receiver<ActorMessage>) {
+    let bootstrap = config
+        .bootstrap
+        .to_owned()
+        .iter()
+        .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
+        .flatten()
+        .collect::<Vec<_>>();
+
+    match Rpc::new(
+        bootstrap,
+        config.server.is_none(),
+        config.request_timeout,
+        config.port,
+    ) {
         Ok(mut rpc) => {
-            let mut server = settings.server;
+            let mut server = config.server;
 
             let address = rpc
                 .local_addr()

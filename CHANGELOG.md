@@ -2,6 +2,16 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `DhtBuilder` wrapper around `Config`, instead of `Settings` doubling as a builder.
+
+### Changed
+
+- Rename `Settings` to `Config`
+
 ##  [4.1.0](https://github.com/pubky/mainline/compare/v3.0.0...v4.1.0) - 2024-11-29
 
 ### Added

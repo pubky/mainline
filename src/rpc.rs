@@ -5,7 +5,7 @@ mod query;
 mod socket;
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -84,9 +84,9 @@ pub struct Rpc {
 impl Rpc {
     /// Create a new Rpc
     pub(crate) fn new(
-        bootstrap: &Option<Vec<String>>,
+        bootstrap: Vec<SocketAddr>,
         read_only: bool,
-        request_timeout: Option<Duration>,
+        request_timeout: Duration,
         port: Option<u16>,
     ) -> Result<Self, std::io::Error> {
         // TODO: One day I might implement BEP42 on Routing nodes.
@@ -96,18 +96,7 @@ impl Rpc {
 
         Ok(Rpc {
             id,
-            bootstrap: bootstrap
-                .to_owned()
-                .unwrap_or(
-                    DEFAULT_BOOTSTRAP_NODES
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                )
-                .iter()
-                .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
-                .flatten()
-                .collect::<Vec<_>>(),
+            bootstrap,
             socket,
             routing_table: RoutingTable::new().with_id(id),
             queries: HashMap::new(),
