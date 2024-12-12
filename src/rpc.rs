@@ -83,7 +83,7 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub(crate) fn new(
+    pub fn new(
         bootstrap: Vec<SocketAddr>,
         read_only: bool,
         request_timeout: Duration,
