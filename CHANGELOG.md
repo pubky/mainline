@@ -2,6 +2,7 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+<<<<<<< HEAD
 ## [Unreleased]
 
 ### Added
@@ -11,6 +12,12 @@ All notable changes to mainline dht will be documented in this file.
 ### Changed
 
 - Rename `Settings` to `Config`
+
+##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
+
+### Added
+
+- Kake MutableItem de/serializable (mikedilger)
 
 ##  [4.1.0](https://github.com/pubky/mainline/compare/v3.0.0...v4.1.0) - 2024-11-29
 
