@@ -1,6 +1,7 @@
 //! Kademlia node Id or a lookup target
 use crc::{Crc, CRC_32_ISCSI};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::{
     fmt::{self, Debug, Display, Formatter},
@@ -15,7 +16,7 @@ pub const MAX_DISTANCE: u8 = ID_SIZE as u8 * 8;
 const IPV4_MASK: u32 = 0x030f3fff;
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
-#[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Ord, PartialOrd, Eq, Hash, Serialize, Deserialize)]
 /// Kademlia node Id or a lookup target
 pub struct Id([u8; ID_SIZE]);
 
