@@ -70,11 +70,6 @@ impl Default for Config {
 pub struct DhtBuilder(Config);
 
 impl DhtBuilder {
-    // Returns the configured custom server.
-    pub fn into_server(self) -> Option<Box<dyn Server>> {
-        self.0.server
-    }
-
     /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
     pub fn server(mut self) -> Self {
         self.0.server = Some(Box::<DefaultServer>::default());
