@@ -2,12 +2,13 @@
 
 use bytes::Bytes;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use serde::{Deserialize, Serialize};
 use sha1_smol::Sha1;
 use std::convert::TryFrom;
 
 use crate::Id;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// [Bep_0044](https://www.bittorrent.org/beps/bep_0044.html)'s Mutable item.
 pub struct MutableItem {
     /// hash of the key and optional salt
@@ -19,6 +20,7 @@ pub struct MutableItem {
     /// mutable value
     value: Bytes,
     /// ed25519 signature
+    #[serde(with = "serde_bytes")]
     signature: [u8; 64],
     /// Optional salt
     salt: Option<Bytes>,
