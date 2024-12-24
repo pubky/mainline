@@ -7,6 +7,8 @@ All notable changes to mainline dht will be documented in this file.
 ### Added
 
 - `DhtBuilder` wrapper around `Config`, instead of `Settings` doubling as a builder.
+- Support `BEP0042 DHT Security extension` when running as a server. 
+- Optionally set `Config::external_ip` manually to generate secure node `Id` from.
 
 ### Changed
 

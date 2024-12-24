@@ -1,17 +1,19 @@
 //! K-RPC implementatioStoreQueryMetdatan
 
 mod closest_nodes;
+mod ipv4_consensus;
 mod query;
 mod socket;
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use flume::Sender;
+use ipv4_consensus::IPV4Consensus;
 use lru::LruCache;
 use tracing::{debug, error};
 
@@ -40,6 +42,9 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const IPV4_CONSENSUS_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
+
+// TODO: detect if we are behind accessible IP address and running for more than 15 minutes
 
 const MAX_CACHED_BUCKETS: usize = 1000;
 
@@ -59,6 +64,8 @@ pub struct Rpc {
     last_table_refresh: Instant,
     /// Last time we pinged nodes in the routing table.
     last_table_ping: Instant,
+    /// Last time we updated the IPV4Consensus
+    last_ipv4_consensus_update: Instant,
     /// Closest responding nodes to specific target
     ///
     /// as well as the:
@@ -79,18 +86,33 @@ pub struct Rpc {
     responders_based_dht_size_estimates_sum: f64,
     /// Sum of the number of subnets with 6 bits prefix in the closest nodes ipv4
     subnets_sum: usize,
+
+    ipv4_consensus: Option<IPV4Consensus>,
 }
 
 impl Rpc {
     /// Create a new Rpc
+    ///
+    /// - `bootstrap`: Bootstraping nodes addresses.
+    /// - `read_only`: Set to false if you want to explecitly run as a server (responding node)
+    ///     from the get go, otherwise the node will detect if it is publicly accessible and change
+    ///     this setting after `15` minutes of running.
+    /// - `request_timeout`: How long does it take to wait for a response from a node.
+    /// - `port`: The UDP port to listen on, if `None`, a random port will be selected.
+    /// - `external_ip`: Set this Node's Ip to be used for secure Node Id generation, if you know
+    /// your external IP and don't want to trust consensus from responding DHT nodes.
     pub fn new(
         bootstrap: Vec<SocketAddr>,
         read_only: bool,
         request_timeout: Duration,
         port: Option<u16>,
+        external_ip: Option<Ipv4Addr>,
     ) -> Result<Self, std::io::Error> {
-        // TODO: One day I might implement BEP42 on Routing nodes.
-        let id = Id::random();
+        let id = if let Some(ip) = external_ip {
+            Id::from_ip(ip.into())
+        } else {
+            Id::random()
+        };
 
         let socket = KrpcSocket::new(read_only, request_timeout, port)?;
 
@@ -109,11 +131,18 @@ impl Rpc {
                 .checked_sub(REFRESH_TABLE_INTERVAL)
                 .unwrap_or_else(Instant::now),
             last_table_ping: Instant::now(),
+            last_ipv4_consensus_update: Instant::now(),
 
             dht_size_estimates_sum: 0.0,
             // Don't store to too many nodes just because you are in a cold start.
             responders_based_dht_size_estimates_sum: 1_000_000.0,
             subnets_sum: 20,
+
+            ipv4_consensus: if external_ip.is_some() {
+                None
+            } else {
+                Some(IPV4Consensus::new(10, 20))
+            },
         })
     }
 
@@ -449,6 +478,14 @@ impl Rpc {
             return None;
         };
 
+        if let Some(ref mut ipv4_consensus) = self.ipv4_consensus {
+            if let Some(std::net::IpAddr::V4(proposed_addr)) =
+                message.requester_ip.map(|addr| addr.ip())
+            {
+                ipv4_consensus.add_vote(proposed_addr);
+            }
+        };
+
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
         if let Some(query) = self
             .put_queries
@@ -668,6 +705,42 @@ impl Rpc {
                     self.routing_table.remove(&node.id);
                 } else if node.should_ping() {
                     self.ping(node.address);
+                }
+            }
+        }
+
+        if let Some(ref mut ipv4_consensus) = self.ipv4_consensus {
+            if self.last_ipv4_consensus_update.elapsed() > IPV4_CONSENSUS_UPDATE_INTERVAL {
+                self.last_ipv4_consensus_update = Instant::now();
+
+                ipv4_consensus.decay();
+            }
+
+            if let Some(ip) = ipv4_consensus.get_best_ipv4() {
+                let ip = IpAddr::V4(ip);
+                if !self.id.is_valid_for_ip(&ip) {
+                    let new_id = Id::from_ip(ip);
+                    tracing::info!(
+                        "Our current id {} is not valid for IP {}. Using new id {}",
+                        self.id,
+                        ip,
+                        new_id
+                    );
+                    self.id = new_id;
+
+                    let closest = self
+                        .routing_table
+                        .closest(&self.id)
+                        .iter()
+                        .map(|n| *n.address())
+                        .collect::<Vec<_>>();
+
+                    self.get(
+                        self.id,
+                        RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: self.id }),
+                        None,
+                        Some(closest),
+                    );
                 }
             }
         }

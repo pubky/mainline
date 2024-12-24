@@ -2,7 +2,7 @@
 
 use std::{
     fmt::Formatter,
-    net::{SocketAddr, ToSocketAddrs},
+    net::{Ipv4Addr, SocketAddr, ToSocketAddrs},
     thread,
     time::Duration,
 };
@@ -50,6 +50,12 @@ pub struct Config {
     ///
     /// Defaults to None
     pub server: Option<Box<dyn Server>>,
+    /// A known external IPv4 address for this node to generate
+    /// a secure node Id from according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
+    ///
+    /// Defaults to None, where we depend on the consensus of
+    /// votes from responding nodes.
+    pub external_ip: Option<Ipv4Addr>,
 }
 
 impl Default for Config {
@@ -62,6 +68,7 @@ impl Default for Config {
             port: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             server: None,
+            external_ip: None,
         }
     }
 }
@@ -97,6 +104,17 @@ impl DhtBuilder {
     /// bind to a random port.
     pub fn port(mut self, port: u16) -> Self {
         self.0.port = Some(port);
+
+        self
+    }
+
+    /// Set a known external IPv4 address for this node to generate
+    /// a secure node Id from according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
+    ///
+    /// Defaults to None, where we depend on the consensus of
+    /// votes from responding nodes.
+    pub fn external_ip(mut self, external_ip: Ipv4Addr) -> Self {
+        self.0.external_ip = Some(external_ip);
 
         self
     }
@@ -380,6 +398,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
         config.server.is_none(),
         config.request_timeout,
         config.port,
+        config.external_ip,
     ) {
         Ok(mut rpc) => {
             let mut server = config.server;

@@ -44,7 +44,7 @@ let dht = Dht::server(); // or `Dht::builder::server().build();` for more contro
 
 Supported BEPs:
 - [x] [BEP0005 DHT Protocol](https://www.bittorrent.org/beps/bep_0005.html)
-- [ ] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
+- [x] [BEP0042 DHT Security extension](https://www.bittorrent.org/beps/bep_0042.html)
 - [x] [BEP0043 Read-only DHT Nodes](https://www.bittorrent.org/beps/bep_0043.html)
 - [x] [BEP0044 Storing arbitrary data in the DHT](https://www.bittorrent.org/beps/bep_0044.html)
 

@@ -88,6 +88,11 @@ impl Id {
     pub fn from_addr(addr: &SocketAddr) -> Id {
         let ip = addr.ip();
 
+        Id::from_ip(ip)
+    }
+
+    /// Create a new Id from an Ipv4 address according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
+    pub fn from_ip(ip: IpAddr) -> Id {
         let mut rng = rand::thread_rng();
         let r: u8 = rng.gen();
 
