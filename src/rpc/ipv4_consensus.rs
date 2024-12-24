@@ -2,30 +2,26 @@
 //!
 //! Mostly copied from `https://github.com/raptorswing/rustydht-lib/blob/main/src/common/ipv4_addr_src.rs`
 
-use std::convert::TryInto;
 use std::net::Ipv4Addr;
+
+const MIN_VOTES: u8 = 10;
+const MAX_VOTES: u8 = 20;
 
 #[derive(Clone, Debug)]
 struct IPV4Vote {
     ip: Ipv4Addr,
-    votes: i32,
+    votes: u8,
 }
 
 /// An IPV4Source that takes a certain number of "votes" from other nodes on the network to make its decision.
 #[derive(Debug)]
 pub struct IPV4Consensus {
-    min_votes: usize,
-    max_votes: usize,
     votes: Vec<IPV4Vote>,
 }
 
 impl IPV4Consensus {
-    pub fn new(min_votes: usize, max_votes: usize) -> IPV4Consensus {
-        IPV4Consensus {
-            min_votes,
-            max_votes,
-            votes: Vec::new(),
-        }
+    pub fn new() -> IPV4Consensus {
+        IPV4Consensus { votes: Vec::new() }
     }
 }
 
@@ -36,7 +32,7 @@ impl IPV4Consensus {
             Some(vote_info) => {
                 tracing::debug!(target: "rustydht_lib::IPV4AddrSource", "Best IPv4 address {:?} has {} votes", vote_info.ip, vote_info.votes);
 
-                if vote_info.votes >= self.min_votes.try_into().unwrap() {
+                if vote_info.votes >= MIN_VOTES {
                     Some(vote_info.ip)
                 } else {
                     None
@@ -48,16 +44,17 @@ impl IPV4Consensus {
     }
 
     pub fn add_vote(&mut self, proposed_addr: Ipv4Addr) {
-        let mut do_sort = false;
+        let mut should_sort = false;
+
         for vote in self.votes.iter_mut() {
             if vote.ip == proposed_addr {
-                vote.votes = std::cmp::min(self.max_votes.try_into().unwrap(), vote.votes + 1);
-                do_sort = true;
+                vote.votes = std::cmp::min(MAX_VOTES, vote.votes + 1);
+                should_sort = true;
                 break;
             }
         }
 
-        if do_sort {
+        if should_sort {
             self.votes.sort_by(|a, b| b.votes.cmp(&a.votes));
         } else {
             self.votes.push(IPV4Vote {
@@ -72,7 +69,6 @@ impl IPV4Consensus {
             vote.votes = std::cmp::max(0, vote.votes - 1);
         }
 
-        // Optimize this if we care (hint: we probably don't)
         self.votes.retain(|a| a.votes > 0)
     }
 }
@@ -83,7 +79,7 @@ mod tests {
 
     #[test]
     fn test_consensus_src() {
-        let mut src = IPV4Consensus::new(2, 4);
+        let mut src = IPV4Consensus::new();
         // Nothing yet
         assert_eq!(None, src.get_best_ipv4());
 
@@ -95,12 +91,16 @@ mod tests {
         src.add_vote(Ipv4Addr::new(2, 2, 2, 2));
         assert_eq!(None, src.get_best_ipv4());
 
-        // Another vote for the first one. Got something now
-        src.add_vote(Ipv4Addr::new(1, 1, 1, 1));
+        // Another 9 votes for the first one. Got something now
+        for _ in 0..9 {
+            src.add_vote(Ipv4Addr::new(1, 1, 1, 1));
+        }
         assert_eq!(Some(Ipv4Addr::new(1, 1, 1, 1)), src.get_best_ipv4());
 
-        // Another vote for the second one. Should still return the first one because in this house our sorts are stable
-        src.add_vote(Ipv4Addr::new(2, 2, 2, 2));
+        // Another 9 votes for the second one. Should still return the first one because in this house our sorts are stable
+        for _ in 0..9 {
+            src.add_vote(Ipv4Addr::new(2, 2, 2, 2));
+        }
         assert_eq!(Some(Ipv4Addr::new(1, 1, 1, 1)), src.get_best_ipv4());
 
         // Dark horse takes the lead
