@@ -204,14 +204,18 @@ impl Rpc {
         // === Tick Queries ===
 
         let mut done_get_queries = Vec::with_capacity(self.queries.len());
-        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+        let mut done_put_queries: Vec<(Id, Option<PutError>)> =
+            Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
-            let done = query.tick(&mut self.socket);
-
-            if done {
-                done_put_queries.push(*id);
-            }
+            match query.tick(&mut self.socket) {
+                Ok(done) => {
+                    if done {
+                        done_put_queries.push((*id, None));
+                    }
+                }
+                Err(error) => done_put_queries.push((*id, Some(error))),
+            };
         }
 
         let self_id = self.id();
@@ -284,7 +288,10 @@ impl Rpc {
                 self.subnets_sum += subnets_count as usize;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
-                    put_query.start(&mut self.socket, closest_responding_nodes)
+                    if let Err(error) = put_query.start(&mut self.socket, closest_responding_nodes)
+                    {
+                        done_put_queries.push((*id, Some(error)))
+                    }
                 }
 
                 self.closest_nodes.put(
@@ -298,7 +305,7 @@ impl Rpc {
                 );
             };
         }
-        for id in &done_put_queries {
+        for (id, _) in &done_put_queries {
             self.put_queries.remove(id);
         }
 
@@ -373,23 +380,14 @@ impl Rpc {
     /// the cached closest_nodes aren't fresh enough.
     ///
     /// `salt` is only relevant for mutable values.
-    pub fn put(
-        &mut self,
-        target: Id,
-        request: PutRequestSpecific,
-        sender: Option<Sender<Result<Id, PutError>>>,
-    ) {
+    pub fn put(&mut self, target: Id, request: PutRequestSpecific) -> Result<(), PutError> {
         if self.put_queries.contains_key(&target) {
-            if let Some(sender) = sender {
-                let _ = sender.send(Err(PutError::PutQueryIsInflight(target)));
-            };
-
             debug!(?target, "Put query for the same target is already inflight");
 
-            return;
+            return Err(PutError::PutQueryIsInflight(target));
         }
 
-        let mut query = PutQuery::new(target, request.clone(), sender);
+        let mut query = PutQuery::new(target, request.clone());
 
         if let Some(closest_nodes) = self
             .closest_nodes
@@ -399,7 +397,7 @@ impl Rpc {
                 !closest_nodes.is_empty() && closest_nodes.iter().any(|n| n.valid_token())
             })
         {
-            query.start(&mut self.socket, closest_nodes)
+            query.start(&mut self.socket, closest_nodes)?
         } else {
             let salt = match request {
                 PutRequestSpecific::PutMutable(args) => args.salt,
@@ -419,6 +417,8 @@ impl Rpc {
         };
 
         self.put_queries.insert(target, query);
+
+        Ok(())
     }
 
     /// Send a message to closer and closer nodes until we can't find any more nodes.
@@ -843,7 +843,7 @@ pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
     pub done_get_queries: Vec<Id>,
     /// All the [Id]s of the done [Rpc::put] queries.
-    pub done_put_queries: Vec<Id>,
+    pub done_put_queries: Vec<(Id, Option<PutError>)>,
     /// The received message on this tick if any, and the SocketAddr of the sender.
     pub received_from: Option<ReceivedFrom>,
 }

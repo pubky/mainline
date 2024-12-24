@@ -1,6 +1,7 @@
 //! Dht node.
 
 use std::{
+    collections::HashMap,
     fmt::Formatter,
     net::{Ipv4Addr, SocketAddr},
     thread,
@@ -385,6 +386,8 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 .expect("local address should be available after building the Rpc correctly");
             info!(?address, "Mainline DHT listening");
 
+            let mut put_senders = HashMap::new();
+
             loop {
                 if let Ok(actor_message) = receiver.try_recv() {
                     match actor_message {
@@ -406,7 +409,11 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             });
                         }
                         ActorMessage::Put(target, request, sender) => {
-                            rpc.put(target, request, Some(sender));
+                            if let Err(error) = rpc.put(target, request) {
+                                let _ = sender.send(Err(error));
+                            } else {
+                                put_senders.insert(target, sender);
+                            };
                         }
                         ActorMessage::Get(target, request, sender) => {
                             rpc.get(target, request, Some(sender), None)
@@ -414,7 +421,17 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                rpc.tick();
+                let report = rpc.tick();
+
+                for (id, error) in report.done_put_queries {
+                    if let Some(sender) = put_senders.get(&id) {
+                        let _ = sender.send(if let Some(error) = error {
+                            Err(error)
+                        } else {
+                            Ok(id)
+                        });
+                    }
+                }
             }
         }
         Err(err) => {

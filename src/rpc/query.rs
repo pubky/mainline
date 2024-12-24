@@ -3,7 +3,6 @@
 use std::net::SocketAddr;
 use std::{collections::HashSet, rc::Rc};
 
-use flume::Sender;
 use tracing::{debug, error, trace, warn};
 
 use super::{socket::KrpcSocket, ClosestNodes};
@@ -204,28 +203,22 @@ pub struct PutQuery {
     /// Nodes that confirmed success
     stored_at: u8,
     inflight_requests: Vec<u16>,
-    sender: Option<Sender<Result<Id, PutError>>>,
     request: PutRequestSpecific,
     error: Option<ErrorSpecific>,
 }
 
 impl PutQuery {
-    pub fn new(
-        target: Id,
-        request: PutRequestSpecific,
-        sender: Option<Sender<Result<Id, PutError>>>,
-    ) -> Self {
+    pub fn new(target: Id, request: PutRequestSpecific) -> Self {
         Self {
             target,
             stored_at: 0,
             inflight_requests: Vec::new(),
-            sender,
             request,
             error: None,
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Rc<Node>]) {
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Rc<Node>]) -> Result<(), PutError> {
         // Already started.
         if !self.inflight_requests.is_empty() {
             panic!("should not call PutQuery.start() twice");
@@ -234,10 +227,8 @@ impl PutQuery {
         let target = self.target;
         trace!(?target, "PutQuery start");
 
-        if let Some(sender) = &self.sender {
-            if nodes.is_empty() {
-                let _ = sender.send(Err(PutError::NoClosestNodes));
-            }
+        if nodes.is_empty() {
+            Err(PutError::NoClosestNodes)?;
         }
 
         for node in nodes {
@@ -257,6 +248,8 @@ impl PutQuery {
                 self.inflight_requests.push(tid);
             }
         }
+
+        Ok(())
     }
 
     pub fn inflight(&self, tid: u16) -> bool {
@@ -278,7 +271,7 @@ impl PutQuery {
     }
 
     /// Check if the query is done, and if so send the query target to the receiver if any.
-    pub fn tick(&mut self, socket: &mut KrpcSocket) -> bool {
+    pub fn tick(&mut self, socket: &mut KrpcSocket) -> Result<bool, PutError> {
         if
         // Already started
         self.inflight_requests.capacity() > 0
@@ -293,25 +286,20 @@ impl PutQuery {
                 if let Some(error) = self.error.clone() {
                     error!(?target, ?error, "Put Query: failed");
 
-                    let _ = self
-                        .sender
-                        .to_owned()
-                        .map(|sender| sender.send(Err(PutError::ErrorResponse(error))));
+                    return Err(PutError::ErrorResponse(error));
                 }
-            } else {
-                debug!(?target, stored_at = ?self.stored_at, "PutQuery Done");
-
-                let _ = self.sender.to_owned().map(|sender| sender.send(Ok(target)));
             }
 
-            return true;
+            debug!(?target, stored_at = ?self.stored_at, "PutQuery Done");
+
+            return Ok(true);
         }
 
-        false
+        Ok(false)
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, Clone)]
 /// Query errors
 pub enum PutError {
     /// Failed to find any nodes close, usually means dht node failed to bootstrap,
