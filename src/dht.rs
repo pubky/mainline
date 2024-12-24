@@ -424,7 +424,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 let report = rpc.tick();
 
                 for (id, error) in report.done_put_queries {
-                    if let Some(sender) = put_senders.get(&id) {
+                    if let Some(sender) = put_senders.remove(&id) {
                         let _ = sender.send(if let Some(error) = error {
                             Err(error)
                         } else {
