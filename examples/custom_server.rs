@@ -1,8 +1,9 @@
 use std::{thread::sleep, time::Duration};
 
 use mainline::{
+    rpc::messages::MessageType,
     server::{DefaultServer, Server},
-    Dht,
+    Dht, RoutingTable,
 };
 use tracing::{info, instrument, Level};
 
@@ -15,19 +16,17 @@ impl Server for MyCustomServer {
     #[instrument]
     fn handle_request(
         &mut self,
-        rpc: &mut mainline::rpc::Rpc,
+        routing_table: &RoutingTable,
         from: std::net::SocketAddr,
-        transaction_id: u16,
         request: &mainline::rpc::messages::RequestSpecific,
-    ) {
+    ) -> MessageType {
         info!(?request, ?from, "Request from");
 
         // Do something ...
         // For example, rate limiting:
         // if self.rate_limiter.check() { return };
 
-        self.inner
-            .handle_request(rpc, from, transaction_id, request)
+        self.inner.handle_request(routing_table, from, request)
     }
 }
 

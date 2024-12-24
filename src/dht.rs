@@ -2,7 +2,7 @@
 
 use std::{
     fmt::Formatter,
-    net::{Ipv4Addr, SocketAddr, ToSocketAddrs},
+    net::{Ipv4Addr, SocketAddr},
     thread,
     time::Duration,
 };
@@ -19,10 +19,7 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{
-        PutError, ReceivedFrom, ReceivedMessage, ResponseSender, Rpc, DEFAULT_BOOTSTRAP_NODES,
-        DEFAULT_REQUEST_TIMEOUT,
-    },
+    rpc::{PutError, ResponseSender, Rpc, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT},
     server::{DefaultServer, Server},
     Node,
 };
@@ -42,13 +39,18 @@ pub struct Config {
     ///
     /// Defaults to None
     pub port: Option<u16>,
-    /// UDP requests timeout
+    /// UDP socket request timeout duration.
+    ///
+    /// The longer this duration is, the longer queries take until they are deemeed "done".
+    /// The shortet this duration is, the more responses from busy nodes we miss out on,
+    /// which affects the accuracy of queries trying to find closest nodes to a target.
     ///
     /// Defaults to [DEFAULT_REQUEST_TIMEOUT]
     pub request_timeout: Duration,
     /// Server to respond to incoming Requests
     ///
-    /// Defaults to None
+    /// Defaults to None, where the [DefaultServer] will be used
+    /// if the node kept running for `15` minutes with a publicly accessible UDP port.
     pub server: Option<Box<dyn Server>>,
     /// A known external IPv4 address for this node to generate
     /// a secure node Id from according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
@@ -77,55 +79,43 @@ impl Default for Config {
 pub struct DhtBuilder(Config);
 
 impl DhtBuilder {
-    /// Create a full DHT node that accepts requests, and acts as a routing and storage node.
+    /// Run the node in server mode as soon as possible,
+    /// by explicitly setting [Config::server] to the [DefaultServer].
     pub fn server(mut self) -> Self {
         self.0.server = Some(Box::<DefaultServer>::default());
 
         self
     }
 
+    /// Set [Config::server]
     pub fn custom_server(mut self, custom_server: Box<dyn Server>) -> Self {
         self.0.server = Some(custom_server);
 
         self
     }
 
-    /// Set bootstrapping nodes
+    /// Set [Config::bootstrap]
     pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
         self.0.bootstrap = bootstrap.to_vec();
 
         self
     }
 
-    /// Set an explicit port to listen on.
-    ///
-    /// Defaults to None in which case it will attempt to
-    /// connect to [DEFAULT_PORT] and if it fails it will
-    /// bind to a random port.
+    /// Set [Config::port]
     pub fn port(mut self, port: u16) -> Self {
         self.0.port = Some(port);
 
         self
     }
 
-    /// Set a known external IPv4 address for this node to generate
-    /// a secure node Id from according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
-    ///
-    /// Defaults to None, where we depend on the consensus of
-    /// votes from responding nodes.
+    /// Set [Config::external_ip]
     pub fn external_ip(mut self, external_ip: Ipv4Addr) -> Self {
         self.0.external_ip = Some(external_ip);
 
         self
     }
 
-    /// Set the the duration a request awaits for a response.
-    ///
-    /// The longer this duration is, the longer queries take until they are deemeed "done".
-    /// The shortet this duration is, the more responses from busy nodes we miss out on,
-    /// which affects the accuracy of queries trying to find closest nodes to a target.
-    ///
-    /// Defaults to 2 seconds.
+    /// Set [Config::request_timeout]
     pub fn request_timeout(mut self, request_timeout: Duration) -> Self {
         self.0.request_timeout = request_timeout;
 
@@ -149,11 +139,14 @@ impl Dht {
         Dht::builder().build()
     }
 
-    /// Create a new DHT server that serves as a routing node and accepts storage requests
-    /// for peers and other arbitrary data.
+    /// Create a new DHT node that is running in server mode as
+    /// soon as possible.
     ///
-    /// Note: this is only useful if the node has a public IP address and is able to receive
-    /// incoming udp packets.
+    /// You shouldn't use this option unless you are sure your
+    /// DHT node is publicly accessible _AND_ will be long running.
+    ///
+    /// If you are not sure, use [Self::client] and it will switch
+    /// to server mode when/if these two conditions are met.
     pub fn server() -> Result<Self, std::io::Error> {
         Dht::builder().server().build()
     }
@@ -385,24 +378,8 @@ impl Dht {
 }
 
 fn run(config: Config, receiver: Receiver<ActorMessage>) {
-    let bootstrap = config
-        .bootstrap
-        .to_owned()
-        .iter()
-        .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
-        .flatten()
-        .collect::<Vec<_>>();
-
-    match Rpc::new(
-        bootstrap,
-        config.server.is_none(),
-        config.request_timeout,
-        config.port,
-        config.external_ip,
-    ) {
+    match Rpc::new(config) {
         Ok(mut rpc) => {
-            let mut server = config.server;
-
             let address = rpc
                 .local_addr()
                 .expect("local address should be available after building the Rpc correctly");
@@ -421,9 +398,11 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                         }
                         ActorMessage::Info(sender) => {
                             let _ = sender.send(Info {
-                                id: *rpc.id(),
+                                id: rpc.id(),
                                 local_addr: rpc.local_addr(),
                                 dht_size_estimate: rpc.dht_size_estimate(),
+                                public_ip: rpc.public_ip(),
+                                has_public_port: rpc.has_public_port(),
                             });
                         }
                         ActorMessage::Put(target, request, sender) => {
@@ -435,18 +414,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                let report = rpc.tick();
-
-                // Handle incoming request with the default Server logic.
-                if let Some(ReceivedFrom {
-                    from,
-                    message: ReceivedMessage::Request((transaction_id, request_specific)),
-                }) = report.received_from
-                {
-                    if let Some(server) = &mut server {
-                        server.handle_request(&mut rpc, from, transaction_id, &request_specific);
-                    }
-                };
+                rpc.tick();
             }
         }
         Err(err) => {
@@ -469,6 +437,8 @@ pub(crate) enum ActorMessage {
 pub struct Info {
     id: Id,
     local_addr: Result<SocketAddr, std::io::Error>,
+    public_ip: Option<Ipv4Addr>,
+    has_public_port: bool,
     dht_size_estimate: (usize, f64),
 }
 
@@ -483,6 +453,15 @@ impl Info {
             .as_ref()
             .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
     }
+    /// Local UDP Ipv4 socket address that this node is listening on.
+    pub fn public_ip(&self) -> Option<Ipv4Addr> {
+        self.public_ip
+    }
+    /// Returns a best guess of whether this nodes port is publicly accessible
+    pub fn has_public_port(&self) -> bool {
+        self.has_public_port
+    }
+
     /// Returns:
     ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
     ///  2. Standard deviaiton as a function of the number of samples used in this estimate.

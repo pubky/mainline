@@ -9,10 +9,16 @@ All notable changes to mainline dht will be documented in this file.
 - `DhtBuilder` wrapper around `Config`, instead of `Settings` doubling as a builder.
 - Support `BEP0042 DHT Security extension` when running as a server. 
 - Optionally set `Config::external_ip` manually to generate secure node `Id` from.
+- Export `RoutingTable`
+- Add `Info::public_ip()` and `Info::has_public_port`.
 
 ### Changed
 
 - Rename `Settings` to `Config`
+- `Rpc::new()` takes `Config` as input.
+- `Rpc::id()` returns `Id` instead of `&Id`
+- `Server::handle_request` takes the `RoutingTable` and returns the message to be sent as a response.
+- Automatically change the node to server mode after running for 15 minutes with public address.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 

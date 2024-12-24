@@ -13,7 +13,7 @@ pub mod async_dht;
 pub mod rpc;
 pub mod server;
 
-pub use crate::common::{Id, MutableItem, Node};
+pub use crate::common::{Id, MutableItem, Node, RoutingTable};
 pub use dht::{Config, Dht, Testnet};
 pub use rpc::ClosestNodes;
 

@@ -19,7 +19,7 @@ pub const READ_TIMEOUT: Duration = Duration::from_millis(10);
 pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
-    read_only: bool,
+    pub(crate) read_only: bool,
     request_timeout: Duration,
     /// We don't need a HashMap, since we know the capacity is `65536` requests.
     /// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
