@@ -10,8 +10,8 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info},
-    rpc::{PutError, ResponseSender},
+    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info, ResponseSender},
+    rpc::PutError,
 };
 
 impl Dht {

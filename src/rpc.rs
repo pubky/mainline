@@ -12,7 +12,6 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use flume::Sender;
 use ipv4_consensus::IPV4Consensus;
 use lru::LruCache;
 use tracing::{debug, error, info};
@@ -22,6 +21,7 @@ use crate::common::{
     GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
     MessageType, MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments, Node,
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
+    MAX_BUCKET_SIZE_K,
 };
 use crate::server::{DefaultServer, Server};
 use crate::Config;
@@ -204,8 +204,8 @@ impl Rpc {
         // === Tick Queries ===
 
         let mut done_get_queries = Vec::with_capacity(self.queries.len());
-        let mut done_put_queries: Vec<(Id, Option<PutError>)> =
-            Vec::with_capacity(self.put_queries.len());
+        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+        let mut done_find_node_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
             match query.tick(&mut self.socket) {
@@ -225,15 +225,27 @@ impl Rpc {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
-                done_get_queries.push(*id);
+                if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
+                    let closest_nodes = query
+                        .closest()
+                        .nodes()
+                        .iter()
+                        .take(MAX_BUCKET_SIZE_K)
+                        .map(|n| n.as_ref().clone())
+                        .collect::<Vec<_>>();
 
-                if id == &self_id {
-                    if table_size == 0 {
-                        error!("Could not bootstrap the routing table");
-                    } else {
-                        debug!(?self_id, table_size, "Populated the routing table");
-                    }
-                };
+                    done_find_node_queries.push((*id, closest_nodes));
+
+                    if id == &self_id {
+                        if table_size == 0 {
+                            error!("Could not bootstrap the routing table");
+                        } else {
+                            debug!(?self_id, table_size, "Populated the routing table");
+                        }
+                    };
+                } else {
+                    done_get_queries.push(*id);
+                }
             };
         }
 
@@ -313,7 +325,7 @@ impl Rpc {
         self.maintain_routing_table();
 
         // TODO: Rethink RpcTickReport
-        let received_from =
+        let query_response =
             self.socket
                 .recv_from()
                 .and_then(|(message, from)| match &message.message_type {
@@ -333,26 +345,16 @@ impl Rpc {
                             };
                         }
 
-                        Some(ReceivedFrom {
-                            from,
-                            message: ReceivedMessage::Request((
-                                message.transaction_id,
-                                request_specific.clone(),
-                            )),
-                        })
+                        None
                     }
-                    _ => self
-                        .handle_response(from, &message)
-                        .map(|response| ReceivedFrom {
-                            message: ReceivedMessage::QueryResponse(response),
-                            from,
-                        }),
+                    _ => self.handle_response(from, &message),
                 });
 
         RpcTickReport {
             done_get_queries,
             done_put_queries,
-            received_from,
+            done_find_node_queries,
+            query_response,
         }
     }
 
@@ -412,7 +414,6 @@ impl Rpc {
                     salt: salt.map(|s| s.into()),
                 }),
                 None,
-                None,
             );
         };
 
@@ -424,27 +425,25 @@ impl Rpc {
     /// Send a message to closer and closer nodes until we can't find any more nodes.
     ///
     /// Queries take few seconds to fully traverse the network, once it is done, it will be removed from
-    /// self.queries. But until then, calling `rpc.query()` multiple times, will just add the
-    /// sender to the query, send all the responses seen so far, as well as subsequent responses.
+    /// self.queries. But until then, calling [Rpc::get] multiple times, will just return the list
+    /// of responses seen so far.
+    ///
+    /// Subsequent responses can be obtained from the [RpcTickReport::query_response] you get after calling [Rpc::tick].
     ///
     /// Effectively, we are caching responses and backing off the network for the duration it takes
     /// to traverse it.
     ///
-    /// `extra_nodes` option allows the query to visit specific nodes, that won't necessesarily be visited
-    /// through the query otherwise.
+    /// - `extra_nodes` option allows the query to visit specific nodes, that won't necessesarily be visited
+    ///     through the query otherwise.
     pub fn get(
         &mut self,
         target: Id,
         request: RequestTypeSpecific,
-        sender: Option<ResponseSender>,
         extra_nodes: Option<Vec<SocketAddr>>,
-    ) {
-        // If query is still active, add the sender to it.
-        if let Some(query) = self.queries.get_mut(&target) {
-            if let Some(sender) = sender {
-                query.add_sender(sender)
-            };
-            return;
+    ) -> Option<Vec<Response>> {
+        // If query is still active, no need to create a new one.
+        if let Some(query) = self.queries.get(&target) {
+            return Some(query.responses().to_vec());
         }
 
         let mut query = Query::new(
@@ -454,10 +453,6 @@ impl Rpc {
                 request_type: request,
             },
         );
-
-        if let Some(sender) = sender {
-            query.add_sender(sender)
-        };
 
         // Seed the query either with the closest nodes from the routing table, or the
         // bootstrapping nodes if the closest nodes are not enough.
@@ -496,11 +491,13 @@ impl Rpc {
         query.start(&mut self.socket);
 
         self.queries.insert(target, query);
+
+        None
     }
 
     // === Private Methods ===
 
-    fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<QueryResponse> {
+    fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
         if message.read_only {
             return None;
@@ -579,12 +576,9 @@ impl Rpc {
                     ..
                 })) => {
                     let response = Response::Peers(values.to_owned());
-                    query.response(from, response.to_owned());
+                    query.response(from, response.clone());
 
-                    return Some(QueryResponse {
-                        target,
-                        response: QueryResponseSpecific::Value(response),
-                    });
+                    return Some((target, response));
                 }
                 MessageType::Response(ResponseSpecific::GetImmutable(
                     GetImmutableResponseArguments {
@@ -593,13 +587,9 @@ impl Rpc {
                 )) => {
                     if validate_immutable(v, &query.target()) {
                         let response = Response::Immutable(v.to_owned().into());
+                        query.response(from, response.clone());
 
-                        query.response(from, response.to_owned());
-
-                        return Some(QueryResponse {
-                            target,
-                            response: QueryResponseSpecific::Value(response),
-                        });
+                        return Some((target, response));
                     }
 
                     let target = query.target();
@@ -631,13 +621,9 @@ impl Rpc {
                         &None,
                     ) {
                         let response = Response::Mutable(item);
+                        query.response(from, response.clone());
 
-                        query.response(from, response.to_owned());
-
-                        return Some(QueryResponse {
-                            target,
-                            response: QueryResponseSpecific::Value(response),
-                        });
+                        return Some((target, response));
                     }
 
                     debug!(
@@ -669,11 +655,6 @@ impl Rpc {
                         from_version = ?message.version,
                         "No more recent value"
                     );
-
-                    return Some(QueryResponse {
-                        target,
-                        response: QueryResponseSpecific::Value(Response::NoMoreRecentValue(*seq)),
-                    });
                 }
                 MessageType::Response(ResponseSpecific::NoValues(NoValuesResponseArguments {
                     responder_id,
@@ -693,11 +674,6 @@ impl Rpc {
                 }
                 MessageType::Error(error) => {
                     debug!(?error, ?message, from_version = ?message.version, "Get query got error response");
-
-                    return Some(QueryResponse {
-                        target,
-                        response: QueryResponseSpecific::Error(error.to_owned()),
-                    });
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
@@ -734,7 +710,6 @@ impl Rpc {
                 self.get(
                     target,
                     RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }),
-                    None,
                     None,
                 );
 
@@ -791,7 +766,6 @@ impl Rpc {
                                 target: new_id,
                             }),
                             None,
-                            None,
                         );
 
                         self.routing_table = RoutingTable::new().with_id(new_id);
@@ -808,7 +782,6 @@ impl Rpc {
         self.get(
             self.id(),
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: self.id() }),
-            None,
             None,
         );
     }
@@ -837,48 +810,19 @@ struct CachedGetQuery {
     subnets: u8,
 }
 
-/// Any received message and done queries in the [Rpc::tick].
+/// State change after a call to [Rpc::tick], including
+/// done PUT, GET, and FIND_NODE queries, as well as any
+/// incoming value response for any GET query.
 #[derive(Debug, Clone)]
 pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
     pub done_get_queries: Vec<Id>,
-    /// All the [Id]s of the done [Rpc::put] queries.
+    /// All the [Id]s of the done [Rpc::put] queries,
+    /// and optional [PutError] if the query failed.
     pub done_put_queries: Vec<(Id, Option<PutError>)>,
-    /// The received message on this tick if any, and the SocketAddr of the sender.
-    pub received_from: Option<ReceivedFrom>,
-}
-
-/// An incoming request or a query's response reported from [RpcTickReport::received_from]
-#[derive(Debug, Clone)]
-pub struct ReceivedFrom {
-    /// The socket address of the sender.
-    /// Useful to send a response for an incoming query using [Rpc::response]
-    pub from: SocketAddr,
-    pub message: ReceivedMessage,
-}
-
-#[derive(Debug, Clone)]
-pub enum ReceivedMessage {
-    /// An incoming request, as a tuple of the `transaction_id` and the RequestSpecific
-    Request((u16, RequestSpecific)),
-    /// A query response.
-    QueryResponse(QueryResponse),
-}
-
-/// Target and payload of a response to a [Rpc::get] or [Rpc::put] query
-#[derive(Debug, Clone)]
-pub struct QueryResponse {
-    pub target: Id,
-    pub response: QueryResponseSpecific,
-}
-
-/// Rpc query resopnse; a value or an error.
-#[derive(Debug, Clone)]
-pub enum QueryResponseSpecific {
-    /// A set of peers, immutable or mutable value response for a request
-    Value(Response),
-    /// An error response for a sent request
-    Error(ErrorSpecific),
+    pub done_find_node_queries: Vec<(Id, Vec<Node>)>,
+    /// Received GET query response.
+    pub query_response: Option<(Id, Response)>,
 }
 
 #[derive(Debug, Clone)]
@@ -886,13 +830,4 @@ pub enum Response {
     Peers(Vec<SocketAddr>),
     Immutable(Bytes),
     Mutable(MutableItem),
-    NoMoreRecentValue(i64),
-}
-
-#[derive(Debug, Clone)]
-pub enum ResponseSender {
-    ClosestNodes(Sender<Vec<Node>>),
-    Peers(Sender<Vec<SocketAddr>>),
-    Mutable(Sender<MutableItem>),
-    Immutable(Sender<Bytes>),
 }

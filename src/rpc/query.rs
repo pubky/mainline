@@ -11,7 +11,7 @@ use crate::{
         ErrorSpecific, Id, Node, PutRequest, PutRequestSpecific, RequestSpecific,
         RequestTypeSpecific, MAX_BUCKET_SIZE_K,
     },
-    rpc::{Response, ResponseSender},
+    rpc::Response,
 };
 
 /// A query is an iterative process of concurrently sending a request to the closest known nodes to
@@ -24,7 +24,6 @@ pub(crate) struct Query {
     responders: ClosestNodes,
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
-    senders: Vec<ResponseSender>,
     responses: Vec<Response>,
 }
 
@@ -41,7 +40,6 @@ impl Query {
             inflight_requests: Vec::with_capacity(200),
             visited: HashSet::with_capacity(200),
 
-            senders: Vec::with_capacity(1),
             responses: Vec::with_capacity(30),
         }
     }
@@ -62,16 +60,11 @@ impl Query {
         &self.responders
     }
 
-    // === Public Methods ===
-
-    /// Add a sender to the query and send all replies we found so far to it.
-    pub fn add_sender(&mut self, sender: ResponseSender) {
-        for response in &self.responses {
-            self.send_value(&sender, response.clone())
-        }
-
-        self.senders.push(sender);
+    pub fn responses(&self) -> &[Response] {
+        &self.responses
     }
+
+    // === Public Methods ===
 
     /// Force start query traversal by visiting closest nodes.
     pub fn start(&mut self, socket: &mut KrpcSocket) {
@@ -116,15 +109,11 @@ impl Query {
         self.responders.add(node)
     }
 
-    /// Add received response
+    /// Store received response.
     pub fn response(&mut self, from: SocketAddr, response: Response) {
         let target = self.target();
 
         debug!(?target, ?response, ?from, "Query got response");
-
-        for sender in &self.senders {
-            self.send_value(sender, response.to_owned())
-        }
 
         self.responses.push(response.to_owned());
     }
@@ -144,41 +133,13 @@ impl Query {
             .any(|&tid| socket.inflight(&tid));
 
         if done {
-            for sender in &self.senders {
-                if let ResponseSender::ClosestNodes(s) = sender {
-                    let _ = s.send(
-                        self.closest
-                            .nodes()
-                            .iter()
-                            .take(MAX_BUCKET_SIZE_K)
-                            .map(|n| n.as_ref().clone())
-                            .collect::<Vec<_>>(),
-                    );
-                }
-            }
-
-            debug!(id=?self.target(), candidates = ?self.closest.len(), visited = ?self.visited.len(), responders = ? self.responders.len(), "Done query");
+            debug!(id=?self.target(), candidates = ?self.closest.len(), visited = ?self.visited.len(), responders = ?self.responders.len(), "Done query");
         };
 
         done
     }
 
     // === Private Methods ===
-
-    fn send_value(&self, sender: &ResponseSender, response: Response) {
-        match (sender, response) {
-            (ResponseSender::Peers(s), Response::Peers(r)) => {
-                let _ = s.send(r);
-            }
-            (ResponseSender::Mutable(s), Response::Mutable(r)) => {
-                let _ = s.send(r);
-            }
-            (ResponseSender::Immutable(s), Response::Immutable(r)) => {
-                let _ = s.send(r);
-            }
-            _ => {}
-        }
-    }
 
     /// Visit the closest candidates and remove them as candidates
     fn visit_closest(&mut self, socket: &mut KrpcSocket) {

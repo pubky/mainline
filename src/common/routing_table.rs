@@ -41,7 +41,7 @@ impl RoutingTable {
     }
 
     /// Returns the map of distances and their [KBucket]
-    pub fn buckets(&self) -> &BTreeMap<u8, KBucket> {
+    pub(crate) fn buckets(&self) -> &BTreeMap<u8, KBucket> {
         &self.buckets
     }
 
@@ -169,10 +169,6 @@ impl KBucket {
 
     // === Getters ===
 
-    pub fn len(&self) -> usize {
-        self.nodes.len()
-    }
-
     // === Public Methods ===
 
     pub fn add(&mut self, incoming: Node) -> bool {
@@ -217,10 +213,6 @@ impl KBucket {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
-    }
-
-    pub fn is_full(&self) -> bool {
-        self.nodes.len() >= MAX_BUCKET_SIZE_K
     }
 
     pub fn iter(&self) -> Iter<'_, Rc<Node>> {

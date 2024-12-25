@@ -30,7 +30,7 @@ pub const MAX_VALUES: usize = 1000;
 pub trait Server: std::fmt::Debug + Send + Sync {
     /// Handle incoming requests.
     ///
-    /// This function will block the main loop where the [Rpc]
+    /// This function will block the main loop where the [crate::rpc::Rpc]
     /// is running, thus it needs to be very fast and lightweight.
     fn handle_request(
         &mut self,

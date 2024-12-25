@@ -20,7 +20,7 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{PutError, ResponseSender, Rpc, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT},
+    rpc::{PutError, Response, Rpc, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT},
     server::{DefaultServer, Server},
     Node,
 };
@@ -387,6 +387,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
             info!(?address, "Mainline DHT listening");
 
             let mut put_senders = HashMap::new();
+            let mut get_senders = HashMap::new();
 
             loop {
                 if let Ok(actor_message) = receiver.try_recv() {
@@ -416,13 +417,34 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             };
                         }
                         ActorMessage::Get(target, request, sender) => {
-                            rpc.get(target, request, Some(sender), None)
+                            if let Some(responses) = rpc.get(target, request, None) {
+                                for response in responses {
+                                    send(&sender, response);
+                                }
+                            };
+
+                            get_senders.insert(target, sender);
                         }
                     }
                 }
 
                 let report = rpc.tick();
 
+                // Response for an ongoing GET query
+                if let Some((target, response)) = report.query_response {
+                    if let Some(sender) = get_senders.get(&target) {
+                        send(sender, response);
+                    }
+                }
+
+                // Response for finished FIND_NODE query
+                for (id, closest_nodes) in report.done_find_node_queries {
+                    if let Some(ResponseSender::ClosestNodes(sender)) = get_senders.remove(&id) {
+                        let _ = sender.send(closest_nodes);
+                    };
+                }
+
+                // Cleanup done PUT query and send a resulting error if any.
                 for (id, error) in report.done_put_queries {
                     if let Some(sender) = put_senders.remove(&id) {
                         let _ = sender.send(if let Some(error) = error {
@@ -431,6 +453,11 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             Ok(id)
                         });
                     }
+                }
+
+                // Cleanup done GET queries
+                for id in report.done_get_queries {
+                    get_senders.remove(&id);
                 }
             }
         }
@@ -442,12 +469,35 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
     };
 }
 
+fn send(sender: &ResponseSender, response: Response) {
+    match (sender, response) {
+        (ResponseSender::Peers(s), Response::Peers(r)) => {
+            let _ = s.send(r);
+        }
+        (ResponseSender::Mutable(s), Response::Mutable(r)) => {
+            let _ = s.send(r);
+        }
+        (ResponseSender::Immutable(s), Response::Immutable(r)) => {
+            let _ = s.send(r);
+        }
+        _ => {}
+    }
+}
+
 pub(crate) enum ActorMessage {
     Info(Sender<Info>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
     Check(Sender<Result<(), std::io::Error>>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ResponseSender {
+    ClosestNodes(Sender<Vec<Node>>),
+    Peers(Sender<Vec<SocketAddr>>),
+    Mutable(Sender<MutableItem>),
+    Immutable(Sender<Bytes>),
 }
 
 /// Information and statistics about this [Dht] node.
