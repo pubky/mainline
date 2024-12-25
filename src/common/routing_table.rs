@@ -131,6 +131,25 @@ impl RoutingTable {
         nodes
     }
 
+    pub fn to_owned_nodes(&self) -> Vec<Node> {
+        self.to_vec()
+            .into_iter()
+            .map(|rc| rc.as_ref().clone())
+            .collect()
+    }
+
+    /// Turn this routing table to a list of bootstraping nodes
+    /// by finding the oldest 20th nodes, and stringify their addresses.
+    pub fn to_bootstrap(&self) -> Vec<String> {
+        let mut nodes = self.to_vec();
+
+        nodes.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
+
+        nodes.truncate(MAX_BUCKET_SIZE_K);
+
+        nodes.iter().map(|n| n.address().to_string()).collect()
+    }
+
     // === Private Methods ===
 
     #[cfg(test)]

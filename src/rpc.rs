@@ -48,8 +48,6 @@ const IPV4_CONSENSUS_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
-// TODO: test load node from older routing table
-
 #[derive(Debug)]
 /// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
 pub struct Rpc {
@@ -680,14 +678,6 @@ impl Rpc {
 
             // Bootstrap if necessary
             if self.routing_table.is_empty() {
-                // Make a random query, to help the dht size estimation.
-                let target = Id::random();
-                self.get(
-                    target,
-                    RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }),
-                    None,
-                );
-
                 self.populate();
             }
 

@@ -9,16 +9,23 @@ All notable changes to mainline dht will be documented in this file.
 - `DhtBuilder` wrapper around `Config`, instead of `Settings` doubling as a builder.
 - Support `BEP0042 DHT Security extension` when running as a server. 
 - Optionally set `Config::external_ip` manually to generate secure node `Id` from.
-- Export `RoutingTable`
+- Export `RoutingTable`.
 - Add `Info::public_ip()` and `Info::has_public_port`.
+- Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
+- Add `Dht::bootstrapped` and `AsyncDht::bootstrapped` to wait for the routing table to be bootstrapped.
+- Add `Info::routing_table()` to get a snapshot of the node's routing table.
+- Add `RoutingTable::to_bootstrap()` to export the addresses of the oldest 20 node in the routing table.
+- Add `cache_bootstrap.rs` example.
 
 ### Changed
 
-- Rename `Settings` to `Config`
+- Rename `Settings` to `Config`.
 - `Rpc::new()` takes `Config` as input.
-- `Rpc::id()` returns `Id` instead of `&Id`
+- `Rpc::id()` returns `Id` instead of `&Id`.
 - `Server::handle_request` takes the `RoutingTable` and returns the message to be sent as a response.
 - Automatically change the node to server mode after running for 15 minutes with public address.
+- `Dht::info()` returns a new enum error, including an error if the local_addr can't be obtained.
+- `Info::local_addr()` is infallible.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 

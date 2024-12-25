@@ -22,7 +22,7 @@ use crate::{
     },
     rpc::{PutError, Response, Rpc, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT},
     server::{DefaultServer, Server},
-    Node,
+    Node, RoutingTable,
 };
 
 #[derive(Debug, Clone)]
@@ -36,6 +36,7 @@ pub struct Config {
     ///
     /// Defaults to [DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Vec<String>,
+    /// Extra bootstrapping nodes to be used alongside
     /// Explicit port to listen on.
     ///
     /// Defaults to None
@@ -98,6 +99,18 @@ impl DhtBuilder {
     /// Set [Config::bootstrap]
     pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
         self.0.bootstrap = bootstrap.to_vec();
+
+        self
+    }
+
+    /// Add more bootstrap nodes to [Config::bootstrap].
+    ///
+    /// Useful when you want to augment the default bootstrapping nodes with
+    /// dynamic list of nodes you have seen in previous sessions.
+    pub fn extra_bootstrap(mut self, extra_bootstrap: &[String]) -> Self {
+        for node in extra_bootstrap {
+            self.0.bootstrap.push(node.clone());
+        }
 
         self
     }
@@ -177,14 +190,14 @@ impl Dht {
     // === Getters ===
 
     /// Information and statistics about this [Dht] node.
-    pub fn info(&self) -> Result<Info, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Info>(1);
+    pub fn info(&self) -> Result<Info, InfoError> {
+        let (sender, receiver) = flume::bounded::<Result<Info, std::io::Error>>(1);
 
         self.0
             .send(ActorMessage::Info(sender))
             .map_err(|_| DhtWasShutdown)?;
 
-        receiver.recv().map_err(|_| DhtWasShutdown)
+        Ok(receiver.recv().map_err(|_| DhtWasShutdown)??)
     }
 
     // === Public Methods ===
@@ -195,6 +208,17 @@ impl Dht {
 
         let _ = self.0.send(ActorMessage::Shutdown(sender));
         let _ = receiver.recv();
+    }
+
+    /// Block until the bootstraping query is done.
+    pub fn bootstrapped(&self) -> Result<(), InfoError> {
+        let info = self.info()?;
+
+        if info.routing_table.is_empty() {
+            let _ = self.find_node(*info.id());
+        }
+
+        Ok(())
     }
 
     // === Find nodes ===
@@ -401,13 +425,14 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             let _ = sender.send(Ok(()));
                         }
                         ActorMessage::Info(sender) => {
-                            let _ = sender.send(Info {
+                            let _ = sender.send(rpc.local_addr().map(|local_addr| Info {
                                 id: rpc.id(),
-                                local_addr: rpc.local_addr(),
+                                local_addr,
                                 dht_size_estimate: rpc.dht_size_estimate(),
                                 public_ip: rpc.public_ip(),
                                 has_public_port: rpc.has_public_port(),
-                            });
+                                routing_table: rpc.routing_table().to_owned_nodes(),
+                            }));
                         }
                         ActorMessage::Put(target, request, sender) => {
                             if let Err(error) = rpc.put(target, request) {
@@ -485,7 +510,7 @@ fn send(sender: &ResponseSender, response: Response) {
 }
 
 pub(crate) enum ActorMessage {
-    Info(Sender<Info>),
+    Info(Sender<Result<Info, std::io::Error>>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
@@ -501,12 +526,14 @@ pub enum ResponseSender {
 }
 
 /// Information and statistics about this [Dht] node.
+#[derive(Debug, Clone)]
 pub struct Info {
     id: Id,
-    local_addr: Result<SocketAddr, std::io::Error>,
+    local_addr: SocketAddr,
     public_ip: Option<Ipv4Addr>,
     has_public_port: bool,
     dht_size_estimate: (usize, f64),
+    pub(crate) routing_table: Vec<Node>,
 }
 
 impl Info {
@@ -515,10 +542,8 @@ impl Info {
         &self.id
     }
     /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn local_addr(&self) -> Result<&SocketAddr, std::io::Error> {
-        self.local_addr
-            .as_ref()
-            .map_err(|e| std::io::Error::new(e.kind(), e.to_string()))
+    pub fn local_addr(&self) -> &SocketAddr {
+        &self.local_addr
     }
     /// Local UDP Ipv4 socket address that this node is listening on.
     pub fn public_ip(&self) -> Option<Ipv4Addr> {
@@ -536,6 +561,17 @@ impl Info {
     /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> (usize, f64) {
         self.dht_size_estimate
+    }
+
+    /// Returns a snapshot of the node's routing table.
+    pub fn routing_table(&self) -> RoutingTable {
+        let mut table = RoutingTable::new().with_id(self.id);
+
+        for node in &self.routing_table {
+            table.add(node.clone());
+        }
+
+        table
     }
 }
 
@@ -558,8 +594,8 @@ impl Testnet {
                 let addr = node
                     .info()
                     .expect("node should not be shutdown in Testnet")
-                    .local_addr
-                    .expect("node should not be shutdown in Testnet");
+                    .local_addr;
+
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 
                 nodes.push(node)
@@ -578,6 +614,16 @@ impl Testnet {
 pub enum DhtPutError {
     #[error(transparent)]
     PutError(#[from] PutError),
+
+    #[error(transparent)]
+    DhtWasShutdown(#[from] DhtWasShutdown),
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Dht Actor errors
+pub enum InfoError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 
     #[error(transparent)]
     DhtWasShutdown(#[from] DhtWasShutdown),
@@ -606,10 +652,6 @@ mod test {
     fn shutdown() {
         let mut dht = Dht::client().unwrap();
 
-        let info = dht.info().unwrap();
-
-        info.local_addr().unwrap();
-
         let a = dht.clone();
 
         dht.shutdown();
@@ -623,7 +665,7 @@ mod test {
     fn bind_twice() {
         let a = Dht::client().unwrap();
         let result = Dht::builder()
-            .port(a.info().unwrap().local_addr().unwrap().port())
+            .port(a.info().unwrap().local_addr().port())
             .server()
             .build();
 

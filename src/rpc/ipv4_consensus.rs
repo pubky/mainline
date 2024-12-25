@@ -30,7 +30,11 @@ impl IPV4Consensus {
         let first = self.votes.first();
         match first {
             Some(vote_info) => {
-                tracing::debug!(target: "rustydht_lib::IPV4AddrSource", "Best IPv4 address {:?} has {} votes", vote_info.ip, vote_info.votes);
+                tracing::debug!(
+                    "Best IPv4 address {:?} has {} votes",
+                    vote_info.ip,
+                    vote_info.votes
+                );
 
                 if vote_info.votes >= MIN_VOTES {
                     Some(vote_info.ip)

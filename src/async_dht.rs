@@ -10,7 +10,7 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info, ResponseSender},
+    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info, InfoError, ResponseSender},
     rpc::PutError,
 };
 
@@ -29,15 +29,15 @@ impl AsyncDht {
     // === Getters ===
 
     /// Information and statistics about this [Dht] node.
-    pub async fn info(&self) -> Result<Info, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Info>(1);
+    pub async fn info(&self) -> Result<Info, InfoError> {
+        let (sender, receiver) = flume::bounded::<Result<Info, std::io::Error>>(1);
 
         self.0
              .0
             .send(ActorMessage::Info(sender))
             .map_err(|_| DhtWasShutdown)?;
 
-        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
+        Ok(receiver.recv_async().await.map_err(|_| DhtWasShutdown)??)
     }
 
     // === Public Methods ===
@@ -48,6 +48,17 @@ impl AsyncDht {
 
         let _ = self.0 .0.send(ActorMessage::Shutdown(sender));
         let _ = receiver.recv_async().await;
+    }
+
+    /// Wait until the bootstraping query is done.
+    pub async fn bootstrapped(&self) -> Result<(), InfoError> {
+        let info = self.info().await?;
+
+        if info.routing_table.is_empty() {
+            let _ = self.find_node(*info.id()).await;
+        }
+
+        Ok(())
     }
 
     // === Find nodes ===
@@ -252,10 +263,6 @@ mod test {
     fn shutdown() {
         async fn test() {
             let mut dht = Dht::client().unwrap().as_async();
-
-            let info = dht.info().await.unwrap();
-
-            info.local_addr().unwrap();
 
             let a = dht.clone();
 
