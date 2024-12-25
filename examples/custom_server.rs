@@ -5,7 +5,7 @@ use mainline::{
     server::{DefaultServer, Server},
     Dht, RoutingTable,
 };
-use tracing::{info, instrument, Level};
+use tracing::{info, Level};
 
 #[derive(Debug, Default)]
 struct MyCustomServer {
@@ -13,14 +13,13 @@ struct MyCustomServer {
 }
 
 impl Server for MyCustomServer {
-    #[instrument]
     fn handle_request(
         &mut self,
         routing_table: &RoutingTable,
         from: std::net::SocketAddr,
         request: &mainline::rpc::messages::RequestSpecific,
     ) -> MessageType {
-        info!(?request, ?from, "Request from");
+        info!(?request, ?from, "Got Request");
 
         // Do something ...
         // For example, rate limiting:

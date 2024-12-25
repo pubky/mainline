@@ -14,11 +14,11 @@ use crate::{
     rpc::Response,
 };
 
-/// A query is an iterative process of concurrently sending a request to the closest known nodes to
+/// An iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and
 /// repeating this process until no closer nodes (that aren't already queried) are found.
 #[derive(Debug)]
-pub(crate) struct Query {
+pub(crate) struct IterativeQuery {
     pub request: RequestSpecific,
     closest: ClosestNodes,
     responders: ClosestNodes,
@@ -27,7 +27,7 @@ pub(crate) struct Query {
     responses: Vec<Response>,
 }
 
-impl Query {
+impl IterativeQuery {
     pub fn new(target: Id, request: RequestSpecific) -> Self {
         trace!(?target, ?request, "New Query");
 
@@ -159,6 +159,9 @@ impl Query {
 }
 
 #[derive(Debug)]
+/// Once an [IterativeQuery] is done, or if a previous cached one was a vailable,
+/// we can store data at the closest nodes using this PutQuery, that keeps track of
+/// acknowledging nodes, and or errors.
 pub struct PutQuery {
     pub target: Id,
     /// Nodes that confirmed success
@@ -179,7 +182,7 @@ impl PutQuery {
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: &[Rc<Node>]) -> Result<(), PutError> {
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Vec<Rc<Node>>) -> Result<(), PutError> {
         // Already started.
         if !self.inflight_requests.is_empty() {
             panic!("should not call PutQuery.start() twice");

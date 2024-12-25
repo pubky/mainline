@@ -26,7 +26,7 @@ use crate::common::{
 use crate::server::{DefaultServer, Server};
 use crate::Config;
 
-use query::{PutQuery, Query};
+use query::{IterativeQuery, PutQuery};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
@@ -46,7 +46,7 @@ const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const IPV4_CONSENSUS_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
-const MAX_CACHED_BUCKETS: usize = 1000;
+const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
 // TODO: test load node from older routing table
 
@@ -73,18 +73,21 @@ pub struct Rpc {
     /// 1. dht size estimate based on closest claimed nodes,
     /// 2. dht size estimate based on closest responding nodes.
     /// 3. number of subnets with unique 6 bits prefix in ipv4
-    closest_nodes: LruCache<Id, CachedGetQuery>,
+    cached_iterative_queries: LruCache<Id, CachedIterativeQuery>,
 
-    // Active Queries
-    queries: HashMap<Id, Query>,
+    // Active IterativeQueries
+    iterative_queries: HashMap<Id, IterativeQuery>,
     /// Put queries are special, since they have to wait for a corresponing
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
 
     /// Sum of Dht size estimates from closest nodes from get queries.
     dht_size_estimates_sum: f64,
+
     /// Sum of Dht size estimates from closest _responding_ nodes from get queries.
     responders_based_dht_size_estimates_sum: f64,
+    responders_based_dht_size_estimates_count: usize,
+
     /// Sum of the number of subnets with 6 bits prefix in the closest nodes ipv4
     subnets_sum: usize,
 
@@ -121,10 +124,12 @@ impl Rpc {
             socket,
 
             routing_table: RoutingTable::new().with_id(id),
-            queries: HashMap::new(),
+            iterative_queries: HashMap::new(),
             put_queries: HashMap::new(),
-            closest_nodes: LruCache::new(
-                NonZeroUsize::new(MAX_CACHED_BUCKETS).expect("MAX_CACHED_BUCKETS is NonZeroUsize"),
+
+            cached_iterative_queries: LruCache::new(
+                NonZeroUsize::new(MAX_CACHED_ITERATIVE_QUERIES)
+                    .expect("MAX_CACHED_BUCKETS is NonZeroUsize"),
             ),
 
             last_table_refresh: Instant::now()
@@ -134,6 +139,8 @@ impl Rpc {
             last_ipv4_consensus_update: Instant::now(),
 
             dht_size_estimates_sum: 0.0,
+            responders_based_dht_size_estimates_count: 0,
+
             // Don't store to too many nodes just because you are in a cold start.
             responders_based_dht_size_estimates_sum: 1_000_000.0,
             subnets_sum: 20,
@@ -187,10 +194,11 @@ impl Rpc {
     ///
     /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> (usize, f64) {
-        let normal = self.dht_size_estimates_sum as usize / self.closest_nodes.len().max(1);
+        let normal =
+            self.dht_size_estimates_sum as usize / self.cached_iterative_queries.len().max(1);
 
         // See https://github.com/pubky/mainline/blob/main/docs/standard-deviation-vs-lookups.png
-        let std_dev = 0.281 * (self.closest_nodes.len() as f64).powf(-0.529);
+        let std_dev = 0.281 * (self.cached_iterative_queries.len() as f64).powf(-0.529);
 
         (normal, std_dev)
     }
@@ -201,7 +209,7 @@ impl Rpc {
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
     pub fn tick(&mut self) -> RpcTickReport {
-        let mut done_get_queries = Vec::with_capacity(self.queries.len());
+        let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
         let mut done_find_node_queries = Vec::with_capacity(self.put_queries.len());
 
@@ -221,7 +229,7 @@ impl Rpc {
         let self_id = self.id();
         let table_size = self.routing_table.size();
 
-        for (id, query) in self.queries.iter_mut() {
+        for (id, query) in self.iterative_queries.iter_mut() {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
@@ -251,54 +259,11 @@ impl Rpc {
 
         // === Cleanup done queries ===
 
-        // Has to happen _after_ ticking queries otherwise we might
-        // disconnect response receivers too soon.
-        //
         // Has to happen _before_ `self.socket.recv_from()`.
         for id in &done_get_queries {
-            if let Some(query) = self.queries.remove(id) {
-                // Handle closest nodes from a get query.
-
-                let closest = query.closest();
-                let responders = query.responders();
-
-                let closest_responding_nodes = responders.take_until_secure(
-                    self.responders_based_dht_size_estimates_sum as usize
-                        / self.closest_nodes.len().max(1),
-                    self.subnets_sum / self.closest_nodes.len().max(1),
-                );
-
-                if self.closest_nodes.len() >= MAX_CACHED_BUCKETS {
-                    if let Some((
-                        _,
-                        CachedGetQuery {
-                            dht_size_estimate,
-                            responders_dht_size_estimate,
-                            subnets,
-                            ..
-                        },
-                    )) = self.closest_nodes.pop_lru()
-                    {
-                        self.dht_size_estimates_sum -= dht_size_estimate;
-                        self.responders_based_dht_size_estimates_sum -=
-                            responders_dht_size_estimate;
-                        self.subnets_sum -= subnets as usize
-                    };
-                }
-
-                let dht_size_estimate = closest.dht_size_estimate();
-                let responders_dht_size_estimate = responders.dht_size_estimate();
-                let subnets_count = closest.subnets_count();
-
-                self.dht_size_estimates_sum += dht_size_estimate;
-
-                // Don't count the responders from non GET queries, as they will always be 0.
-                if let RequestTypeSpecific::GetValue(_) | RequestTypeSpecific::GetPeers(_) =
-                    query.request.request_type
-                {
-                    self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
-                }
-                self.subnets_sum += subnets_count as usize;
+            if let Some(query) = self.iterative_queries.remove(id) {
+                let closest_responding_nodes = self.cache_iterative_query(query);
+                self.responders_based_dht_size_estimates_count += 1;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
                     if let Err(error) = put_query.start(&mut self.socket, closest_responding_nodes)
@@ -306,16 +271,6 @@ impl Rpc {
                         done_put_queries.push((*id, Some(error)))
                     }
                 }
-
-                self.closest_nodes.put(
-                    *id,
-                    CachedGetQuery {
-                        closest_nodes: closest_responding_nodes.into(),
-                        dht_size_estimate,
-                        responders_dht_size_estimate,
-                        subnets: subnets_count,
-                    },
-                );
             };
         }
 
@@ -324,7 +279,9 @@ impl Rpc {
         }
 
         for (id, _) in &done_find_node_queries {
-            self.queries.remove(id);
+            if let Some(query) = self.iterative_queries.remove(id) {
+                self.cache_iterative_query(query);
+            }
         }
 
         // === Periodic node maintainance ===
@@ -385,9 +342,9 @@ impl Rpc {
         let mut query = PutQuery::new(target, request.clone());
 
         if let Some(closest_nodes) = self
-            .closest_nodes
+            .cached_iterative_queries
             .get(&target)
-            .map(|cached| &cached.closest_nodes)
+            .map(|cached| cached.closest_responding_nodes.clone())
             .filter(|closest_nodes| {
                 !closest_nodes.is_empty() && closest_nodes.iter().any(|n| n.valid_token())
             })
@@ -418,7 +375,7 @@ impl Rpc {
     /// Send a message to closer and closer nodes until we can't find any more nodes.
     ///
     /// Queries take few seconds to fully traverse the network, once it is done, it will be removed from
-    /// self.queries. But until then, calling [Rpc::get] multiple times, will just return the list
+    /// self.iterative_queries. But until then, calling [Rpc::get] multiple times, will just return the list
     /// of responses seen so far.
     ///
     /// Subsequent responses can be obtained from the [RpcTickReport::query_response] you get after calling [Rpc::tick].
@@ -435,11 +392,11 @@ impl Rpc {
         extra_nodes: Option<Vec<SocketAddr>>,
     ) -> Option<Vec<Response>> {
         // If query is still active, no need to create a new one.
-        if let Some(query) = self.queries.get(&target) {
+        if let Some(query) = self.iterative_queries.get(&target) {
             return Some(query.responses().to_vec());
         }
 
-        let mut query = Query::new(
+        let mut query = IterativeQuery::new(
             target,
             RequestSpecific {
                 requester_id: self.id(),
@@ -452,8 +409,8 @@ impl Rpc {
 
         let routing_table_closest = self.routing_table.closest_secure(
             &target,
-            self.responders_based_dht_size_estimates_sum as usize / self.closest_nodes.len().max(1),
-            self.subnets_sum / self.closest_nodes.len().max(1),
+            self.responders_based_dht_size_estimate(),
+            self.average_subnets(),
         );
 
         // If we don't have enough or any closest nodes, call the bootstraping nodes.
@@ -474,8 +431,12 @@ impl Rpc {
             query.add_candidate(node)
         }
 
-        if let Some(CachedGetQuery { closest_nodes, .. }) = self.closest_nodes.get(&target) {
-            for node in closest_nodes {
+        if let Some(CachedIterativeQuery {
+            closest_responding_nodes,
+            ..
+        }) = self.cached_iterative_queries.get(&target)
+        {
+            for node in closest_responding_nodes {
                 query.add_candidate(node.clone())
             }
         }
@@ -483,7 +444,7 @@ impl Rpc {
         // After adding the nodes, we need to start the query.
         query.start(&mut self.socket);
 
-        self.queries.insert(target, query);
+        self.iterative_queries.insert(target, query);
 
         None
     }
@@ -561,7 +522,7 @@ impl Rpc {
 
         // Get corresponing query for message.transaction_id
         if let Some(query) = self
-            .queries
+            .iterative_queries
             .values_mut()
             .find(|query| query.inflight(message.transaction_id))
         {
@@ -809,6 +770,75 @@ impl Rpc {
             },
         );
     }
+
+    fn cache_iterative_query(&mut self, query: IterativeQuery) -> Vec<Rc<Node>> {
+        if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
+            // Remove least recent closest_nodes
+            if let Some((
+                _,
+                CachedIterativeQuery {
+                    dht_size_estimate,
+                    responders_dht_size_estimate,
+                    subnets,
+                    is_find_node,
+                    ..
+                },
+            )) = self.cached_iterative_queries.pop_lru()
+            {
+                self.dht_size_estimates_sum -= dht_size_estimate;
+                self.responders_based_dht_size_estimates_sum -= responders_dht_size_estimate;
+                self.subnets_sum -= subnets as usize;
+
+                if !is_find_node {
+                    self.responders_based_dht_size_estimates_count -= 1;
+                }
+            };
+        }
+
+        let closest = query.closest();
+        let responders = query.responders();
+
+        let dht_size_estimate = closest.dht_size_estimate();
+        let responders_dht_size_estimate = responders.dht_size_estimate();
+        let subnets_count = closest.subnets_count();
+
+        self.dht_size_estimates_sum += dht_size_estimate;
+        self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
+        self.subnets_sum += subnets_count as usize;
+
+        let closest_responding_nodes = responders
+            .take_until_secure(
+                self.responders_based_dht_size_estimate(),
+                self.average_subnets(),
+            )
+            .to_vec();
+
+        self.cached_iterative_queries.put(
+            query.target(),
+            CachedIterativeQuery {
+                closest_responding_nodes: closest_responding_nodes.clone(),
+                dht_size_estimate,
+                responders_dht_size_estimate,
+                subnets: subnets_count,
+
+                is_find_node: matches!(
+                    query.request.request_type,
+                    RequestTypeSpecific::FindNode(_)
+                ),
+            },
+        );
+
+        closest_responding_nodes
+    }
+
+    fn responders_based_dht_size_estimate(&self) -> usize {
+        self.responders_based_dht_size_estimates_sum as usize
+            / self.responders_based_dht_size_estimates_count.max(1)
+    }
+
+    fn average_subnets(&self) -> usize {
+        self.subnets_sum / self.cached_iterative_queries.len().max(1)
+    }
 }
 
 impl Drop for Rpc {
@@ -817,11 +847,15 @@ impl Drop for Rpc {
     }
 }
 
-struct CachedGetQuery {
-    closest_nodes: Vec<Rc<Node>>,
+struct CachedIterativeQuery {
+    closest_responding_nodes: Vec<Rc<Node>>,
     dht_size_estimate: f64,
     responders_dht_size_estimate: f64,
     subnets: u8,
+
+    /// Keeping track of find_node queries, because they shouldn't
+    /// be counted in `responders_based_dht_size_estimates_count`
+    is_find_node: bool,
 }
 
 /// State change after a call to [Rpc::tick], including

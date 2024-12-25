@@ -7,7 +7,7 @@ use std::thread;
 
 use clap::Parser;
 use full_palette::GREY;
-use mainline::{ClosestNodes, Id, Node};
+use mainline::{rpc::ClosestNodes, Id, Node};
 use plotters::prelude::*;
 use statrs::statistics::*;
 
