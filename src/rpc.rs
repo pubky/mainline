@@ -201,11 +201,11 @@ impl Rpc {
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
     pub fn tick(&mut self) -> RpcTickReport {
-        // === Tick Queries ===
-
         let mut done_get_queries = Vec::with_capacity(self.queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
         let mut done_find_node_queries = Vec::with_capacity(self.put_queries.len());
+
+        // === Tick Queries ===
 
         for (id, query) in self.put_queries.iter_mut() {
             match query.tick(&mut self.socket) {
@@ -249,7 +249,8 @@ impl Rpc {
             };
         }
 
-        // === Remove done queries ===
+        // === Cleanup done queries ===
+
         // Has to happen _after_ ticking queries otherwise we might
         // disconnect response receivers too soon.
         //
@@ -317,33 +318,25 @@ impl Rpc {
                 );
             };
         }
+
         for (id, _) in &done_put_queries {
             self.put_queries.remove(id);
         }
 
-        // Refresh the routing table, ping stale nodes, and remove unresponsive ones.
-        self.maintain_routing_table();
+        for (id, _) in &done_find_node_queries {
+            self.queries.remove(id);
+        }
 
-        // TODO: Rethink RpcTickReport
+        // === Periodic node maintainance ===
+        self.periodic_node_maintainance();
+
+        // Handle new incoming message
         let query_response =
             self.socket
                 .recv_from()
                 .and_then(|(message, from)| match &message.message_type {
                     MessageType::Request(request_specific) => {
-                        if !self.socket.read_only {
-                            let server = &mut self.server;
-
-                            match server.handle_request(&self.routing_table, from, request_specific)
-                            {
-                                MessageType::Error(error) => {
-                                    self.error(from, message.transaction_id, error);
-                                }
-                                MessageType::Response(response) => {
-                                    self.response(from, message.transaction_id, response);
-                                }
-                                _ => {}
-                            };
-                        }
+                        self.handle_request(from, message.transaction_id, request_specific);
 
                         None
                     }
@@ -496,6 +489,27 @@ impl Rpc {
     }
 
     // === Private Methods ===
+
+    fn handle_request(
+        &mut self,
+        from: SocketAddr,
+        transaction_id: u16,
+        request_specific: &RequestSpecific,
+    ) {
+        if !self.socket.read_only {
+            let server = &mut self.server;
+
+            match server.handle_request(&self.routing_table, from, request_specific) {
+                MessageType::Error(error) => {
+                    self.error(from, transaction_id, error);
+                }
+                MessageType::Response(response) => {
+                    self.response(from, transaction_id, response);
+                }
+                _ => {}
+            };
+        }
+    }
 
     fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
@@ -698,7 +712,7 @@ impl Rpc {
         }
     }
 
-    fn maintain_routing_table(&mut self) {
+    fn periodic_node_maintainance(&mut self) {
         // Every 15 minutes.
         if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
             self.last_table_refresh = Instant::now();
