@@ -47,12 +47,14 @@ pub trait Server: std::fmt::Debug + Send + Sync {
 ///
 /// But it doesn't implement any rate-limiting or blocking.
 pub struct DefaultServer {
-    tokens: Tokens,
-    // server storage
-    peers: PeersStore,
-
-    immutable_values: LruCache<Id, Bytes>,
-    mutable_values: LruCache<Id, MutableItem>,
+    /// Tokens generator
+    pub tokens: Tokens,
+    /// Peers store
+    pub peers: PeersStore,
+    /// Immutable values store
+    pub immutable_values: LruCache<Id, Bytes>,
+    /// Mutable values store
+    pub mutable_values: LruCache<Id, MutableItem>,
 }
 
 impl Default for DefaultServer {
@@ -106,8 +108,6 @@ impl DefaultServer {
         }
     }
 
-    // === Private Methods ===
-
     /// Handle get mutable request
     fn handle_get_mutable(
         &mut self,
@@ -150,7 +150,6 @@ impl DefaultServer {
 }
 
 impl Server for DefaultServer {
-    /// Handle incoming request.
     fn handle_request(
         &mut self,
         routing_table: &RoutingTable,

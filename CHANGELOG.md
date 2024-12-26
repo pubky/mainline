@@ -27,6 +27,7 @@ All notable changes to mainline dht will be documented in this file.
 - Automatically change the node to server mode after running for 15 minutes with public address.
 - `Dht::info()` returns a new enum error, including an error if the local_addr can't be obtained.
 - `Info::local_addr()` is infallible.
+- Make `DefaultServer` properties public.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
