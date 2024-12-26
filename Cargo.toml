@@ -36,10 +36,12 @@ rayon = "1.10"
 dashmap = "6.1"
 
 [features]
+## Include [Dht] node, if this feature is disabled, you can still use the [rpc::Rpc] and build your own node.
+node = []
 ## Enable [Dht::as_async()] to use [async_dht::AsyncDht]
-async = ["flume/async"]
+async = ["node", "flume/async"]
 
-default = []
+default = ["node"]
 
 [package.metadata.docs.rs]
 all-features = true

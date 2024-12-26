@@ -3,8 +3,8 @@
 #![doc = document_features::document_features!()]
 //!
 
-// Public modules
 mod common;
+#[cfg(feature = "node")]
 mod dht;
 
 // Public modules
@@ -14,6 +14,8 @@ pub mod rpc;
 pub mod server;
 
 pub use crate::common::{Id, MutableItem, Node, RoutingTable};
+
+#[cfg(feature = "node")]
 pub use dht::{Config, Dht, Testnet};
 
 pub use bytes::Bytes;

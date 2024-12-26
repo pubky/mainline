@@ -251,10 +251,9 @@ mod tests {
         let lookups = 4;
         let acceptable_margin = 0.2;
         let sims = 10;
-        let dht_size = 2500 as f64;
+        let dht_size = 2500_f64;
 
         let mean = (0..sims)
-            .into_iter()
             .map(|_| simulate(dht_size as usize, lookups) as f64)
             .sum::<f64>()
             / (sims as f64);

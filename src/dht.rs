@@ -20,62 +20,16 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{PutError, Response, Rpc, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT},
+    rpc::{PutError, Response, Rpc},
     server::{DefaultServer, Server},
     Node, RoutingTable,
 };
 
+pub use crate::rpc::Config;
+
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
-
-#[derive(Debug)]
-/// Dht Configurations
-pub struct Config {
-    /// Bootstrap nodes
-    ///
-    /// Defaults to [DEFAULT_BOOTSTRAP_NODES]
-    pub bootstrap: Vec<String>,
-    /// Extra bootstrapping nodes to be used alongside
-    /// Explicit port to listen on.
-    ///
-    /// Defaults to None
-    pub port: Option<u16>,
-    /// UDP socket request timeout duration.
-    ///
-    /// The longer this duration is, the longer queries take until they are deemeed "done".
-    /// The shortet this duration is, the more responses from busy nodes we miss out on,
-    /// which affects the accuracy of queries trying to find closest nodes to a target.
-    ///
-    /// Defaults to [DEFAULT_REQUEST_TIMEOUT]
-    pub request_timeout: Duration,
-    /// Server to respond to incoming Requests
-    ///
-    /// Defaults to None, where the [DefaultServer] will be used
-    /// if the node kept running for `15` minutes with a publicly accessible UDP port.
-    pub server: Option<Box<dyn Server>>,
-    /// A known external IPv4 address for this node to generate
-    /// a secure node Id from according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
-    ///
-    /// Defaults to None, where we depend on the consensus of
-    /// votes from responding nodes.
-    pub external_ip: Option<Ipv4Addr>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            bootstrap: DEFAULT_BOOTSTRAP_NODES
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            port: None,
-            request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            server: None,
-            external_ip: None,
-        }
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct DhtBuilder(Config);
@@ -721,14 +675,14 @@ mod test {
 
     #[test]
     fn find_node_no_values() {
-        let client = Dht::builder().bootstrap(&vec![]).build().unwrap();
+        let client = Dht::builder().bootstrap(&[]).build().unwrap();
 
         client.find_node(Id::random()).unwrap();
     }
 
     #[test]
     fn put_get_immutable_no_values() {
-        let client = Dht::builder().bootstrap(&vec![]).build().unwrap();
+        let client = Dht::builder().bootstrap(&[]).build().unwrap();
 
         assert_eq!(client.get_immutable(Id::random()).unwrap(), None);
     }

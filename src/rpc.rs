@@ -1,6 +1,7 @@
 //! K-RPC implementatioStoreQueryMetdatan
 
 mod closest_nodes;
+mod config;
 mod ipv4_consensus;
 mod query;
 mod socket;
@@ -24,13 +25,13 @@ use crate::common::{
     MAX_BUCKET_SIZE_K,
 };
 use crate::server::{DefaultServer, Server};
-use crate::Config;
 
 use query::{IterativeQuery, PutQuery};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
+pub use config::Config;
 pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;

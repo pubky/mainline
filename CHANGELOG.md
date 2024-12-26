@@ -19,6 +19,7 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Changed
 
+- `Dht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
 - Rename `Settings` to `Config`.
 - `Rpc::new()` takes `Config` as input.
 - `Rpc::id()` returns `Id` instead of `&Id`.
