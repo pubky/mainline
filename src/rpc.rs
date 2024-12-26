@@ -36,6 +36,14 @@ pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
+use self::messages::{
+    AnnouncePeerRequestArguments, GetPeersRequestArguments, PutImmutableRequestArguments,
+    PutMutableRequestArguments, PutRequest,
+};
+
+// TODO: add a proper test for public ports.
+// TODO: make servers optional feature
+
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
@@ -330,8 +338,16 @@ impl Rpc {
     /// Store a value in the closest nodes, optionally trigger a lookup query if
     /// the cached closest_nodes aren't fresh enough.
     ///
-    /// `salt` is only relevant for mutable values.
-    pub fn put(&mut self, target: Id, request: PutRequestSpecific) -> Result<(), PutError> {
+    /// - `request`: the put request.
+    pub fn put(&mut self, request: PutRequestSpecific) -> Result<(), PutError> {
+        let target = match request {
+            PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+                info_hash, ..
+            }) => info_hash,
+            PutRequestSpecific::PutMutable(PutMutableRequestArguments { target, .. }) => target,
+            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, .. }) => target,
+        };
+
         if self.put_queries.contains_key(&target) {
             debug!(?target, "Put query for the same target is already inflight");
 
@@ -356,7 +372,6 @@ impl Rpc {
             };
 
             self.get(
-                target,
                 RequestTypeSpecific::GetValue(GetValueRequestArguments {
                     target,
                     seq: None,
@@ -382,14 +397,24 @@ impl Rpc {
     /// Effectively, we are caching responses and backing off the network for the duration it takes
     /// to traverse it.
     ///
+    /// - `request` [RequestTypeSpecific], except [RequestTypeSpecific::Ping] and
+    ///     [RequestTypeSpecific::Put] which will be ignored.
     /// - `extra_nodes` option allows the query to visit specific nodes, that won't necessesarily be visited
     ///     through the query otherwise.
     pub fn get(
         &mut self,
-        target: Id,
         request: RequestTypeSpecific,
         extra_nodes: Option<Vec<SocketAddr>>,
     ) -> Option<Vec<Response>> {
+        let target = match request {
+            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }) => target,
+            RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => info_hash,
+            RequestTypeSpecific::GetValue(GetValueRequestArguments { target, .. }) => target,
+            _ => {
+                return None;
+            }
+        };
+
         // If query is still active, no need to create a new one.
         if let Some(query) = self.iterative_queries.get(&target) {
             return Some(query.responses().to_vec());
@@ -460,13 +485,39 @@ impl Rpc {
             let server = &mut self.server;
 
             match server.handle_request(&self.routing_table, from, request_specific) {
-                MessageType::Error(error) => {
+                (MessageType::Error(error), _) => {
                     self.error(from, transaction_id, error);
                 }
-                MessageType::Response(response) => {
+                (MessageType::Response(response), _) => {
                     self.response(from, transaction_id, response);
                 }
-                _ => {}
+                (MessageType::Request(request), extra_nodes) => {
+                    debug!(
+                        ?request,
+                        "Sending a request (from Rpc::server) after handling a request!"
+                    );
+
+                    match request {
+                        RequestSpecific {
+                            request_type: RequestTypeSpecific::Ping,
+                            ..
+                        } => {
+                            // Ignoring ping.
+                        }
+                        RequestSpecific {
+                            request_type:
+                                RequestTypeSpecific::Put(PutRequest {
+                                    put_request_type, ..
+                                }),
+                            ..
+                        } => {
+                            let _ = self.put(put_request_type);
+                        }
+                        RequestSpecific { request_type, .. } => {
+                            let _ = self.get(request_type, extra_nodes);
+                        }
+                    }
+                }
             };
         }
     }
@@ -723,11 +774,10 @@ impl Rpc {
                             "Our current id {} is not valid for IP {}. Using new id {}",
                             self.id(),
                             ip,
-                            new_id
+                            new_id,
                         );
 
                         self.get(
-                            new_id,
                             RequestTypeSpecific::FindNode(FindNodeRequestArguments {
                                 target: new_id,
                             }),
@@ -746,8 +796,7 @@ impl Rpc {
         let node_id = self.id();
         debug!(?node_id, "Bootstraping the routing table");
         self.get(
-            self.id(),
-            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: self.id() }),
+            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: node_id }),
             None,
         );
     }

@@ -4,7 +4,8 @@ Simple, robust, BitTorrent's [Mainline](https://en.wikipedia.org/wiki/Mainline_D
 
 This library is focused on being the best and simplest Rust client for Mainline, especially focused on reliable and fast time-to-first-response.
 
-It should work as a routing / storing node as well, and has been running in production for many months without an issue. However if you are running your separate (read: small) DHT, or otherwise facing unusual DoS attack, you should consider implementing [rate limiting](#rate-limiting).
+It should work as a routing / storing node (server mode) as well, and has been running in production for many months without an issue. 
+However if you are concerned about spam or DoS, you should consider implementing [rate limiting](#rate-limiting).
 
 **[API Docs](https://docs.rs/mainline/latest/mainline/)**
 
@@ -50,8 +51,10 @@ Supported BEPs:
 
 #### Rate limiting
 
-The default server implementation has no rate-limiting, you can run your own [custom server](./examples/custom_server.rs) and apply your custom rate-limiting. However, that limit/block will only apply _after_ parsing incoming messages, and it won't affect handling incoming responses.
+The default server implementation has no rate-limiting, you can run your own [custom server](./examples/custom_server.rs) and apply your custom rate-limiting. 
+However, that limit/block will only apply _after_ parsing incoming messages, and it won't affect handling incoming responses.
 
 ## Acknowledgment
 
-This implementation was possible thanks to [Webtorrent's Bittorrent-dht](https://github.com/webtorrent/bittorrent-dht) as a reference, and [Rustydht-lib](https://github.com/raptorswing/rustydht-lib) that saved me a lot of time, especially at the serialization and deserialization of Bencode messages.
+This implementation was possible thanks to [Webtorrent's Bittorrent-dht](https://github.com/webtorrent/bittorrent-dht) as a reference, 
+and [Rustydht-lib](https://github.com/raptorswing/rustydht-lib) that saved me a lot of time, especially at the serialization and deserialization of Bencode messages.

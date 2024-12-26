@@ -30,6 +30,14 @@ pub const MAX_VALUES: usize = 1000;
 pub trait Server: std::fmt::Debug + Send + Sync {
     /// Handle incoming requests.
     ///
+    /// Returns a tuple of `(MessageType, Some(extra_nodes))`:
+    /// Where [MessageType] is:
+    /// - A [MessageType::Response] to send to the requester.
+    /// - A [MessageType::Error] to send to the requester.
+    /// - Or a [MessageType::Request] for the RPC to query the DHT (PING excluded).
+    ///
+    /// And the `extra_nodes` is passed to [crate::rpc::Rpc::put], and ignored otherwise.
+    ///
     /// This function will block the main loop where the [crate::rpc::Rpc]
     /// is running, thus it needs to be very fast and lightweight.
     fn handle_request(
@@ -37,7 +45,7 @@ pub trait Server: std::fmt::Debug + Send + Sync {
         routing_table: &RoutingTable,
         from: SocketAddr,
         request: &RequestSpecific,
-    ) -> MessageType;
+    ) -> (MessageType, Option<Vec<SocketAddr>>);
 }
 
 #[derive(Debug)]
@@ -155,7 +163,7 @@ impl Server for DefaultServer {
         routing_table: &RoutingTable,
         from: SocketAddr,
         request: &RequestSpecific,
-    ) -> MessageType {
+    ) -> (MessageType, Option<Vec<SocketAddr>>) {
         // Lazily rotate secrets before handling a request
         if self.tokens.should_update() {
             self.tokens.rotate()
@@ -163,7 +171,7 @@ impl Server for DefaultServer {
 
         let requester_id = request.requester_id;
 
-        match &request.request_type {
+        let message = match &request.request_type {
             RequestTypeSpecific::Ping => {
                 MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                     responder_id: routing_table.id(),
@@ -226,10 +234,13 @@ impl Server for DefaultServer {
                             "Invalid token"
                         );
 
-                        return MessageType::Error(ErrorSpecific {
-                            code: 203,
-                            description: "Bad token".to_string(),
-                        });
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Bad token".to_string(),
+                            }),
+                            None,
+                        );
                     }
 
                     let peer = match implied_port {
@@ -258,26 +269,35 @@ impl Server for DefaultServer {
                             request_type = "put_immutable",
                             "Invalid token"
                         );
-                        return MessageType::Error(ErrorSpecific {
-                            code: 203,
-                            description: "Bad token".to_string(),
-                        });
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Bad token".to_string(),
+                            }),
+                            None,
+                        );
                     }
 
                     if v.len() > 1000 {
                         debug!(?target, ?requester_id, ?from, size = ?v.len(), "Message (v field) too big.");
-                        return MessageType::Error(ErrorSpecific {
-                            code: 205,
-                            description: "Message (v field) too big.".to_string(),
-                        });
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 205,
+                                description: "Message (v field) too big.".to_string(),
+                            }),
+                            None,
+                        );
                     }
                     if !validate_immutable(v, target) {
                         debug!(?target, ?requester_id, ?from, v = ?v, "Target doesn't match the sha1 hash of v field.");
-                        return MessageType::Error(ErrorSpecific {
-                            code: 203,
-                            description: "Target doesn't match the sha1 hash of v field"
-                                .to_string(),
-                        });
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Target doesn't match the sha1 hash of v field"
+                                    .to_string(),
+                            }),
+                            None,
+                        );
                     }
 
                     self.immutable_values.put(*target, v.to_owned().into());
@@ -305,23 +325,32 @@ impl Server for DefaultServer {
                             request_type = "put_mutable",
                             "Invalid token"
                         );
-                        return MessageType::Error(ErrorSpecific {
-                            code: 203,
-                            description: "Bad token".to_string(),
-                        });
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Bad token".to_string(),
+                            }),
+                            None,
+                        );
                     }
                     if v.len() > 1000 {
-                        return MessageType::Error(ErrorSpecific {
-                            code: 205,
-                            description: "Message (v field) too big.".to_string(),
-                        });
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 205,
+                                description: "Message (v field) too big.".to_string(),
+                            }),
+                            None,
+                        );
                     }
                     if let Some(salt) = salt {
                         if salt.len() > 64 {
-                            return MessageType::Error(ErrorSpecific {
-                                code: 207,
-                                description: "salt (salt field) too big.".to_string(),
-                            });
+                            return (
+                                MessageType::Error(ErrorSpecific {
+                                    code: 207,
+                                    description: "salt (salt field) too big.".to_string(),
+                                }),
+                                None,
+                            );
                         }
                     }
                     if let Some(previous) = self.mutable_values.get(target) {
@@ -334,11 +363,14 @@ impl Server for DefaultServer {
                                     "CAS mismatched, re-read value and try again."
                                 );
 
-                                return MessageType::Error(ErrorSpecific {
-                                    code: 301,
-                                    description: "CAS mismatched, re-read value and try again."
-                                        .to_string(),
-                                });
+                                return (
+                                    MessageType::Error(ErrorSpecific {
+                                        code: 301,
+                                        description: "CAS mismatched, re-read value and try again."
+                                            .to_string(),
+                                    }),
+                                    None,
+                                );
                             }
                         };
 
@@ -350,10 +382,13 @@ impl Server for DefaultServer {
                                 "Sequence number less than current."
                             );
 
-                            return MessageType::Error(ErrorSpecific {
-                                code: 302,
-                                description: "Sequence number less than current.".to_string(),
-                            });
+                            return (
+                                MessageType::Error(ErrorSpecific {
+                                    code: 302,
+                                    description: "Sequence number less than current.".to_string(),
+                                }),
+                                None,
+                            );
                         }
                     }
 
@@ -383,6 +418,8 @@ impl Server for DefaultServer {
                     }
                 }
             },
-        }
+        };
+
+        (message, None)
     }
 }

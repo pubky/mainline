@@ -10,7 +10,7 @@ All notable changes to mainline dht will be documented in this file.
 - Support `BEP0042 DHT Security extension` when running as a server. 
 - Optionally set `Config::external_ip` manually to generate secure node `Id` from.
 - Export `RoutingTable`.
-- Add `Info::public_ip()` and `Info::has_public_port`.
+- Add `Info::public_ip()`, `Info::has_public_port`, and `Info::public_address()`.
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
 - Add `Dht::bootstrapped` and `AsyncDht::bootstrapped` to wait for the routing table to be bootstrapped.
 - Add `Info::routing_table()` to get a snapshot of the node's routing table.
@@ -28,6 +28,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Dht::info()` returns a new enum error, including an error if the local_addr can't be obtained.
 - `Info::local_addr()` is infallible.
 - Make `DefaultServer` properties public.
+- `Rpc::get` and `Rpc::put` don't take a `target` argument, as it is included in the request arguments.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 

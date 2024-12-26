@@ -389,14 +389,14 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             }));
                         }
                         ActorMessage::Put(target, request, sender) => {
-                            if let Err(error) = rpc.put(target, request) {
+                            if let Err(error) = rpc.put(request) {
                                 let _ = sender.send(Err(error));
                             } else {
                                 put_senders.insert(target, sender);
                             };
                         }
                         ActorMessage::Get(target, request, sender) => {
-                            if let Some(responses) = rpc.get(target, request, None) {
+                            if let Some(responses) = rpc.get(request, None) {
                                 for response in responses {
                                     send(&sender, response);
                                 }
@@ -502,6 +502,16 @@ impl Info {
     /// Local UDP Ipv4 socket address that this node is listening on.
     pub fn public_ip(&self) -> Option<Ipv4Addr> {
         self.public_ip
+    }
+    /// Returns the public address if it has a public_ip and a public_port.
+    pub fn public_addr(&self) -> Option<SocketAddr> {
+        if let Some(public_ip) = self.public_ip {
+            if self.has_public_port {
+                return Some(SocketAddr::new(public_ip.into(), self.local_addr().port()));
+            }
+        }
+
+        None
     }
     /// Returns a best guess of whether this nodes port is publicly accessible
     pub fn has_public_port(&self) -> bool {

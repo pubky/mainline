@@ -1,4 +1,4 @@
-use std::{thread::sleep, time::Duration};
+use std::{net::SocketAddr, thread::sleep, time::Duration};
 
 use mainline::{
     rpc::messages::MessageType,
@@ -18,7 +18,7 @@ impl Server for MyCustomServer {
         routing_table: &RoutingTable,
         from: std::net::SocketAddr,
         request: &mainline::rpc::messages::RequestSpecific,
-    ) -> MessageType {
+    ) -> (MessageType, Option<Vec<SocketAddr>>) {
         info!(?request, ?from, "Got Request");
 
         // Do something ...
