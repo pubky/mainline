@@ -54,9 +54,7 @@ impl AsyncDht {
     pub async fn bootstrapped(&self) -> Result<(), DhtWasShutdown> {
         let info = self.info().await?;
 
-        if info.routing_table.is_empty() {
-            let _ = self.find_node(*info.id()).await;
-        }
+        let _ = self.find_node(*info.id()).await;
 
         Ok(())
     }

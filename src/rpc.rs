@@ -525,6 +525,7 @@ impl Rpc {
                 SocketAddr::V4(from) => {
                     if from == our_adress {
                         dbg!("GOT PING REQUEST...");
+                        self.firewalled = false;
                     }
                 }
                 _ => {}

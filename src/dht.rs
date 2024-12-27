@@ -168,9 +168,7 @@ impl Dht {
     pub fn bootstrapped(&self) -> Result<(), DhtWasShutdown> {
         let info = self.info()?;
 
-        if info.routing_table.is_empty() {
-            let _ = self.find_node(*info.id());
-        }
+        let _ = self.find_node(*info.id());
 
         Ok(())
     }
@@ -486,7 +484,7 @@ pub struct Info {
     public_address: Option<SocketAddrV4>,
     firewalled: bool,
     dht_size_estimate: (usize, f64),
-    pub(crate) routing_table: Vec<Node>,
+    routing_table: Vec<Node>,
     server_mode: bool,
 }
 
