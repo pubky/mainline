@@ -534,6 +534,13 @@ impl Rpc {
                     if !self.id().is_valid_for_ipv4(*ipv4) {
                         let new_id = Id::from_ipv4(*ipv4);
 
+                        info!(
+                            "Our current id {} is not valid for adrsess {}. Using new id {}",
+                            self.id(),
+                            our_adress,
+                            new_id
+                        );
+
                         self.get(
                             RequestTypeSpecific::FindNode(FindNodeRequestArguments {
                                 target: new_id,
@@ -542,13 +549,6 @@ impl Rpc {
                         );
 
                         self.routing_table = RoutingTable::new().with_id(new_id);
-
-                        info!(
-                            "Our current id {} is not valid for adrsess {}. Using new id {}",
-                            self.id(),
-                            our_adress,
-                            new_id
-                        );
                     }
                 }
             }
