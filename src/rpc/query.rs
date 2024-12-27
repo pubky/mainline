@@ -1,6 +1,7 @@
 //! Manage iterative queries and their corresponding request/response.
 
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{SocketAddr, SocketAddrV4};
 use std::{collections::HashSet, rc::Rc};
 
 use tracing::{debug, error, trace, warn};
@@ -25,6 +26,7 @@ pub(crate) struct IterativeQuery {
     inflight_requests: Vec<u16>,
     visited: HashSet<SocketAddr>,
     responses: Vec<Response>,
+    public_address_votes: HashMap<SocketAddrV4, u16>,
 }
 
 impl IterativeQuery {
@@ -41,6 +43,8 @@ impl IterativeQuery {
             visited: HashSet::with_capacity(200),
 
             responses: Vec::with_capacity(30),
+
+            public_address_votes: HashMap::new(),
         }
     }
 
@@ -64,6 +68,20 @@ impl IterativeQuery {
         &self.responses
     }
 
+    pub fn best_address(&self) -> Option<SocketAddrV4> {
+        let mut max = 0_u16;
+        let mut best_addr = None;
+
+        for (addr, count) in self.public_address_votes.iter() {
+            if *count > max {
+                max = *count;
+                best_addr = Some(*addr);
+            };
+        }
+
+        best_addr
+    }
+
     // === Public Methods ===
 
     /// Force start query traversal by visiting closest nodes.
@@ -75,6 +93,21 @@ impl IterativeQuery {
     pub fn add_candidate(&mut self, node: Rc<Node>) {
         // ready for a ipv6 routing table?
         self.closest.add(node);
+    }
+
+    /// Add a vote for this node's address.
+    pub fn add_address_vote(&mut self, address: SocketAddr) {
+        match address {
+            SocketAddr::V4(address) => {
+                self.public_address_votes
+                    .entry(address)
+                    .and_modify(|counter| *counter += 1)
+                    .or_insert(1);
+            }
+            _ => {
+                // Ipv6 is not supported
+            }
+        }
     }
 
     /// Visit explicitly given addresses, and add them to the visited set.

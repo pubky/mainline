@@ -1,11 +1,13 @@
 //! Udp socket layer managine incoming/outgoing requests and responses.
 
 use std::cmp::Ordering;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
+
+use super::Config;
 
 const VERSION: [u8; 4] = [82, 83, 0, 4]; // "RS" version 04
 const MTU: usize = 2048;
@@ -19,11 +21,13 @@ pub const READ_TIMEOUT: Duration = Duration::from_millis(10);
 pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
-    pub(crate) read_only: bool,
+    pub(crate) server_mode: bool,
     request_timeout: Duration,
     /// We don't need a HashMap, since we know the capacity is `65536` requests.
     /// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
     inflight_requests: Vec<InflightRequest>,
+
+    local_addr: SocketAddrV4,
 }
 
 #[derive(Debug)]
@@ -34,11 +38,10 @@ pub struct InflightRequest {
 }
 
 impl KrpcSocket {
-    pub(crate) fn new(
-        read_only: bool,
-        request_timeout: Duration,
-        port: Option<u16>,
-    ) -> Result<Self, std::io::Error> {
+    pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
+        let request_timeout = config.request_timeout;
+        let port = config.port;
+
         let socket = if let Some(port) = port {
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
@@ -48,33 +51,45 @@ impl KrpcSocket {
             }?
         };
 
+        let local_addr = match socket.local_addr()? {
+            SocketAddr::V4(addr) => addr,
+            SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
+        };
+
         socket.set_read_timeout(Some(READ_TIMEOUT))?;
 
         Ok(Self {
             socket,
             next_tid: 0,
-            read_only,
+            server_mode: config.server_mode,
             request_timeout,
             inflight_requests: Vec::with_capacity(u16::MAX as usize),
+
+            local_addr,
         })
     }
 
     #[cfg(test)]
     pub(crate) fn server() -> Result<Self, std::io::Error> {
-        Self::new(false, DEFAULT_REQUEST_TIMEOUT, None)
+        use crate::server::DefaultServer;
+
+        let mut config = Config::default();
+        config.server = Some(Box::new(DefaultServer::default()));
+
+        Self::new(&config)
     }
 
     #[cfg(test)]
-    pub(crate) fn read_only() -> Result<Self, std::io::Error> {
-        Self::new(true, DEFAULT_REQUEST_TIMEOUT, None)
+    pub(crate) fn client() -> Result<Self, std::io::Error> {
+        Self::new(&Config::default())
     }
 
     // === Getters ===
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
-        self.socket.local_addr()
+    pub fn local_addr(&self) -> SocketAddrV4 {
+        self.local_addr
     }
 
     // === Public Methods ===
@@ -219,7 +234,7 @@ impl KrpcSocket {
             transaction_id,
             message_type: MessageType::Request(message),
             version: Some(VERSION.into()),
-            read_only: self.read_only,
+            read_only: !self.server_mode,
             requester_ip: None,
         }
     }
@@ -235,7 +250,7 @@ impl KrpcSocket {
             transaction_id: request_tid,
             message_type: message,
             version: Some(VERSION.into()),
-            read_only: self.read_only,
+            read_only: !self.server_mode,
             // BEP0042 Only relevant in responses.
             requester_ip: Some(requester_ip),
         }
@@ -299,12 +314,12 @@ mod test {
     #[test]
     fn recv_request() {
         let mut server = KrpcSocket::server().unwrap();
-        let server_address = server.local_addr().unwrap();
+        let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::read_only().unwrap();
+        let mut client = KrpcSocket::client().unwrap();
         client.next_tid = 120;
 
-        let client_address = client.local_addr().unwrap();
+        let client_address = client.local_addr();
         let request = RequestSpecific {
             requester_id: Id::random(),
             request_type: RequestTypeSpecific::Ping,
@@ -327,7 +342,7 @@ mod test {
             }
         });
 
-        client.request(server_address, request);
+        client.request(server_address.into(), request);
 
         server_thread.join().unwrap();
     }
@@ -336,21 +351,21 @@ mod test {
     fn recv_response() {
         let (tx, rx) = flume::bounded(1);
 
-        let mut client = KrpcSocket::read_only().unwrap();
-        let client_address = client.local_addr().unwrap();
+        let mut client = KrpcSocket::client().unwrap();
+        let client_address = client.local_addr();
 
         let responder_id = Id::random();
         let response = ResponseSpecific::Ping(PingResponseArguments { responder_id });
 
         let server_thread = thread::spawn(move || {
-            let mut server = KrpcSocket::read_only().unwrap();
-            let server_address = server.local_addr().unwrap();
+            let mut server = KrpcSocket::client().unwrap();
+            let server_address = server.local_addr();
             tx.send(server_address).unwrap();
 
             loop {
                 server.inflight_requests.push(InflightRequest {
                     tid: 8,
-                    to: client_address,
+                    to: client_address.into(),
                     sent_at: Instant::now(),
                 });
 
@@ -376,19 +391,19 @@ mod test {
 
         let server_address = rx.recv().unwrap();
 
-        client.response(server_address, 8, response);
+        client.response(server_address.into(), 8, response);
 
         server_thread.join().unwrap();
     }
 
     #[test]
     fn ignore_response_from_wrong_address() {
-        let mut server = KrpcSocket::read_only().unwrap();
-        let server_address = server.local_addr().unwrap();
+        let mut server = KrpcSocket::client().unwrap();
+        let server_address = server.local_addr();
 
-        let mut client = KrpcSocket::read_only().unwrap();
+        let mut client = KrpcSocket::client().unwrap();
 
-        let client_address = client.local_addr().unwrap();
+        let client_address = client.local_addr();
 
         server.inflight_requests.push(InflightRequest {
             tid: 8,
@@ -410,7 +425,7 @@ mod test {
             );
         });
 
-        client.response(server_address, 8, response);
+        client.response(server_address.into(), 8, response);
 
         server_thread.join().unwrap();
     }

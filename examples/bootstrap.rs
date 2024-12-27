@@ -1,5 +1,3 @@
-use std::{thread, time::Duration};
-
 use mainline::Dht;
 
 use tracing::Level;
@@ -10,7 +8,7 @@ fn main() {
         .with_max_level(Level::DEBUG)
         .init();
 
-    Dht::client().unwrap();
+    let client = Dht::client().unwrap();
 
-    thread::sleep(Duration::from_secs(5));
+    client.bootstrapped().unwrap();
 }

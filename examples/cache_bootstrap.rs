@@ -29,12 +29,15 @@ fn main() {
         file.read_to_string(&mut content)
             .expect("Failed to read bootstrapping nodes file");
 
-        builder = builder.extra_bootstrap(
-            &content
-                .lines()
-                .map(|line| line.to_string())
-                .collect::<Vec<_>>(),
-        );
+        let cached_nodes = content
+            .lines()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        // To confirm that these old nodes are still viable,
+        // try `builder.bootstrap(&cached_nodes)` instead,
+        // this way you don't rely on default bootstrap nodes.
+        builder = builder.extra_bootstrap(&cached_nodes);
     };
 
     let client = builder.build().unwrap();

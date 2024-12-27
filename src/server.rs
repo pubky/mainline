@@ -131,14 +131,14 @@ impl DefaultServer {
                 match no_more_recent_values {
                     Some(true) => {
                         ResponseSpecific::NoMoreRecentValue(NoMoreRecentValueResponseArguments {
-                            responder_id: routing_table.id(),
+                            responder_id: *routing_table.id(),
                             token: self.tokens.generate_token(from).into(),
                             nodes: Some(routing_table.closest(target)),
                             seq: *item.seq(),
                         })
                     }
                     _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
-                        responder_id: routing_table.id(),
+                        responder_id: *routing_table.id(),
                         token: self.tokens.generate_token(from).into(),
                         nodes: Some(routing_table.closest(target)),
                         v: item.value().to_vec(),
@@ -149,7 +149,7 @@ impl DefaultServer {
                 }
             }
             None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                responder_id: routing_table.id(),
+                responder_id: *routing_table.id(),
                 token: self.tokens.generate_token(from).into(),
                 nodes: Some(routing_table.closest(target)),
             }),
@@ -174,25 +174,25 @@ impl Server for DefaultServer {
         let message = match &request.request_type {
             RequestTypeSpecific::Ping => {
                 MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                    responder_id: routing_table.id(),
+                    responder_id: *routing_table.id(),
                 }))
             }
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target, .. }) => {
                 MessageType::Response(ResponseSpecific::FindNode(FindNodeResponseArguments {
-                    responder_id: routing_table.id(),
+                    responder_id: *routing_table.id(),
                     nodes: routing_table.closest(target),
                 }))
             }
             RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
                 MessageType::Response(match self.peers.get_random_peers(info_hash) {
                     Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                        responder_id: routing_table.id(),
+                        responder_id: *routing_table.id(),
                         token: self.tokens.generate_token(from).into(),
                         nodes: Some(routing_table.closest(info_hash)),
                         values: peers,
                     }),
                     None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                        responder_id: routing_table.id(),
+                        responder_id: *routing_table.id(),
                         token: self.tokens.generate_token(from).into(),
                         nodes: Some(routing_table.closest(info_hash)),
                     }),
@@ -204,7 +204,7 @@ impl Server for DefaultServer {
                 } else if let Some(v) = self.immutable_values.get(target) {
                     MessageType::Response(ResponseSpecific::GetImmutable(
                         GetImmutableResponseArguments {
-                            responder_id: routing_table.id(),
+                            responder_id: *routing_table.id(),
                             token: self.tokens.generate_token(from).into(),
                             nodes: Some(routing_table.closest(target)),
                             v: v.to_vec(),
@@ -252,7 +252,7 @@ impl Server for DefaultServer {
                         .add_peer(*info_hash, (&request.requester_id, peer));
 
                     MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                        responder_id: routing_table.id(),
+                        responder_id: *routing_table.id(),
                     }))
                 }
                 PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
@@ -303,7 +303,7 @@ impl Server for DefaultServer {
                     self.immutable_values.put(*target, v.to_owned().into());
 
                     MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                        responder_id: routing_table.id(),
+                        responder_id: *routing_table.id(),
                     }))
                 }
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments {
@@ -405,7 +405,7 @@ impl Server for DefaultServer {
                             self.mutable_values.put(*target, item);
 
                             MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
-                                responder_id: routing_table.id(),
+                                responder_id: *routing_table.id(),
                             }))
                         }
                         Err(error) => {

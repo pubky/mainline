@@ -3,7 +3,7 @@
 use std::{
     collections::HashMap,
     fmt::Formatter,
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     thread,
     time::Duration,
 };
@@ -21,7 +21,7 @@ use crate::{
         RequestTypeSpecific,
     },
     rpc::{PutError, Response, Rpc},
-    server::{DefaultServer, Server},
+    server::Server,
     Node, RoutingTable,
 };
 
@@ -35,10 +35,9 @@ pub struct Dht(pub(crate) Sender<ActorMessage>);
 pub struct DhtBuilder(Config);
 
 impl DhtBuilder {
-    /// Run the node in server mode as soon as possible,
-    /// by explicitly setting [Config::server] to the [DefaultServer].
-    pub fn server(mut self) -> Self {
-        self.0.server = Some(Box::<DefaultServer>::default());
+    /// Set [Config::server_mode].
+    pub fn server_mode(mut self) -> Self {
+        self.0.server_mode = true;
 
         self
     }
@@ -76,9 +75,9 @@ impl DhtBuilder {
         self
     }
 
-    /// Set [Config::external_ip]
-    pub fn external_ip(mut self, external_ip: Ipv4Addr) -> Self {
-        self.0.external_ip = Some(external_ip);
+    /// Set [Config::public_ip]
+    pub fn public_ip(mut self, public_ip: Ipv4Addr) -> Self {
+        self.0.public_ip = Some(public_ip);
 
         self
     }
@@ -107,16 +106,17 @@ impl Dht {
         Dht::builder().build()
     }
 
-    /// Create a new DHT node that is running in server mode as
+    /// Create a new DHT node that is running in [Server mode][Config::server_mode] as
     /// soon as possible.
     ///
     /// You shouldn't use this option unless you are sure your
-    /// DHT node is publicly accessible _AND_ will be long running.
+    /// DHT node is publicly accessible (not firewalled) _AND_ will be long running,
+    /// and/or you are running your own local network for testing.
     ///
     /// If you are not sure, use [Self::client] and it will switch
     /// to server mode when/if these two conditions are met.
     pub fn server() -> Result<Self, std::io::Error> {
-        Dht::builder().server().build()
+        Dht::builder().server_mode().build()
     }
 
     /// Create a new Dht node.
@@ -144,14 +144,14 @@ impl Dht {
     // === Getters ===
 
     /// Information and statistics about this [Dht] node.
-    pub fn info(&self) -> Result<Info, InfoError> {
-        let (sender, receiver) = flume::bounded::<Result<Info, std::io::Error>>(1);
+    pub fn info(&self) -> Result<Info, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Info>(1);
 
         self.0
             .send(ActorMessage::Info(sender))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.recv().map_err(|_| DhtWasShutdown)??)
+        receiver.recv().map_err(|_| DhtWasShutdown)
     }
 
     // === Public Methods ===
@@ -165,7 +165,7 @@ impl Dht {
     }
 
     /// Block until the bootstraping query is done.
-    pub fn bootstrapped(&self) -> Result<(), InfoError> {
+    pub fn bootstrapped(&self) -> Result<(), DhtWasShutdown> {
         let info = self.info()?;
 
         if info.routing_table.is_empty() {
@@ -359,9 +359,7 @@ impl Dht {
 fn run(config: Config, receiver: Receiver<ActorMessage>) {
     match Rpc::new(config) {
         Ok(mut rpc) => {
-            let address = rpc
-                .local_addr()
-                .expect("local address should be available after building the Rpc correctly");
+            let address = rpc.local_addr();
             info!(?address, "Mainline DHT listening");
 
             let mut put_senders = HashMap::new();
@@ -379,14 +377,15 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             let _ = sender.send(Ok(()));
                         }
                         ActorMessage::Info(sender) => {
-                            let _ = sender.send(rpc.local_addr().map(|local_addr| Info {
-                                id: rpc.id(),
-                                local_addr,
+                            let _ = sender.send(Info {
+                                id: *rpc.id(),
+                                local_addr: rpc.local_addr(),
                                 dht_size_estimate: rpc.dht_size_estimate(),
-                                public_ip: rpc.public_ip(),
-                                has_public_port: rpc.has_public_port(),
+                                public_address: rpc.public_address(),
+                                firewalled: rpc.firewalled(),
                                 routing_table: rpc.routing_table().to_owned_nodes(),
-                            }));
+                                server_mode: rpc.server_mode(),
+                            });
                         }
                         ActorMessage::Put(target, request, sender) => {
                             if let Err(error) = rpc.put(request) {
@@ -464,7 +463,7 @@ fn send(sender: &ResponseSender, response: Response) {
 }
 
 pub(crate) enum ActorMessage {
-    Info(Sender<Result<Info, std::io::Error>>),
+    Info(Sender<Info>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
@@ -483,11 +482,12 @@ pub enum ResponseSender {
 #[derive(Debug, Clone)]
 pub struct Info {
     id: Id,
-    local_addr: SocketAddr,
-    public_ip: Option<Ipv4Addr>,
-    has_public_port: bool,
+    local_addr: SocketAddrV4,
+    public_address: Option<SocketAddrV4>,
+    firewalled: bool,
     dht_size_estimate: (usize, f64),
     pub(crate) routing_table: Vec<Node>,
+    server_mode: bool,
 }
 
 impl Info {
@@ -496,26 +496,25 @@ impl Info {
         &self.id
     }
     /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn local_addr(&self) -> &SocketAddr {
+    pub fn local_addr(&self) -> &SocketAddrV4 {
         &self.local_addr
     }
-    /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn public_ip(&self) -> Option<Ipv4Addr> {
-        self.public_ip
+    /// Returns the best guess for this node's Public addresss.
+    ///
+    /// If [Config::public_ip] was set, this is what will be returned
+    /// (plus the local port), otherwise it will rely on consensus from
+    /// responding nodes voting on our public IP and port.
+    pub fn public_address(&self) -> Option<SocketAddrV4> {
+        self.public_address
     }
-    /// Returns the public address if it has a public_ip and a public_port.
-    pub fn public_addr(&self) -> Option<SocketAddr> {
-        if let Some(public_ip) = self.public_ip {
-            if self.has_public_port {
-                return Some(SocketAddr::new(public_ip.into(), self.local_addr().port()));
-            }
-        }
+    /// Returns true if the port this node is listening on is publicly accessible.
+    pub fn firewalled(&self) -> bool {
+        self.firewalled
+    }
 
-        None
-    }
-    /// Returns a best guess of whether this nodes port is publicly accessible
-    pub fn has_public_port(&self) -> bool {
-        self.has_public_port
+    /// Returns whether or not this node is running in server mode.
+    pub fn server_mode(&self) -> bool {
+        self.server_mode
     }
 
     /// Returns:
@@ -553,7 +552,7 @@ impl Testnet {
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().server().bootstrap(&[]).build()?;
+                let node = Dht::builder().server_mode().bootstrap(&[]).build()?;
 
                 let addr = node
                     .info()
@@ -564,7 +563,7 @@ impl Testnet {
 
                 nodes.push(node)
             } else {
-                let node = Dht::builder().server().bootstrap(&bootstrap).build()?;
+                let node = Dht::builder().server_mode().bootstrap(&bootstrap).build()?;
                 nodes.push(node)
             }
         }
@@ -578,16 +577,6 @@ impl Testnet {
 pub enum DhtPutError {
     #[error(transparent)]
     PutError(#[from] PutError),
-
-    #[error(transparent)]
-    DhtWasShutdown(#[from] DhtWasShutdown),
-}
-
-#[derive(thiserror::Error, Debug)]
-/// Dht Actor errors
-pub enum InfoError {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
 
     #[error(transparent)]
     DhtWasShutdown(#[from] DhtWasShutdown),
@@ -630,7 +619,7 @@ mod test {
         let a = Dht::client().unwrap();
         let result = Dht::builder()
             .port(a.info().unwrap().local_addr().port())
-            .server()
+            .server_mode()
             .build();
 
         assert!(result.is_err());

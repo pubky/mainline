@@ -7,28 +7,39 @@ All notable changes to mainline dht will be documented in this file.
 ### Added
 
 - `DhtBuilder` wrapper around `Config`, instead of `Settings` doubling as a builder.
-- Support `BEP0042 DHT Security extension` when running as a server. 
-- Optionally set `Config::external_ip` manually to generate secure node `Id` from.
+- Support `BEP0042 DHT Security extension` when running in server mode. 
+- Add `Config::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
+- Add `Config::server_mode` to force server mode.
+- Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
 - Export `RoutingTable`.
-- Add `Info::public_ip()`, `Info::has_public_port`, and `Info::public_address()`.
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
 - Add `Dht::bootstrapped` and `AsyncDht::bootstrapped` to wait for the routing table to be bootstrapped.
+- Add `RoutingTable::to_bootstrap()` to export the addresses nodes in the routing table.
+- Add `Rpc::public_address()` and `Info::public_address()` which returns the best estimate for this node's public address.
+- Add `Rpc::firewalled()` and `Info::firewalled()` which returns whether or not this node is firewalled, or publicly accessible.
+- Add `Rpc::server_mode()` and `Info::server_mode()` which returns whether or not this node is running in server mode.
 - Add `Info::routing_table()` to get a snapshot of the node's routing table.
-- Add `RoutingTable::to_bootstrap()` to export the addresses of the oldest 20 node in the routing table.
-- Add `cache_bootstrap.rs` example.
+- Add `cache_bootstrap.rs` example to show how you can store your routing table to disk and use it for subsequent bootstrapping.
+- Add `Id::from_ipv4()`.
+- Add `Id::is_valid_for_ipv4`.
 
 ### Changed
 
 - `Dht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
 - Rename `Settings` to `Config`.
 - `Rpc::new()` takes `Config` as input.
-- `Rpc::id()` returns `Id` instead of `&Id`.
-- `Server::handle_request` takes the `RoutingTable` and returns the message to be sent as a response.
-- Automatically change the node to server mode after running for 15 minutes with public address.
-- `Dht::info()` returns a new enum error, including an error if the local_addr can't be obtained.
-- `Info::local_addr()` is infallible.
+- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
 - Make `DefaultServer` properties public.
-- `Rpc::get` and `Rpc::put` don't take a `target` argument, as it is included in the request arguments.
+- `Rpc::id()` returns `Id` instead of `&Id`.
+- `Rpc::get`, and `Rpc::put` don't take a `target` argument, as it is included in the request arguments.
+- `Rpc::get()`, and `Rpc::put()` don't take a sender any more.
+- `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
+  and `RpcTickReport::qurey_response` are added.
+- `Info::local_addr()` is infallible.
+
+### Removed
+
+- Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 

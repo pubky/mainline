@@ -100,24 +100,28 @@ impl Id {
 
         match ip {
             IpAddr::V4(addr) => from_ipv4_and_r(bytes, addr, r),
-            IpAddr::V6(_addr) => unimplemented!(),
+            IpAddr::V6(_addr) => unimplemented!("Ipv6 is not supported"),
         }
+    }
+
+    /// Create a new Id from an Ipv4 address according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
+    pub fn from_ipv4(ipv4: Ipv4Addr) -> Id {
+        let mut rng = rand::thread_rng();
+        let r: u8 = rng.gen();
+
+        let bytes: [u8; 20] = rng.gen();
+
+        from_ipv4_and_r(bytes, ipv4, r)
     }
 
     /// Validate that this Id is valid with respect to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn is_valid_for_ip(&self, ip: &IpAddr) -> bool {
         match ip {
-            IpAddr::V4(ipv4) => {
-                if ipv4.is_private() {
-                    return true;
-                }
-
-                let expected = first_21_bits(&id_prefix_ipv4(ipv4, self.0[ID_SIZE - 1]));
-
-                self.first_21_bits() == expected
-            }
+            IpAddr::V4(ipv4) => self.is_valid_for_ipv4(*ipv4),
             IpAddr::V6(_ipv6) => {
-                unimplemented!()
+                // Ipv6 is not supported
+
+                false
 
                 // // For IPv6, checking the ULA range fc00::/7
                 // if (ipv6.segments()[0] & 0xFE00 == 0xFC00) {
@@ -125,6 +129,16 @@ impl Id {
                 // }
             }
         }
+    }
+
+    pub fn is_valid_for_ipv4(&self, ipv4: Ipv4Addr) -> bool {
+        if ipv4.is_private() {
+            return true;
+        }
+
+        let expected = first_21_bits(&id_prefix_ipv4(ipv4, self.0[ID_SIZE - 1]));
+
+        self.first_21_bits() == expected
     }
 
     pub(crate) fn first_21_bits(&self) -> [u8; 3] {
@@ -138,7 +152,7 @@ fn first_21_bits(bytes: &[u8]) -> [u8; 3] {
 
 fn from_ipv4_and_r(bytes: [u8; 20], ip: Ipv4Addr, r: u8) -> Id {
     let mut bytes = bytes;
-    let prefix = id_prefix_ipv4(&ip, r);
+    let prefix = id_prefix_ipv4(ip, r);
 
     // Set first 21 bits to the prefix
     bytes[0] = prefix[0];
@@ -152,7 +166,7 @@ fn from_ipv4_and_r(bytes: [u8; 20], ip: Ipv4Addr, r: u8) -> Id {
     Id(bytes)
 }
 
-fn id_prefix_ipv4(ip: &Ipv4Addr, r: u8) -> [u8; 3] {
+fn id_prefix_ipv4(ip: Ipv4Addr, r: u8) -> [u8; 3] {
     let r32: u32 = r.into();
     let ip_int: u32 = u32::from_be_bytes(ip.octets());
     let masked_ip: u32 = (ip_int & IPV4_MASK) | (r32 << 29);

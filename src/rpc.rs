@@ -2,20 +2,18 @@
 
 mod closest_nodes;
 mod config;
-mod ipv4_consensus;
 mod query;
 mod socket;
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, SocketAddrV4, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use ipv4_consensus::IPV4Consensus;
 use lru::LruCache;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::common::{
     validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
@@ -41,9 +39,6 @@ use self::messages::{
     PutMutableRequestArguments, PutRequest,
 };
 
-// TODO: add a proper test for public ports.
-// TODO: make servers optional feature
-
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
@@ -53,7 +48,6 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const IPV4_CONSENSUS_UPDATE_INTERVAL: Duration = Duration::from_secs(10);
 
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
@@ -72,8 +66,6 @@ pub struct Rpc {
     last_table_refresh: Instant,
     /// Last time we pinged nodes in the routing table.
     last_table_ping: Instant,
-    /// Last time we updated the IPV4Consensus
-    last_ipv4_consensus_update: Instant,
     /// Closest responding nodes to specific target
     ///
     /// as well as the:
@@ -98,25 +90,22 @@ pub struct Rpc {
     /// Sum of the number of subnets with 6 bits prefix in the closest nodes ipv4
     subnets_sum: usize,
 
-    /// Count votes on this node's external Ipv4Addr address
-    ipv4_consensus: Option<IPV4Consensus>,
-    /// Count the votes that we have a public port.
-    /// If > 0, then we do have one.
-    public_port_vote: i32,
-
     server: Box<dyn Server>,
+
+    public_address: Option<SocketAddrV4>,
+    firewalled: bool,
 }
 
 impl Rpc {
     /// Create a new Rpc
     pub fn new(config: Config) -> Result<Self, std::io::Error> {
-        let id = if let Some(ip) = config.external_ip {
+        let id = if let Some(ip) = config.public_ip {
             Id::from_ip(ip.into())
         } else {
             Id::random()
         };
 
-        let socket = KrpcSocket::new(config.server.is_none(), config.request_timeout, config.port)?;
+        let socket = KrpcSocket::new(&config)?;
 
         let bootstrap = config
             .bootstrap
@@ -139,11 +128,8 @@ impl Rpc {
                     .expect("MAX_CACHED_BUCKETS is NonZeroUsize"),
             ),
 
-            last_table_refresh: Instant::now()
-                .checked_sub(REFRESH_TABLE_INTERVAL)
-                .unwrap_or_else(Instant::now),
+            last_table_refresh: Instant::now(),
             last_table_ping: Instant::now(),
-            last_ipv4_consensus_update: Instant::now(),
 
             dht_size_estimates_sum: 0.0,
             responders_based_dht_size_estimates_count: 0,
@@ -152,43 +138,48 @@ impl Rpc {
             responders_based_dht_size_estimates_sum: 1_000_000.0,
             subnets_sum: 20,
 
-            ipv4_consensus: if config.external_ip.is_some() {
-                None
-            } else {
-                Some(IPV4Consensus::new())
-            },
-
-            public_port_vote: 0,
-
             server: config.server.unwrap_or(Box::new(DefaultServer::default())),
+
+            public_address: None,
+            firewalled: true,
         })
     }
 
     // === Getters ===
 
     /// Returns the node's Id
-    pub fn id(&self) -> Id {
+    pub fn id(&self) -> &Id {
         self.routing_table.id()
     }
 
     /// Returns the address the server is listening to.
     #[inline]
-    pub fn local_addr(&self) -> Result<SocketAddr, std::io::Error> {
+    pub fn local_addr(&self) -> SocketAddrV4 {
         self.socket.local_addr()
     }
 
-    /// Returns the best guess for the node's Public Ipv4Addr
-    pub fn public_ip(&self) -> Option<Ipv4Addr> {
-        if let Some(ipv4_consensus) = &self.ipv4_consensus {
-            return ipv4_consensus.get_best_ipv4();
-        }
-
+    /// Returns the best guess for this node's Public addresss.
+    ///
+    /// If [Config::public_ip] was set, this is what will be returned
+    /// (plus the local port), otherwise it will rely on consensus from
+    /// responding nodes voting on our public IP and port.
+    pub fn public_address(&self) -> Option<SocketAddrV4> {
+        // TODO:
         None
     }
 
-    /// Returns a best guess of whether this nodes port is publicly accessible
-    pub fn has_public_port(&self) -> bool {
-        self.public_port_vote > 0
+    /// Returns true if the port this node is listening on is publicly accessible.
+    ///
+    /// If this node is firewalled, it won't switch to server mode if it is in adaptive mode,
+    /// but if [Config::server_mode] was set to true, then whether or not this node is firewalled
+    /// won't matter.
+    pub fn firewalled(&self) -> bool {
+        self.firewalled
+    }
+
+    /// Returns whether or not this node is running in server mode.
+    pub fn server_mode(&self) -> bool {
+        self.socket.server_mode
     }
 
     pub fn routing_table(&self) -> &RoutingTable {
@@ -233,7 +224,7 @@ impl Rpc {
             };
         }
 
-        let self_id = self.id();
+        let self_id = *self.id();
         let table_size = self.routing_table.size();
 
         for (id, query) in self.iterative_queries.iter_mut() {
@@ -251,7 +242,7 @@ impl Rpc {
 
                     done_find_node_queries.push((*id, closest_nodes));
 
-                    if id == &self_id {
+                    if *id == self_id {
                         if table_size == 0 {
                             error!("Could not bootstrap the routing table");
                         } else {
@@ -269,7 +260,8 @@ impl Rpc {
         // Has to happen _before_ `self.socket.recv_from()`.
         for id in &done_get_queries {
             if let Some(query) = self.iterative_queries.remove(id) {
-                let closest_responding_nodes = self.cache_iterative_query(query);
+                let closest_responding_nodes = self.handle_iterative_query(&query);
+
                 self.responders_based_dht_size_estimates_count += 1;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
@@ -287,7 +279,8 @@ impl Rpc {
 
         for (id, _) in &done_find_node_queries {
             if let Some(query) = self.iterative_queries.remove(id) {
-                self.cache_iterative_query(query);
+                self.check_address_votes_from_iterative_query(&query);
+                self.handle_iterative_query(&query);
             }
         }
 
@@ -420,10 +413,16 @@ impl Rpc {
             return Some(query.responses().to_vec());
         }
 
+        let node_id = self.routing_table.id();
+
+        if target == *node_id {
+            debug!(?node_id, "Bootstraping the routing table");
+        }
+
         let mut query = IterativeQuery::new(
             target,
             RequestSpecific {
-                requester_id: self.id(),
+                requester_id: *node_id,
                 request_type: request,
             },
         );
@@ -481,7 +480,7 @@ impl Rpc {
         transaction_id: u16,
         request_specific: &RequestSpecific,
     ) {
-        if !self.socket.read_only {
+        if self.socket.server_mode {
             let server = &mut self.server;
 
             match server.handle_request(&self.routing_table, from, request_specific) {
@@ -511,14 +510,25 @@ impl Rpc {
                                 }),
                             ..
                         } => {
+                            tracing::trace!("custom server returned a PUT request, sending it.");
                             let _ = self.put(put_request_type);
                         }
                         RequestSpecific { request_type, .. } => {
+                            tracing::trace!("custom server returned a GET request, sending it.");
                             let _ = self.get(request_type, extra_nodes);
                         }
                     }
                 }
             };
+        } else if let Some(our_adress) = self.public_address {
+            match from {
+                SocketAddr::V4(from) => {
+                    if from == our_adress {
+                        dbg!("GOT PING REQUEST...");
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -527,28 +537,6 @@ impl Rpc {
         if message.read_only {
             return None;
         };
-
-        if let Some(ref mut ipv4_consensus) = self.ipv4_consensus {
-            if let Some(std::net::IpAddr::V4(proposed_addr)) =
-                message.requester_ip.map(|addr| addr.ip())
-            {
-                ipv4_consensus.add_vote(proposed_addr);
-            }
-        };
-
-        if message.requester_ip.map(|ip| ip.port()).unwrap_or_default()
-            == self.local_addr().map(|ip| ip.port()).unwrap_or_default()
-        {
-            self.public_port_vote = self
-                .public_port_vote
-                .checked_add(1)
-                .unwrap_or(self.public_port_vote);
-        } else {
-            self.public_port_vote = self
-                .public_port_vote
-                .checked_sub(1)
-                .unwrap_or(self.public_port_vote);
-        }
 
         // If the response looks like a Ping response, check StoreQueries for the transaction_id.
         if let Some(query) = self
@@ -591,6 +579,10 @@ impl Rpc {
                         .with_token(token.clone())
                         .into(),
                 );
+            }
+
+            if let Some(proposed_ip) = message.requester_ip {
+                query.add_address_vote(proposed_ip);
             }
 
             let target = query.target();
@@ -724,23 +716,16 @@ impl Rpc {
     }
 
     fn periodic_node_maintainance(&mut self) {
-        // Every 15 minutes.
+        // Bootstrap if necessary
+        if self.routing_table.is_empty() {
+            self.populate();
+        }
+
+        // Every 15 minutes refresh the routing table.
         if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
             self.last_table_refresh = Instant::now();
 
-            // Bootstrap if necessary
-            if self.routing_table.is_empty() {
-                self.populate();
-            }
-
-            // Have been running for more than 15 minutes, and
-            // appears to have a public port, so we change the read_only to false
-            if self.socket.read_only && self.public_port_vote > 0 {
-                info!(
-                    "Have been running on a public port for >15 minutes, switching to server mode"
-                );
-                self.socket.read_only = false
-            }
+            self.populate();
         }
 
         if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
@@ -754,49 +739,12 @@ impl Rpc {
                 }
             }
         }
-
-        if let Some(ref mut ipv4_consensus) = self.ipv4_consensus {
-            if self.last_ipv4_consensus_update.elapsed() > IPV4_CONSENSUS_UPDATE_INTERVAL {
-                self.last_ipv4_consensus_update = Instant::now();
-
-                ipv4_consensus.decay();
-            }
-
-            // Update our node Id to be a secure id according to BEP_0042,
-            // but only do that if we are running in server mode in the first place,
-            // because otherwise we are re-bootstrapping for no reason.
-            if !self.socket.read_only {
-                if let Some(ip) = ipv4_consensus.get_best_ipv4() {
-                    let ip = IpAddr::V4(ip);
-                    if !self.id().is_valid_for_ip(&ip) {
-                        let new_id = Id::from_ip(ip);
-                        info!(
-                            "Our current id {} is not valid for IP {}. Using new id {}",
-                            self.id(),
-                            ip,
-                            new_id,
-                        );
-
-                        self.get(
-                            RequestTypeSpecific::FindNode(FindNodeRequestArguments {
-                                target: new_id,
-                            }),
-                            None,
-                        );
-
-                        self.routing_table = RoutingTable::new().with_id(new_id);
-                    }
-                }
-            }
-        }
     }
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
-        let node_id = self.id();
-        debug!(?node_id, "Bootstraping the routing table");
         self.get(
-            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: node_id }),
+            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: *self.id() }),
             None,
         );
     }
@@ -805,13 +753,38 @@ impl Rpc {
         self.socket.request(
             address,
             RequestSpecific {
-                requester_id: self.id(),
+                requester_id: *self.id(),
                 request_type: RequestTypeSpecific::Ping,
             },
         );
     }
 
-    fn cache_iterative_query(&mut self, query: IterativeQuery) -> Vec<Rc<Node>> {
+    fn handle_iterative_query(&mut self, query: &IterativeQuery) -> Vec<Rc<Node>> {
+        self.check_address_votes_from_iterative_query(query);
+        self.cache_iterative_query(query)
+    }
+
+    fn check_address_votes_from_iterative_query(&mut self, query: &IterativeQuery) {
+        if let Some(new_address) = query.best_address() {
+            if self.public_address.is_none()
+                || new_address
+                    != self
+                        .public_address
+                        .expect("self.public_address is not None")
+            {
+                debug!(
+                    ?new_address,
+                    "Query responses suggest a different public_address, trying to confirm.."
+                );
+
+                self.ping(new_address.into());
+            }
+
+            self.public_address = Some(new_address)
+        }
+    }
+
+    fn cache_iterative_query(&mut self, query: &IterativeQuery) -> Vec<Rc<Node>> {
         if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
             // Remove least recent closest_nodes
             if let Some((

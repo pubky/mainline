@@ -54,6 +54,13 @@ Supported BEPs:
 The default server implementation has no rate-limiting, you can run your own [custom server](./examples/custom_server.rs) and apply your custom rate-limiting. 
 However, that limit/block will only apply _after_ parsing incoming messages, and it won't affect handling incoming responses.
 
+### Adaptive mode
+
+The default Adaptive mode will start the node in client mode, and after 15 minutes of running with a publicly accessible address,
+it will switch to server mode. If you want to explicitly start in Server mode, because you know you are not running behind firewall,
+you can call `Dht::builder().server_mode().build()`, and you can optionally add your known public ip so the node doesn't have to depend on,
+votes from responding nodes: `Dht::builder().server_mode().public_ip().build()`.
+
 ## Acknowledgment
 
 This implementation was possible thanks to [Webtorrent's Bittorrent-dht](https://github.com/webtorrent/bittorrent-dht) as a reference, 

@@ -36,8 +36,8 @@ impl RoutingTable {
     // === Getters ===
 
     /// Returns the [Id] of this node, where the distance is measured from.
-    pub fn id(&self) -> Id {
-        self.id
+    pub fn id(&self) -> &Id {
+        &self.id
     }
 
     /// Returns the map of distances and their [KBucket]
@@ -138,16 +138,13 @@ impl RoutingTable {
             .collect()
     }
 
-    /// Turn this routing table to a list of bootstraping nodes
-    /// by finding the oldest 20th nodes, and stringify their addresses.
+    /// Turn this routing table to a list of bootstraping nodes.   
     pub fn to_bootstrap(&self) -> Vec<String> {
-        let mut nodes = self.to_vec();
-
-        nodes.sort_by(|a, b| a.last_seen.cmp(&b.last_seen));
-
-        nodes.truncate(MAX_BUCKET_SIZE_K);
-
-        nodes.iter().map(|n| n.address().to_string()).collect()
+        self.to_vec()
+            .iter()
+            .filter(|n| !n.is_stale())
+            .map(|n| n.address.to_string())
+            .collect()
     }
 
     // === Private Methods ===

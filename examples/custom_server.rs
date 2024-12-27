@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, thread::sleep, time::Duration};
+use std::net::SocketAddr;
 
 use mainline::{
     rpc::messages::MessageType,
@@ -32,10 +32,11 @@ impl Server for MyCustomServer {
 fn main() {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    Dht::builder()
+    let client = Dht::builder()
+        .server_mode()
         .custom_server(Box::<MyCustomServer>::default())
         .build()
         .unwrap();
 
-    sleep(Duration::from_secs(5))
+    client.bootstrapped().unwrap();
 }
