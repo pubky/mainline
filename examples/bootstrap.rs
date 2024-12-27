@@ -11,10 +11,8 @@ fn main() {
     let client = Dht::client().unwrap();
 
     client.bootstrapped().unwrap();
-    
+
     let info = client.info().unwrap();
 
-    dbg!(info.firewalled());
-
-    loop {}
+    dbg!(info);
 }

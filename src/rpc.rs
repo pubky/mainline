@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use lru::LruCache;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::common::{
     validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
@@ -164,11 +164,10 @@ impl Rpc {
     /// (plus the local port), otherwise it will rely on consensus from
     /// responding nodes voting on our public IP and port.
     pub fn public_address(&self) -> Option<SocketAddrV4> {
-        // TODO:
-        None
+        self.public_address
     }
 
-    /// Returns true if the port this node is listening on is publicly accessible.
+    /// Returns `true` if we can't confirm that [Self::public_address] is publicly addressable.
     ///
     /// If this node is firewalled, it won't switch to server mode if it is in adaptive mode,
     /// but if [Config::server_mode] was set to true, then whether or not this node is firewalled
@@ -521,14 +520,19 @@ impl Rpc {
                 }
             };
         } else if let Some(our_adress) = self.public_address {
-            match from {
-                SocketAddr::V4(from) => {
-                    if from == our_adress {
-                        dbg!("GOT PING REQUEST...");
-                        self.firewalled = false;
-                    }
+            if let SocketAddr::V4(from) = from {
+                if from == our_adress {
+                    self.firewalled = false;
+
+                    let new_id = Id::from_ipv4(*our_adress.ip());
+
+                    info!(
+                        "Our current id {} is not valid for adrsess {}. Using new id {}",
+                        self.id(),
+                        our_adress,
+                        new_id
+                    );
                 }
-                _ => {}
             }
         }
     }
@@ -727,6 +731,12 @@ impl Rpc {
             self.last_table_refresh = Instant::now();
 
             self.populate();
+
+            if !self.server_mode() && !self.firewalled() {
+                info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
+
+                self.socket.server_mode = true;
+            }
         }
 
         if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
@@ -778,6 +788,7 @@ impl Rpc {
                     "Query responses suggest a different public_address, trying to confirm.."
                 );
 
+                self.firewalled = true;
                 self.ping(new_address.into());
             }
 

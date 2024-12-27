@@ -39,4 +39,10 @@ fn main() {
         .unwrap();
 
     client.bootstrapped().unwrap();
+
+    let info = client.info().unwrap();
+
+    dbg!(info);
+
+    loop {}
 }

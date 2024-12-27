@@ -477,7 +477,7 @@ pub enum ResponseSender {
 }
 
 /// Information and statistics about this [Dht] node.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Info {
     id: Id,
     local_addr: SocketAddrV4,
@@ -486,6 +486,23 @@ pub struct Info {
     dht_size_estimate: (usize, f64),
     routing_table: Vec<Node>,
     server_mode: bool,
+}
+
+impl std::fmt::Debug for Info {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Info")
+            .field("id", &self.id())
+            .field("local_addr", &self.local_addr())
+            .field("public_address", &self.public_address())
+            .field("firewalled", &self.firewalled())
+            .field("dht_size_estimate", &self.dht_size_estimate)
+            .field(
+                "routing_table",
+                &format!("RoutingTable [{}] nodes", self.routing_table.len()),
+            )
+            .field("server_mode", &self.server_mode())
+            .finish()
+    }
 }
 
 impl Info {
@@ -505,7 +522,11 @@ impl Info {
     pub fn public_address(&self) -> Option<SocketAddrV4> {
         self.public_address
     }
-    /// Returns true if the port this node is listening on is publicly accessible.
+    /// Returns `true` if we can't confirm that [Self::public_address] is publicly addressable.
+    ///
+    /// If this node is firewalled, it won't switch to server mode if it is in adaptive mode,
+    /// but if [Config::server_mode] was set to true, then whether or not this node is firewalled
+    /// won't matter.
     pub fn firewalled(&self) -> bool {
         self.firewalled
     }
