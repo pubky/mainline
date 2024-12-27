@@ -479,7 +479,7 @@ impl Rpc {
         transaction_id: u16,
         request_specific: &RequestSpecific,
     ) {
-        if self.socket.server_mode {
+        if self.server_mode() {
             let server = &mut self.server;
 
             match server.handle_request(&self.routing_table, from, request_specific) {
@@ -748,13 +748,13 @@ impl Rpc {
         if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
             self.last_table_refresh = Instant::now();
 
-            self.populate();
-
             if !self.server_mode() && !self.firewalled() {
                 info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
 
                 self.socket.server_mode = true;
             }
+
+            self.populate();
         }
 
         if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
