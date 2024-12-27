@@ -519,19 +519,37 @@ impl Rpc {
                     }
                 }
             };
-        } else if let Some(our_adress) = self.public_address {
+        }
+
+        if let Some(our_adress) = self.public_address {
             if let SocketAddr::V4(from) = from {
-                if from == our_adress {
+                if from == our_adress
+                    && matches!(request_specific.request_type, RequestTypeSpecific::Ping)
+                {
                     self.firewalled = false;
 
-                    let new_id = Id::from_ipv4(*our_adress.ip());
+                    let ipv4 = our_adress.ip();
 
-                    info!(
-                        "Our current id {} is not valid for adrsess {}. Using new id {}",
-                        self.id(),
-                        our_adress,
-                        new_id
-                    );
+                    // Restarting our routing table with new secure Id if necessary.
+                    if !self.id().is_valid_for_ipv4(*ipv4) {
+                        let new_id = Id::from_ipv4(*ipv4);
+
+                        self.get(
+                            RequestTypeSpecific::FindNode(FindNodeRequestArguments {
+                                target: new_id,
+                            }),
+                            None,
+                        );
+
+                        self.routing_table = RoutingTable::new().with_id(new_id);
+
+                        info!(
+                            "Our current id {} is not valid for adrsess {}. Using new id {}",
+                            self.id(),
+                            our_adress,
+                            new_id
+                        );
+                    }
                 }
             }
         }
