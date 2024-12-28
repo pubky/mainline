@@ -2,6 +2,7 @@
 
 mod closest_nodes;
 mod config;
+mod info;
 mod query;
 mod socket;
 
@@ -30,6 +31,7 @@ use socket::KrpcSocket;
 pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
 pub use config::Config;
+pub use info::Info;
 pub use query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
@@ -198,6 +200,12 @@ impl Rpc {
         let std_dev = 0.281 * (self.cached_iterative_queries.len() as f64).powf(-0.529);
 
         (normal, std_dev)
+    }
+
+    /// Returns a thread safe and lightweight summary of this node's
+    /// information and statistics.
+    pub fn info(&self) -> Info {
+        Info::from(self)
     }
 
     // === Public Methods ===

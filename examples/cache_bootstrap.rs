@@ -44,7 +44,7 @@ fn main() {
 
     client.bootstrapped().unwrap();
 
-    let bootstrap = client.info().unwrap().routing_table().to_bootstrap();
+    let bootstrap = client.to_bootstrap().unwrap();
 
     let bootstrap_content = bootstrap.join("\n");
     let mut file = fs::File::create(&nodes_file).expect("Failed to save bootstrapping nodes");

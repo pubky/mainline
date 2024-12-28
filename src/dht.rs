@@ -3,7 +3,7 @@
 use std::{
     collections::HashMap,
     fmt::Formatter,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddr},
     thread,
     time::Duration,
 };
@@ -20,9 +20,9 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    rpc::{PutError, Response, Rpc},
+    rpc::{Info, PutError, Response, Rpc},
     server::Server,
-    Node, RoutingTable,
+    Node,
 };
 
 pub use crate::rpc::Config;
@@ -149,6 +149,17 @@ impl Dht {
 
         self.0
             .send(ActorMessage::Info(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv().map_err(|_| DhtWasShutdown)
+    }
+
+    /// Turn this node's routing table to a list of bootstraping nodes.   
+    pub fn to_bootstrap(&self) -> Result<Vec<String>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Vec<String>>(1);
+
+        self.0
+            .send(ActorMessage::ToBootstrap(sender))
             .map_err(|_| DhtWasShutdown)?;
 
         receiver.recv().map_err(|_| DhtWasShutdown)
@@ -377,15 +388,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             let _ = sender.send(Ok(()));
                         }
                         ActorMessage::Info(sender) => {
-                            let _ = sender.send(Info {
-                                id: *rpc.id(),
-                                local_addr: rpc.local_addr(),
-                                dht_size_estimate: rpc.dht_size_estimate(),
-                                public_address: rpc.public_address(),
-                                firewalled: rpc.firewalled(),
-                                routing_table: rpc.routing_table().to_owned_nodes(),
-                                server_mode: rpc.server_mode(),
-                            });
+                            let _ = sender.send(rpc.info());
                         }
                         ActorMessage::Put(target, request, sender) => {
                             if let Err(error) = rpc.put(request) {
@@ -402,6 +405,9 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             };
 
                             get_senders.insert(target, sender);
+                        }
+                        ActorMessage::ToBootstrap(sender) => {
+                            let _ = sender.send(rpc.routing_table().to_bootstrap());
                         }
                     }
                 }
@@ -468,6 +474,7 @@ pub(crate) enum ActorMessage {
     Get(Id, RequestTypeSpecific, ResponseSender),
     Shutdown(Sender<()>),
     Check(Sender<Result<(), std::io::Error>>),
+    ToBootstrap(Sender<Vec<String>>),
 }
 
 #[derive(Debug, Clone)]
@@ -476,87 +483,6 @@ pub enum ResponseSender {
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Bytes>),
-}
-
-/// Information and statistics about this [Dht] node.
-#[derive(Clone)]
-pub struct Info {
-    id: Id,
-    local_addr: SocketAddrV4,
-    public_address: Option<SocketAddrV4>,
-    firewalled: bool,
-    dht_size_estimate: (usize, f64),
-    routing_table: Vec<Node>,
-    server_mode: bool,
-}
-
-impl std::fmt::Debug for Info {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Info")
-            .field("id", &self.id())
-            .field("local_addr", &self.local_addr())
-            .field("public_address", &self.public_address())
-            .field("firewalled", &self.firewalled())
-            .field("dht_size_estimate", &self.dht_size_estimate)
-            .field(
-                "routing_table",
-                &format!("RoutingTable [{}] nodes", self.routing_table.len()),
-            )
-            .field("server_mode", &self.server_mode())
-            .finish()
-    }
-}
-
-impl Info {
-    /// This Node's [Id]
-    pub fn id(&self) -> &Id {
-        &self.id
-    }
-    /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn local_addr(&self) -> &SocketAddrV4 {
-        &self.local_addr
-    }
-    /// Returns the best guess for this node's Public addresss.
-    ///
-    /// If [Config::public_ip] was set, this is what will be returned
-    /// (plus the local port), otherwise it will rely on consensus from
-    /// responding nodes voting on our public IP and port.
-    pub fn public_address(&self) -> Option<SocketAddrV4> {
-        self.public_address
-    }
-    /// Returns `true` if we can't confirm that [Self::public_address] is publicly addressable.
-    ///
-    /// If this node is firewalled, it won't switch to server mode if it is in adaptive mode,
-    /// but if [Config::server_mode] was set to true, then whether or not this node is firewalled
-    /// won't matter.
-    pub fn firewalled(&self) -> bool {
-        self.firewalled
-    }
-
-    /// Returns whether or not this node is running in server mode.
-    pub fn server_mode(&self) -> bool {
-        self.server_mode
-    }
-
-    /// Returns:
-    ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
-    ///  2. Standard deviaiton as a function of the number of samples used in this estimate.
-    ///
-    /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
-    pub fn dht_size_estimate(&self) -> (usize, f64) {
-        self.dht_size_estimate
-    }
-
-    /// Returns a snapshot of the node's routing table.
-    pub fn routing_table(&self) -> RoutingTable {
-        let mut table = RoutingTable::new().with_id(self.id);
-
-        for node in &self.routing_table {
-            table.add(node.clone());
-        }
-
-        table
-    }
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
@@ -575,10 +501,8 @@ impl Testnet {
             if i == 0 {
                 let node = Dht::builder().server_mode().bootstrap(&[]).build()?;
 
-                let addr = node
-                    .info()
-                    .expect("node should not be shutdown in Testnet")
-                    .local_addr;
+                let info = node.info().expect("node should not be shutdown in Testnet");
+                let addr = info.local_addr();
 
                 bootstrap.push(format!("127.0.0.1:{}", addr.port()));
 

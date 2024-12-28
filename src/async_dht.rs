@@ -10,8 +10,8 @@ use crate::{
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
         RequestTypeSpecific,
     },
-    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, Info, ResponseSender},
-    rpc::PutError,
+    dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, ResponseSender},
+    rpc::{Info, PutError},
 };
 
 impl Dht {
@@ -35,6 +35,18 @@ impl AsyncDht {
         self.0
              .0
             .send(ActorMessage::Info(sender))
+            .map_err(|_| DhtWasShutdown)?;
+
+        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
+    }
+
+    /// Turn this node's routing table to a list of bootstraping nodes.   
+    pub async fn to_bootstrap(&self) -> Result<Vec<String>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Vec<String>>(1);
+
+        self.0
+             .0
+            .send(ActorMessage::ToBootstrap(sender))
             .map_err(|_| DhtWasShutdown)?;
 
         receiver.recv_async().await.map_err(|_| DhtWasShutdown)
