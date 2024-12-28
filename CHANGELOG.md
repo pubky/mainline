@@ -26,6 +26,7 @@ All notable changes to mainline dht will be documented in this file.
 ### Removed
 
 - Remove `bytes` dependency.
+- Remove `ipv6` optionality and commit to `ipv4`.
 
 ### Changed
 

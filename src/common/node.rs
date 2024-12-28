@@ -1,7 +1,7 @@
 //! Struct and implementation of the Node entry in the Kademlia routing table
 use std::{
     fmt::{self, Debug, Formatter},
-    net::SocketAddr,
+    net::SocketAddrV4,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -18,7 +18,7 @@ pub const TOKEN_ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 /// Node entry in Kademlia routing table
 pub struct Node {
     pub(crate) id: Id,
-    pub(crate) address: SocketAddr,
+    pub(crate) address: SocketAddrV4,
     pub(crate) token: Option<Box<[u8]>>,
     pub(crate) last_seen: Instant,
 }
@@ -35,7 +35,7 @@ impl Debug for Node {
 
 impl Node {
     /// Creates a new Node from an id and socket address.
-    pub fn new(id: Id, address: SocketAddr) -> Node {
+    pub fn new(id: Id, address: SocketAddrV4) -> Node {
         Node {
             id,
             address,
@@ -50,15 +50,15 @@ impl Node {
         &self.id
     }
 
-    pub fn address(&self) -> &SocketAddr {
-        &self.address
+    pub fn address(&self) -> SocketAddrV4 {
+        self.address
     }
 
     /// Creates a node with random Id for testing purposes.
     pub fn random() -> Node {
         Node {
             id: Id::random(),
-            address: SocketAddr::from(([0, 0, 0, 0], 0)),
+            address: SocketAddrV4::new(0.into(), 0),
             token: None,
             last_seen: Instant::now(),
         }
@@ -66,9 +66,7 @@ impl Node {
 
     /// Create a node that is unique per `i` as it has a random Id and sets IP and port to `i`
     pub fn unique(i: usize) -> Node {
-        use std::net::Ipv4Addr;
-
-        Node::random().with_address(SocketAddr::from((Ipv4Addr::from_bits(i as u32), i as u16)))
+        Node::random().with_address(SocketAddrV4::new((i as u32).into(), i as u16))
     }
 
     pub fn with_id(mut self, id: Id) -> Self {
@@ -76,13 +74,15 @@ impl Node {
         self
     }
 
-    pub fn with_address(mut self, address: SocketAddr) -> Self {
+    pub fn with_address(mut self, address: SocketAddrV4) -> Self {
         self.address = address;
+
         self
     }
 
     pub fn with_token(mut self, token: Box<[u8]>) -> Self {
         self.token = Some(token);
+
         self
     }
 
@@ -114,7 +114,7 @@ impl Node {
     ///
     /// Check [BEP0042](https://www.bittorrent.org/beps/bep_0042.html).
     pub fn is_secure(&self) -> bool {
-        self.id.is_valid_for_ip(&self.address.ip())
+        self.id.is_valid_for_ip(*self.address.ip())
     }
 
     /// Returns true if Any of the existing nodes:

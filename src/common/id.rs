@@ -115,23 +115,7 @@ impl Id {
     }
 
     /// Validate that this Id is valid with respect to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
-    pub fn is_valid_for_ip(&self, ip: &IpAddr) -> bool {
-        match ip {
-            IpAddr::V4(ipv4) => self.is_valid_for_ipv4(*ipv4),
-            IpAddr::V6(_ipv6) => {
-                // Ipv6 is not supported
-
-                false
-
-                // // For IPv6, checking the ULA range fc00::/7
-                // if (ipv6.segments()[0] & 0xFE00 == 0xFC00) {
-                //     return true;
-                // }
-            }
-        }
-    }
-
-    pub fn is_valid_for_ipv4(&self, ipv4: Ipv4Addr) -> bool {
+    pub fn is_valid_for_ip(&self, ipv4: Ipv4Addr) -> bool {
         if ipv4.is_private() {
             return true;
         }
@@ -375,7 +359,7 @@ mod test {
         fn test(ip: Ipv4Addr, hex: &str) {
             let id = Id::from_str(hex).unwrap();
 
-            assert!(id.is_valid_for_ip(&IpAddr::V4(ip)));
+            assert!(id.is_valid_for_ip(ip));
         }
     }
 }

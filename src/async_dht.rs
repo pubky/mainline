@@ -1,6 +1,6 @@
 //! AsyncDht node.
 
-use std::net::SocketAddr;
+use std::net::SocketAddrV4;
 
 use crate::{
     common::{
@@ -108,13 +108,13 @@ impl AsyncDht {
     pub fn get_peers(
         &self,
         info_hash: Id,
-    ) -> Result<flume::r#async::RecvStream<Vec<SocketAddr>>, DhtWasShutdown> {
+    ) -> Result<flume::r#async::RecvStream<Box<[SocketAddrV4]>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<Vec<SocketAddr>>();
+        let (sender, receiver) = flume::unbounded::<Box<[SocketAddrV4]>>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 

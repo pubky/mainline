@@ -5,7 +5,7 @@
 mod internal;
 
 use std::convert::TryInto;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::rc::Rc;
 
 use crate::common::{Id, Node, ID_SIZE};
@@ -21,7 +21,7 @@ pub struct Message {
 
     /// The IP address and port ("SocketAddr") of the requester as seen from the responder's point of view.
     /// This should be set only on response, but is defined at this level with the other common fields to avoid defining yet another layer on the response objects.
-    pub requester_ip: Option<SocketAddr>,
+    pub requester_ip: Option<SocketAddrV4>,
 
     pub message_type: MessageType,
 
@@ -133,7 +133,7 @@ pub struct GetPeersRequestArguments {
 pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub values: Vec<SocketAddr>,
+    pub values: Box<[SocketAddrV4]>,
     pub nodes: Option<Box<[Rc<Node>]>>,
 }
 
@@ -654,7 +654,7 @@ impl Message {
     }
 }
 
-fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr, DecodeMessageError> {
+fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddrV4, DecodeMessageError> {
     let bytes = bytes.as_ref();
     match bytes.len() {
         6 => {
@@ -666,31 +666,17 @@ fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr, DecodeMessa
 
             let port: u16 = u16::from_be_bytes(port_bytes_as_array);
 
-            Ok(SocketAddr::new(IpAddr::V4(ip), port))
+            Ok(SocketAddrV4::new(ip, port))
         }
-
         18 => Err(DecodeMessageError::Ipv6Unsupported),
-
         _ => Err(DecodeMessageError::InvalidSocketAddrEncodingLength),
     }
 }
 
-pub fn sockaddr_to_bytes(sockaddr: &SocketAddr) -> [u8; 6] {
+pub fn sockaddr_to_bytes(sockaddr: &SocketAddrV4) -> [u8; 6] {
     let mut bytes = [0u8; 6];
 
-    match sockaddr {
-        SocketAddr::V4(v4) => {
-            bytes[0..4].copy_from_slice(&v4.ip().octets());
-        }
-
-        SocketAddr::V6(_v6) => {
-            unimplemented!("ipv6 is not supported");
-            // let ip_bytes = v6.ip().octets();
-            // for item in ip_bytes {
-            //     bytes.push(item);
-            // }
-        }
-    }
+    bytes[0..4].copy_from_slice(&sockaddr.ip().octets());
 
     bytes[4..6].copy_from_slice(&sockaddr.port().to_be_bytes());
 
@@ -712,17 +698,17 @@ fn nodes4_to_bytes(nodes: &[Rc<Node>]) -> Box<[u8]> {
 
 fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Rc<Node>]>, DecodeMessageError> {
     let bytes = bytes.as_ref();
-    let node4_byte_size: usize = ID_SIZE + 6;
-    if bytes.len() % node4_byte_size != 0 {
+
+    if bytes.len() % NODE_BYTE_SIZE != 0 {
         return Err(DecodeMessageError::InvalidNodes4);
     }
 
-    let expected_num = bytes.len() / node4_byte_size;
+    let expected_num = bytes.len() / NODE_BYTE_SIZE;
     let mut to_ret = Vec::with_capacity(expected_num);
-    for i in 0..bytes.len() / node4_byte_size {
-        let i = i * node4_byte_size;
+    for i in 0..bytes.len() / NODE_BYTE_SIZE {
+        let i = i * NODE_BYTE_SIZE;
         let id = Id::from_bytes(&bytes[i..i + ID_SIZE])?;
-        let sockaddr = bytes_to_sockaddr(&bytes[i + ID_SIZE..i + node4_byte_size])?;
+        let sockaddr = bytes_to_sockaddr(&bytes[i + ID_SIZE..i + NODE_BYTE_SIZE])?;
         let node = Node::new(id, sockaddr);
         to_ret.push(node.into());
     }
@@ -730,18 +716,34 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Rc<Node>]>, DecodeMe
     Ok(to_ret.into_boxed_slice())
 }
 
-fn peers_to_bytes(peers: Vec<SocketAddr>) -> Vec<serde_bytes::ByteBuf> {
-    peers
-        .iter()
-        .map(|p| serde_bytes::ByteBuf::from(sockaddr_to_bytes(p)))
-        .collect()
+fn peers_to_bytes(peers: Box<[SocketAddrV4]>) -> Box<[u8]> {
+    let mut bytes = Vec::with_capacity(6 * peers.len());
+
+    for peer in peers {
+        bytes.extend_from_slice(&sockaddr_to_bytes(&peer));
+    }
+
+    bytes.into_boxed_slice()
 }
 
-fn bytes_to_peers<T: AsRef<[serde_bytes::ByteBuf]>>(
-    bytes: T,
-) -> Result<Vec<SocketAddr>, DecodeMessageError> {
+fn bytes_to_peers<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[SocketAddrV4]>, DecodeMessageError> {
     let bytes = bytes.as_ref();
-    bytes.iter().map(bytes_to_sockaddr).collect()
+
+    // only works because we are fully committing to ipv4 only.
+    if bytes.len() % 6 != 0 {
+        return Err(DecodeMessageError::InvalidPeers);
+    }
+
+    let expected_num = bytes.len() / 6;
+    let mut to_ret = Vec::with_capacity(expected_num);
+
+    for i in 0..bytes.len() / 6 {
+        let i = i * 6;
+        let sockaddr = bytes_to_sockaddr(&bytes[i..i + 6])?;
+        to_ret.push(sockaddr);
+    }
+
+    Ok(to_ret.into_boxed_slice())
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -755,6 +757,9 @@ pub enum DecodeMessageError {
 
     #[error("Wrong number of bytes for nodes")]
     InvalidNodes4,
+
+    #[error("Wrong number of bytes for peers (values)")]
+    InvalidPeers,
 
     #[error("wrong number of bytes for port")]
     InvalidPortEncoding,
@@ -965,7 +970,7 @@ mod tests {
                     responder_id: Id::random(),
                     token: vec![99, 100, 101, 102].into(),
                     nodes: None,
-                    values: vec!["123.123.123.123:123".parse().unwrap()],
+                    values: ["123.123.123.123:123".parse().unwrap()].into(),
                 },
             )),
         };

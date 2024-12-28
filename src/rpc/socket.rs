@@ -33,7 +33,7 @@ pub struct KrpcSocket {
 #[derive(Debug)]
 pub struct InflightRequest {
     tid: u16,
-    to: SocketAddr,
+    to: SocketAddrV4,
     sent_at: Instant,
 }
 
@@ -102,7 +102,7 @@ impl KrpcSocket {
     }
 
     /// Send a request to the given address and return the transaction_id
-    pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
+    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
         let message = self.request_message(request);
 
         self.inflight_requests.push(InflightRequest {
@@ -122,7 +122,7 @@ impl KrpcSocket {
     /// Send a response to the given address.
     pub fn response(
         &mut self,
-        address: SocketAddr,
+        address: SocketAddrV4,
         transaction_id: u16,
         response: ResponseSpecific,
     ) {
@@ -134,7 +134,7 @@ impl KrpcSocket {
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
+    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u16, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending error message");
@@ -143,7 +143,7 @@ impl KrpcSocket {
 
     /// Receives a single krpc message on the socket.
     /// On success, returns the dht message and the origin.
-    pub fn recv_from(&mut self) -> Option<(Message, SocketAddr)> {
+    pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
         // Cleanup timed-out transaction_ids.
@@ -163,7 +163,7 @@ impl KrpcSocket {
             }
         };
 
-        if let Ok((amt, from)) = self.socket.recv_from(&mut buf) {
+        if let Ok((amt, SocketAddr::V4(from))) = self.socket.recv_from(&mut buf) {
             let bytes = &buf[..amt];
 
             if from.port() == 0 {
@@ -207,7 +207,7 @@ impl KrpcSocket {
 
     // === Private Methods ===
 
-    fn is_expected_response(&mut self, message: &Message, from: &SocketAddr) -> bool {
+    fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
         // Positive or an error response or to an inflight request.
         match self
             .inflight_requests
@@ -263,7 +263,7 @@ impl KrpcSocket {
     fn response_message(
         &mut self,
         message: MessageType,
-        requester_ip: SocketAddr,
+        requester_ip: SocketAddrV4,
         request_tid: u16,
     ) -> Message {
         Message {
@@ -277,7 +277,7 @@ impl KrpcSocket {
     }
 
     /// Send a raw dht message
-    fn send(&mut self, address: SocketAddr, message: Message) -> Result<(), SendMessageError> {
+    fn send(&mut self, address: SocketAddrV4, message: Message) -> Result<(), SendMessageError> {
         trace!(?message, "Sending a message");
         self.socket.send_to(&message.to_bytes()?, address)?;
         Ok(())
@@ -297,7 +297,7 @@ pub enum SendMessageError {
 }
 
 // Same as SocketAddr::eq but ingores the ip if it is unspecified for testing reasons.
-fn compare_socket_addr(a: &SocketAddr, b: &SocketAddr) -> bool {
+fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
     if a.port() != b.port() {
         return false;
     }
@@ -419,7 +419,7 @@ mod test {
 
         server.inflight_requests.push(InflightRequest {
             tid: 8,
-            to: SocketAddr::from(([127, 0, 0, 1], client_address.port() + 1)),
+            to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
             sent_at: Instant::now(),
         });
 

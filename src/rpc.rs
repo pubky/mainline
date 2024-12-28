@@ -56,7 +56,7 @@ const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 /// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
 pub struct Rpc {
     // Options
-    bootstrap: Box<[SocketAddr]>,
+    bootstrap: Box<[SocketAddrV4]>,
 
     socket: KrpcSocket,
 
@@ -112,7 +112,16 @@ impl Rpc {
             .bootstrap
             .to_owned()
             .iter()
-            .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
+            .flat_map(|s| {
+                s.to_socket_addrs().map(|addrs| {
+                    addrs
+                        .filter_map(|addr| match addr {
+                            SocketAddr::V4(addr_v4) => Some(addr_v4),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
             .flatten()
             .collect::<Vec<_>>()
             .into_boxed_slice();
@@ -316,14 +325,14 @@ impl Rpc {
     }
 
     /// Send a request to the given address and return the transaction_id
-    pub fn request(&mut self, address: SocketAddr, request: RequestSpecific) -> u16 {
+    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
         self.socket.request(address, request)
     }
 
     /// Send a response to the given address.
     pub fn response(
         &mut self,
-        address: SocketAddr,
+        address: SocketAddrV4,
         transaction_id: u16,
         response: ResponseSpecific,
     ) {
@@ -331,7 +340,7 @@ impl Rpc {
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddr, transaction_id: u16, error: ErrorSpecific) {
+    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u16, error: ErrorSpecific) {
         self.socket.error(address, transaction_id, error)
     }
 
@@ -404,7 +413,7 @@ impl Rpc {
     pub fn get(
         &mut self,
         request: RequestTypeSpecific,
-        extra_nodes: Option<Vec<SocketAddr>>,
+        extra_nodes: Option<Box<[SocketAddrV4]>>,
     ) -> Option<Vec<Response>> {
         let target = match request {
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }) => target,
@@ -483,7 +492,7 @@ impl Rpc {
 
     fn handle_request(
         &mut self,
-        from: SocketAddr,
+        from: SocketAddrV4,
         transaction_id: u16,
         request_specific: RequestSpecific,
     ) {
@@ -532,38 +541,34 @@ impl Rpc {
         }
 
         if let Some(our_adress) = self.public_address {
-            if let SocketAddr::V4(from) = from {
-                if from == our_adress && is_ping {
-                    self.firewalled = false;
+            if from == our_adress && is_ping {
+                self.firewalled = false;
 
-                    let ipv4 = our_adress.ip();
+                let ipv4 = our_adress.ip();
 
-                    // Restarting our routing table with new secure Id if necessary.
-                    if !self.id().is_valid_for_ipv4(*ipv4) {
-                        let new_id = Id::from_ipv4(*ipv4);
+                // Restarting our routing table with new secure Id if necessary.
+                if !self.id().is_valid_for_ip(*ipv4) {
+                    let new_id = Id::from_ipv4(*ipv4);
 
-                        info!(
-                            "Our current id {} is not valid for adrsess {}. Using new id {}",
-                            self.id(),
-                            our_adress,
-                            new_id
-                        );
+                    info!(
+                        "Our current id {} is not valid for adrsess {}. Using new id {}",
+                        self.id(),
+                        our_adress,
+                        new_id
+                    );
 
-                        self.get(
-                            RequestTypeSpecific::FindNode(FindNodeRequestArguments {
-                                target: new_id,
-                            }),
-                            None,
-                        );
+                    self.get(
+                        RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: new_id }),
+                        None,
+                    );
 
-                        self.routing_table = RoutingTable::new().with_id(new_id);
-                    }
+                    self.routing_table = RoutingTable::new().with_id(new_id);
                 }
             }
         }
     }
 
-    fn handle_response(&mut self, from: SocketAddr, message: Message) -> Option<(Id, Response)> {
+    fn handle_response(&mut self, from: SocketAddrV4, message: Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
         if message.read_only {
             return None;
@@ -791,7 +796,7 @@ impl Rpc {
         );
     }
 
-    fn ping(&mut self, address: SocketAddr) {
+    fn ping(&mut self, address: SocketAddrV4) {
         self.socket.request(
             address,
             RequestSpecific {
@@ -820,7 +825,7 @@ impl Rpc {
                 );
 
                 self.firewalled = true;
-                self.ping(new_address.into());
+                self.ping(new_address);
             }
 
             self.public_address = Some(new_address)
@@ -932,7 +937,7 @@ pub struct RpcTickReport {
 
 #[derive(Debug, Clone)]
 pub enum Response {
-    Peers(Vec<SocketAddr>),
+    Peers(Box<[SocketAddrV4]>),
     Immutable(Box<[u8]>),
     Mutable(MutableItem),
 }

@@ -249,10 +249,10 @@ impl Default for KBucket {
 
 #[cfg(test)]
 mod test {
-    use std::net::Ipv4Addr;
+    use std::net::SocketAddrV4;
+    use std::rc::Rc;
     use std::str::FromStr;
     use std::time::Instant;
-    use std::{net::SocketAddr, rc::Rc};
 
     use crate::common::{Id, KBucket, Node, RoutingTable, MAX_BUCKET_SIZE_K};
 
@@ -376,7 +376,7 @@ mod test {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, SocketAddr::from((node1.address.ip(), 1)));
+            let node2 = Node::new(node1.id, SocketAddrV4::new(*node1.address.ip(), 1));
 
             bucket.add(node1.clone());
             bucket.add(Node::random());
@@ -394,12 +394,12 @@ mod test {
 
             let secure = Node {
                 id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
-                address: (Ipv4Addr::new(21, 75, 31, 124), 0).into(),
+                address: SocketAddrV4::new([21, 75, 31, 124].into(), 0),
                 token: None,
                 last_seen: Instant::now(),
             };
 
-            let unsecure = Node::new(secure.id, SocketAddr::from(([0, 0, 0, 0], 1)));
+            let unsecure = Node::new(secure.id, SocketAddrV4::new([0, 0, 0, 0].into(), 1));
 
             {
                 bucket.add(unsecure.clone());
@@ -421,7 +421,7 @@ mod test {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, SocketAddr::from(([0, 0, 0, 1], 1)));
+            let node2 = Node::new(node1.id, SocketAddrV4::new([0, 0, 0, 1].into(), 1));
 
             bucket.add(node1.clone());
             bucket.add(Node::random());

@@ -1,7 +1,7 @@
 //! Manage iterative queries and their corresponding request/response.
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::SocketAddrV4;
 use std::{collections::HashSet, rc::Rc};
 
 use tracing::{debug, error, trace, warn};
@@ -24,7 +24,7 @@ pub(crate) struct IterativeQuery {
     closest: ClosestNodes,
     responders: ClosestNodes,
     inflight_requests: Vec<u16>,
-    visited: HashSet<SocketAddr>,
+    visited: HashSet<SocketAddrV4>,
     responses: Vec<Response>,
     public_address_votes: HashMap<SocketAddrV4, u16>,
 }
@@ -96,27 +96,16 @@ impl IterativeQuery {
     }
 
     /// Add a vote for this node's address.
-    pub fn add_address_vote(&mut self, address: SocketAddr) {
-        match address {
-            SocketAddr::V4(address) => {
-                self.public_address_votes
-                    .entry(address)
-                    .and_modify(|counter| *counter += 1)
-                    .or_insert(1);
-            }
-            _ => {
-                // Ipv6 is not supported
-            }
-        }
+    pub fn add_address_vote(&mut self, address: SocketAddrV4) {
+        self.public_address_votes
+            .entry(address)
+            .and_modify(|counter| *counter += 1)
+            .or_insert(1);
     }
 
     /// Visit explicitly given addresses, and add them to the visited set.
     /// only used from the Rpc when calling bootstrapping nodes.
-    pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddr) {
-        if address.is_ipv6() {
-            return;
-        }
-
+    pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddrV4) {
         let tid = socket.request(address, self.request.clone());
         self.inflight_requests.push(tid);
 
@@ -143,7 +132,7 @@ impl IterativeQuery {
     }
 
     /// Store received response.
-    pub fn response(&mut self, from: SocketAddr, response: Response) {
+    pub fn response(&mut self, from: SocketAddrV4, response: Response) {
         let target = self.target();
 
         debug!(?target, ?response, ?from, "Query got response");

@@ -3,7 +3,7 @@
 pub mod peers;
 pub mod tokens;
 
-use std::{net::SocketAddr, num::NonZeroUsize};
+use std::{net::SocketAddrV4, num::NonZeroUsize};
 
 use lru::LruCache;
 use tracing::debug;
@@ -42,9 +42,9 @@ pub trait Server: std::fmt::Debug + Send + Sync {
     fn handle_request(
         &mut self,
         routing_table: &RoutingTable,
-        from: SocketAddr,
+        from: SocketAddrV4,
         request: RequestSpecific,
-    ) -> (MessageType, Option<Vec<SocketAddr>>);
+    ) -> (MessageType, Option<Box<[SocketAddrV4]>>);
 }
 
 #[derive(Debug)]
@@ -119,7 +119,7 @@ impl DefaultServer {
     fn handle_get_mutable(
         &mut self,
         routing_table: &RoutingTable,
-        from: SocketAddr,
+        from: SocketAddrV4,
         target: Id,
         seq: Option<i64>,
     ) -> ResponseSpecific {
@@ -160,9 +160,9 @@ impl Server for DefaultServer {
     fn handle_request(
         &mut self,
         routing_table: &RoutingTable,
-        from: SocketAddr,
+        from: SocketAddrV4,
         request: RequestSpecific,
-    ) -> (MessageType, Option<Vec<SocketAddr>>) {
+    ) -> (MessageType, Option<Box<[SocketAddrV4]>>) {
         // Lazily rotate secrets before handling a request
         if self.tokens.should_update() {
             self.tokens.rotate()
@@ -243,7 +243,7 @@ impl Server for DefaultServer {
 
                     let peer = match implied_port {
                         Some(true) => from,
-                        _ => SocketAddr::new(from.ip(), port),
+                        _ => SocketAddrV4::new(*from.ip(), port),
                     };
 
                     self.peers

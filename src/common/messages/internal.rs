@@ -212,7 +212,7 @@ pub struct DHTGetPeersResponseArguments {
 
     // values are not optional, because if they are missing this missing
     // we can just treat this as DHTNoValuesResponseArguments
-    pub values: Vec<serde_bytes::ByteBuf>,
+    pub values: Box<[u8]>,
 }
 
 // === Announce Peer ===

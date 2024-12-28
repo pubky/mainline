@@ -33,7 +33,7 @@ use histo::Histogram;
 use mainline::{Dht, Id, Node};
 use std::{
     collections::{HashMap, HashSet},
-    net::IpAddr,
+    net::Ipv4Addr,
     sync::mpsc::channel,
 };
 use tracing::Level;
@@ -46,7 +46,7 @@ fn main() {
     tracing_subscriber::fmt().with_max_level(Level::WARN).init();
 
     let target = Id::random();
-    let mut ip_hits: HashMap<IpAddr, u16> = HashMap::new();
+    let mut ip_hits: HashMap<Ipv4Addr, u16> = HashMap::new();
     let (tx_interrupted, rx_interrupted) = channel();
 
     println!("Count all IP addresses around a random target_key={target} k={K} max_distance={MAX_DISTANCE} random_boostrap={USE_RANDOM_BOOTSTRAP_NODES}.");
@@ -60,7 +60,7 @@ fn main() {
     })
     .expect("Error setting Ctrl-C handler");
 
-    let mut last_nodes: HashSet<IpAddr> = HashSet::new();
+    let mut last_nodes: HashSet<Ipv4Addr> = HashSet::new();
     let mut lookup_count = 0;
     while rx_interrupted.try_recv().is_err() {
         lookup_count += 1;
@@ -71,9 +71,9 @@ fn main() {
             .filter(|node| target.distance(node.id()) < MAX_DISTANCE)
             .collect();
         let closest_nodes: Vec<Node> = nodes.into_iter().take(K).collect();
-        let sockets: HashSet<IpAddr> = closest_nodes
+        let sockets: HashSet<Ipv4Addr> = closest_nodes
             .iter()
-            .map(|node| node.address().ip())
+            .map(|node| *node.address().ip())
             .collect();
         for socket in sockets.iter() {
             let previous = ip_hits.get(socket);
@@ -95,10 +95,9 @@ fn main() {
         let furthest_node = closest_nodes.last().unwrap();
         let furthest_distance = target.distance(furthest_node.id());
 
-        let overlap_with_last_lookup: HashSet<IpAddr> = sockets
-            .intersection(&last_nodes)
-            .map(|ip| ip.clone())
-            .collect();
+        let overlap_with_last_lookup: HashSet<Ipv4Addr> =
+            sockets.intersection(&last_nodes).map(|ip| *ip).collect();
+
         let overlap = overlap_with_last_lookup.len() as f64 / K as f64;
         last_nodes = sockets;
         println!(
@@ -117,12 +116,12 @@ fn main() {
     print_histogram(ip_hits, lookup_count);
 }
 
-fn print_histogram(hits: HashMap<IpAddr, u16>, lookup_count: usize) {
+fn print_histogram(hits: HashMap<Ipv4Addr, u16>, lookup_count: usize) {
     /*
 
     */
     let mut histogram = Histogram::with_buckets(10);
-    let percents: HashMap<IpAddr, u64> = hits
+    let percents: HashMap<Ipv4Addr, u64> = hits
         .into_iter()
         .map(|(ip, hits)| {
             let percent = (hits as f32 / lookup_count as f32) * 100 as f32;

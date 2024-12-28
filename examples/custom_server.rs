@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::SocketAddrV4;
 
 use mainline::{
     rpc::messages::MessageType,
@@ -16,9 +16,9 @@ impl Server for MyCustomServer {
     fn handle_request(
         &mut self,
         routing_table: &RoutingTable,
-        from: std::net::SocketAddr,
+        from: SocketAddrV4,
         request: mainline::rpc::messages::RequestSpecific,
-    ) -> (MessageType, Option<Vec<SocketAddr>>) {
+    ) -> (MessageType, Option<Box<[SocketAddrV4]>>) {
         info!(?request, ?from, "Got Request");
 
         // Do something ...

@@ -1,6 +1,6 @@
 //! Manage announced peers for info_hashes
 
-use std::{net::SocketAddr, num::NonZeroUsize};
+use std::{net::SocketAddrV4, num::NonZeroUsize};
 
 use rand::{thread_rng, Rng};
 
@@ -13,7 +13,7 @@ use lru::LruCache;
 ///
 /// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.
 pub struct PeersStore {
-    info_hashes: LruCache<Id, LruCache<Id, SocketAddr>>,
+    info_hashes: LruCache<Id, LruCache<Id, SocketAddrV4>>,
     max_peers: NonZeroUsize,
 }
 
@@ -25,7 +25,7 @@ impl PeersStore {
         }
     }
 
-    pub fn add_peer(&mut self, info_hash: Id, peer: (&Id, SocketAddr)) {
+    pub fn add_peer(&mut self, info_hash: Id, peer: (&Id, SocketAddrV4)) {
         if let Some(info_hash_lru) = self.info_hashes.get_mut(&info_hash) {
             info_hash_lru.put(*peer.0, peer.1);
         } else {
@@ -35,7 +35,7 @@ impl PeersStore {
         };
     }
 
-    pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddr>> {
+    pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Box<[SocketAddrV4]>> {
         if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
             let size = info_hash_lru.len();
             let target_size = 20;
@@ -48,7 +48,8 @@ impl PeersStore {
                     info_hash_lru
                         .iter()
                         .map(|n| n.1.to_owned())
-                        .collect::<Vec<_>>(),
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
                 );
             }
 
@@ -64,14 +65,14 @@ impl PeersStore {
 
                 // Randomly decide to add the item based on the current chance
                 if rng.gen_bool(current_chance) {
-                    results.push(addr.to_owned());
+                    results.push(*addr);
                     if results.len() == target_size {
                         break;
                     }
                 }
             }
 
-            return Some(results);
+            return Some(results.into_boxed_slice());
         }
 
         None
@@ -94,17 +95,17 @@ mod test {
 
         store.add_peer(
             info_hash_a,
-            (&info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0))),
+            (&info_hash_a, SocketAddrV4::new([127, 0, 1, 1].into(), 0)),
         );
         store.add_peer(
             info_hash_b,
-            (&info_hash_b, SocketAddr::from(([127, 0, 1, 1], 0))),
+            (&info_hash_b, SocketAddrV4::new([127, 0, 1, 1].into(), 0)),
         );
 
         assert_eq!(store.info_hashes.len(), 1);
         assert_eq!(
             store.get_random_peers(&info_hash_b),
-            Some(vec![SocketAddr::from(([127, 0, 1, 1], 0))])
+            Some([SocketAddrV4::new([127, 0, 1, 1].into(), 0)].into())
         );
     }
 
@@ -119,23 +120,26 @@ mod test {
 
         store.add_peer(
             info_hash_a,
-            (&info_hash_a, SocketAddr::from(([127, 0, 1, 1], 0))),
+            (&info_hash_a, SocketAddrV4::new([127, 0, 1, 1].into(), 0)),
         );
         store.add_peer(
             info_hash_a,
-            (&info_hash_b, SocketAddr::from(([127, 0, 1, 2], 0))),
+            (&info_hash_b, SocketAddrV4::new([127, 0, 1, 2].into(), 0)),
         );
         store.add_peer(
             info_hash_a,
-            (&info_hash_c, SocketAddr::from(([127, 0, 1, 3], 0))),
+            (&info_hash_c, SocketAddrV4::new([127, 0, 1, 3].into(), 0)),
         );
 
         assert_eq!(
             store.get_random_peers(&info_hash_a),
-            Some(vec![
-                SocketAddr::from(([127, 0, 1, 3], 0)),
-                SocketAddr::from(([127, 0, 1, 2], 0)),
-            ])
+            Some(
+                [
+                    SocketAddrV4::new([127, 0, 1, 3].into(), 0),
+                    SocketAddrV4::new([127, 0, 1, 2].into(), 0),
+                ]
+                .into()
+            )
         );
     }
 
@@ -151,7 +155,7 @@ mod test {
         for i in 0..200 {
             store.add_peer(
                 info_hash,
-                (&Id::random(), SocketAddr::from(([127, 0, 1, i], 0))),
+                (&Id::random(), SocketAddrV4::new([127, 0, 1, i].into(), 0)),
             )
         }
 

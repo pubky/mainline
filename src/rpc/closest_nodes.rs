@@ -129,10 +129,7 @@ impl ClosestNodes {
 }
 
 fn subnet(node: &Rc<Node>) -> u8 {
-    match node.address().ip() {
-        std::net::IpAddr::V4(ip) => ((ip.to_bits() >> 26) & 0b0011_1111) as u8,
-        _ => unimplemented!(),
-    }
+    ((node.address().ip().to_bits() >> 26) & 0b0011_1111) as u8
 }
 
 fn distance(target: &Id, node: &Node) -> u128 {
@@ -167,7 +164,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, net::Ipv4Addr, str::FromStr, time::Instant};
+    use std::{collections::BTreeMap, net::SocketAddrV4, str::FromStr, time::Instant};
 
     use super::*;
 
@@ -202,7 +199,7 @@ mod tests {
         let unsecure = Rc::new(Node::random());
         let secure = Rc::new(Node {
             id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
-            address: (Ipv4Addr::new(21, 75, 31, 124), 0).into(),
+            address: SocketAddrV4::new([21, 75, 31, 124].into(), 0),
             token: None,
             last_seen: Instant::now(),
         });

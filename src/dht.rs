@@ -3,7 +3,7 @@
 use std::{
     collections::HashMap,
     fmt::Formatter,
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, SocketAddrV4},
     thread,
     time::Duration,
 };
@@ -224,13 +224,13 @@ impl Dht {
     pub fn get_peers(
         &self,
         info_hash: Id,
-    ) -> Result<flume::IntoIter<Vec<SocketAddr>>, DhtWasShutdown> {
+    ) -> Result<flume::IntoIter<Box<[SocketAddrV4]>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<Vec<SocketAddr>>();
+        let (sender, receiver) = flume::unbounded::<Box<[SocketAddrV4]>>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
@@ -473,7 +473,7 @@ pub(crate) enum ActorMessage {
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
     ClosestNodes(Sender<Vec<Node>>),
-    Peers(Sender<Vec<SocketAddr>>),
+    Peers(Sender<Box<[SocketAddrV4]>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Box<[u8]>>),
 }

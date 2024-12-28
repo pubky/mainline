@@ -4,7 +4,7 @@ use crc::{Crc, CRC_32_ISCSI};
 use rand::{thread_rng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
-    net::SocketAddr,
+    net::SocketAddrV4,
     time::Instant,
 };
 
@@ -47,7 +47,7 @@ impl Tokens {
     }
 
     /// Validate that the token was generated within the past 10 minutes
-    pub fn validate(&mut self, address: SocketAddr, token: &[u8]) -> bool {
+    pub fn validate(&mut self, address: SocketAddrV4, token: &[u8]) -> bool {
         let prev = self.internal_generate_token(address, self.prev_secret);
         let curr = self.internal_generate_token(address, self.curr_secret);
 
@@ -64,7 +64,7 @@ impl Tokens {
         self.last_updated = Instant::now();
     }
 
-    pub fn generate_token(&mut self, address: SocketAddr) -> [u8; 4] {
+    pub fn generate_token(&mut self, address: SocketAddrV4) -> [u8; 4] {
         self.internal_generate_token(address, self.curr_secret)
     }
 
@@ -72,15 +72,12 @@ impl Tokens {
 
     fn internal_generate_token(
         &mut self,
-        address: SocketAddr,
+        address: SocketAddrV4,
         secret: [u8; SECRET_SIZE],
     ) -> [u8; TOKEN_SIZE] {
         let mut digest = CASTAGNOLI.digest();
 
-        let octets: Box<[u8]> = match address.ip() {
-            std::net::IpAddr::V4(v4) => v4.octets().into(),
-            std::net::IpAddr::V6(v6) => v6.octets().into(),
-        };
+        let octets: Box<[u8]> = address.ip().octets().into();
 
         digest.update(&octets);
         digest.update(&secret);
@@ -106,7 +103,7 @@ mod test {
     fn valid_tokens() {
         let mut tokens = Tokens::new();
 
-        let address = SocketAddr::from(([127, 0, 0, 1], 6881));
+        let address = SocketAddrV4::new([127, 0, 0, 1].into(), 6881);
         let token = tokens.generate_token(address);
 
         assert!(tokens.validate(address, &token.to_vec()))
