@@ -215,7 +215,11 @@ impl PutQuery {
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Vec<Rc<Node>>) -> Result<(), PutError> {
+    pub fn start(
+        &mut self,
+        socket: &mut KrpcSocket,
+        nodes: Box<[Rc<Node>]>,
+    ) -> Result<(), PutError> {
         // Already started.
         if !self.inflight_requests.is_empty() {
             panic!("should not call PutQuery.start() twice");

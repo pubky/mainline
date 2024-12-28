@@ -56,7 +56,7 @@ const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 /// Internal Rpc called in the Dht thread loop, useful to create your own actor setup.
 pub struct Rpc {
     // Options
-    bootstrap: Vec<SocketAddr>,
+    bootstrap: Box<[SocketAddr]>,
 
     socket: KrpcSocket,
 
@@ -114,7 +114,8 @@ impl Rpc {
             .iter()
             .flat_map(|s| s.to_socket_addrs().map(|addrs| addrs.collect::<Vec<_>>()))
             .flatten()
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
 
         Ok(Rpc {
             bootstrap,
@@ -608,7 +609,7 @@ impl Rpc {
             if let Some((responder_id, token)) = message.get_token() {
                 query.add_responding_node(
                     Node::new(responder_id, from)
-                        .with_token(token.to_vec().into_boxed_slice())
+                        .with_token(token.into())
                         .into(),
                 );
             }
@@ -800,7 +801,7 @@ impl Rpc {
         );
     }
 
-    fn handle_iterative_query(&mut self, query: &IterativeQuery) -> Vec<Rc<Node>> {
+    fn handle_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Rc<Node>]> {
         self.check_address_votes_from_iterative_query(query);
         self.cache_iterative_query(query)
     }
@@ -826,7 +827,7 @@ impl Rpc {
         }
     }
 
-    fn cache_iterative_query(&mut self, query: &IterativeQuery) -> Vec<Rc<Node>> {
+    fn cache_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Rc<Node>]> {
         if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
             // Remove least recent closest_nodes
             if let Some((
@@ -866,7 +867,8 @@ impl Rpc {
                 self.responders_based_dht_size_estimate(),
                 self.average_subnets(),
             )
-            .to_vec();
+            .to_vec()
+            .into_boxed_slice();
 
         self.cached_iterative_queries.put(
             query.target(),
@@ -903,7 +905,7 @@ impl Drop for Rpc {
 }
 
 struct CachedIterativeQuery {
-    closest_responding_nodes: Vec<Rc<Node>>,
+    closest_responding_nodes: Box<[Rc<Node>]>,
     dht_size_estimate: f64,
     responders_dht_size_estimate: f64,
     subnets: u8,

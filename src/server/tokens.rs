@@ -77,9 +77,9 @@ impl Tokens {
     ) -> [u8; TOKEN_SIZE] {
         let mut digest = CASTAGNOLI.digest();
 
-        let octets = match address.ip() {
-            std::net::IpAddr::V4(v4) => v4.octets().to_vec(),
-            std::net::IpAddr::V6(v6) => v6.octets().to_vec(),
+        let octets: Box<[u8]> = match address.ip() {
+            std::net::IpAddr::V4(v4) => v4.octets().into(),
+            std::net::IpAddr::V6(v6) => v6.octets().into(),
         };
 
         digest.update(&octets);

@@ -325,7 +325,7 @@ impl Dht {
         salt: Option<&[u8]>,
         seq: Option<i64>,
     ) -> Result<flume::IntoIter<MutableItem>, DhtWasShutdown> {
-        let salt = salt.map(|s| s.to_owned().into_boxed_slice());
+        let salt = salt.map(|s| s.to_vec().into_boxed_slice());
 
         let target = MutableItem::target_from_key(public_key, salt.as_deref());
 
