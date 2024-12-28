@@ -253,7 +253,7 @@ impl KrpcSocket {
         Message {
             transaction_id,
             message_type: MessageType::Request(message),
-            version: Some(VERSION.into()),
+            version: Some(VERSION),
             read_only: !self.server_mode,
             requester_ip: None,
         }
@@ -269,7 +269,7 @@ impl KrpcSocket {
         Message {
             transaction_id: request_tid,
             message_type: message,
-            version: Some(VERSION.into()),
+            version: Some(VERSION),
             read_only: !self.server_mode,
             // BEP0042 Only relevant in responses.
             requester_ip: Some(requester_ip),
@@ -352,11 +352,7 @@ mod test {
                 assert_eq!(from.port(), client_address.port());
                 assert_eq!(message.transaction_id, 120);
                 assert!(message.read_only, "Read-only should be true");
-                assert_eq!(
-                    message.version,
-                    Some(VERSION.to_vec()),
-                    "Version should be 'RS'"
-                );
+                assert_eq!(message.version, Some(VERSION), "Version should be 'RS'");
                 assert_eq!(message.message_type, MessageType::Request(expected_request));
                 break;
             }
@@ -393,11 +389,7 @@ mod test {
                     assert_eq!(from.port(), client_address.port());
                     assert_eq!(message.transaction_id, 8);
                     assert!(message.read_only, "Read-only should be true");
-                    assert_eq!(
-                        message.version,
-                        Some(VERSION.to_vec()),
-                        "Version should be 'RS'"
-                    );
+                    assert_eq!(message.version, Some(VERSION), "Version should be 'RS'");
                     assert_eq!(
                         message.message_type,
                         MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {

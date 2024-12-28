@@ -17,7 +17,7 @@ pub struct Message {
     pub transaction_id: u16,
 
     /// The version of the requester or responder.
-    pub version: Option<Vec<u8>>,
+    pub version: Option<[u8; 4]>,
 
     /// The IP address and port ("SocketAddr") of the requester as seen from the responder's point of view.
     /// This should be set only on response, but is defined at this level with the other common fields to avoid defining yet another layer on the response objects.
@@ -833,7 +833,7 @@ mod tests {
     fn test_ping_response() {
         let original_msg = Message {
             transaction_id: 258,
-            version: Some(vec![0xde, 0xad]),
+            version: Some([0xde, 0xad, 0, 1]),
             requester_ip: Some("99.100.101.102:1030".parse().unwrap()),
             read_only: false,
             message_type: MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
@@ -852,7 +852,7 @@ mod tests {
     fn test_find_node_request() {
         let original_msg = Message {
             transaction_id: 258,
-            version: Some(vec![0x62, 0x61, 0x72, 0x66]),
+            version: Some([0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: false,
             message_type: MessageType::Request(RequestSpecific {
@@ -874,7 +874,7 @@ mod tests {
     fn test_find_node_request_read_only() {
         let original_msg = Message {
             transaction_id: 258,
-            version: Some(vec![0x62, 0x61, 0x72, 0x66]),
+            version: Some([0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: true,
             message_type: MessageType::Request(RequestSpecific {
@@ -896,7 +896,7 @@ mod tests {
     fn test_find_node_response() {
         let original_msg = Message {
             transaction_id: 258,
-            version: Some(vec![1]),
+            version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
             message_type: MessageType::Response(ResponseSpecific::FindNode(
@@ -926,7 +926,7 @@ mod tests {
     fn test_get_peers_request() {
         let original_msg = Message {
             transaction_id: 258,
-            version: Some(vec![72, 73]),
+            version: Some([72, 73, 0, 1]),
             requester_ip: None,
             read_only: false,
             message_type: MessageType::Request(RequestSpecific {
@@ -948,7 +948,7 @@ mod tests {
     fn test_get_peers_response() {
         let original_msg = Message {
             transaction_id: 3,
-            version: Some(vec![1]),
+            version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: true,
             message_type: MessageType::Response(ResponseSpecific::NoValues(
@@ -987,7 +987,7 @@ mod tests {
     fn test_get_peers_response_peers() {
         let original_msg = Message {
             transaction_id: 3,
-            version: Some(vec![1]),
+            version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
             message_type: MessageType::Response(ResponseSpecific::GetPeers(
@@ -1035,7 +1035,7 @@ mod tests {
     fn test_get_immutable_request() {
         let original_msg = Message {
             transaction_id: 258,
-            version: Some(vec![72, 73]),
+            version: Some([72, 73, 0, 1]),
             requester_ip: None,
             read_only: false,
             message_type: MessageType::Request(RequestSpecific {
@@ -1059,7 +1059,7 @@ mod tests {
     fn test_get_immutable_response() {
         let original_msg = Message {
             transaction_id: 3,
-            version: Some(vec![1]),
+            version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
             message_type: MessageType::Response(ResponseSpecific::GetImmutable(
@@ -1083,7 +1083,7 @@ mod tests {
     fn test_put_immutable_request() {
         let original_msg = Message {
             transaction_id: 3,
-            version: Some(vec![1]),
+            version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
             message_type: MessageType::Request(RequestSpecific {
@@ -1111,7 +1111,7 @@ mod tests {
     fn test_put_mutable_request() {
         let original_msg = Message {
             transaction_id: 3,
-            version: Some(vec![1]),
+            version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
             message_type: MessageType::Request(RequestSpecific {

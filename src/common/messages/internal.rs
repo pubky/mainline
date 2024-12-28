@@ -7,7 +7,7 @@ pub struct DHTMessage {
 
     #[serde(default)]
     #[serde(rename = "v", with = "serde_bytes")]
-    pub version: Option<Vec<u8>>,
+    pub version: Option<[u8; 4]>,
 
     #[serde(flatten)]
     pub variant: DHTMessageVariant,
