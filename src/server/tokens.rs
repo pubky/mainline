@@ -47,11 +47,11 @@ impl Tokens {
     }
 
     /// Validate that the token was generated within the past 10 minutes
-    pub fn validate(&mut self, address: SocketAddr, token: &Vec<u8>) -> bool {
+    pub fn validate(&mut self, address: SocketAddr, token: &[u8]) -> bool {
         let prev = self.internal_generate_token(address, self.prev_secret);
         let curr = self.internal_generate_token(address, self.curr_secret);
 
-        token == &curr || token == &prev
+        token == curr || token == prev
     }
 
     pub fn rotate(&mut self) {

@@ -18,7 +18,6 @@ pub use crate::common::{Id, MutableItem, Node, RoutingTable};
 #[cfg(feature = "node")]
 pub use dht::{Config, Dht, Testnet};
 
-pub use bytes::Bytes;
 pub use ed25519_dalek::SigningKey;
 
 pub mod errors {

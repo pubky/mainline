@@ -8,8 +8,6 @@ use std::convert::TryInto;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::rc::Rc;
 
-use bytes::Bytes;
-
 use crate::common::{Id, Node, ID_SIZE};
 
 use super::InvalidIdSize;
@@ -114,7 +112,7 @@ pub struct GetValueRequestArguments {
     // A bit of a hack, using this to carry an optional
     // salt in the query.request field of [crate::query]
     // not really encoded, decoded or sent over the wire.
-    pub salt: Option<Bytes>,
+    pub salt: Option<Box<[u8]>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -166,9 +164,9 @@ pub struct GetMutableResponseArguments {
     pub token: Vec<u8>,
     pub nodes: Option<Vec<Rc<Node>>>,
     pub v: Vec<u8>,
-    pub k: Vec<u8>,
+    pub k: [u8; 32],
     pub seq: i64,
-    pub sig: Vec<u8>,
+    pub sig: [u8; 64],
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -193,9 +191,9 @@ pub struct PutImmutableRequestArguments {
 pub struct PutMutableRequestArguments {
     pub target: Id,
     pub v: Vec<u8>,
-    pub k: Vec<u8>,
+    pub k: [u8; 32],
     pub seq: i64,
-    pub sig: Vec<u8>,
+    pub sig: [u8; 64],
     pub salt: Option<Vec<u8>>,
     pub cas: Option<i64>,
 }
@@ -203,7 +201,7 @@ pub struct PutMutableRequestArguments {
 impl Message {
     fn into_serde_message(self) -> internal::DHTMessage {
         internal::DHTMessage {
-            transaction_id: self.transaction_id.to_be_bytes().to_vec(),
+            transaction_id: self.transaction_id.to_be_bytes(),
             version: self.version,
             ip: self
                 .requester_ip
@@ -216,21 +214,21 @@ impl Message {
                 }) => internal::DHTMessageVariant::Request(match request_type {
                     RequestTypeSpecific::Ping => internal::DHTRequestSpecific::Ping {
                         arguments: internal::DHTPingRequestArguments {
-                            id: requester_id.to_vec(),
+                            id: requester_id.into(),
                         },
                     },
                     RequestTypeSpecific::FindNode(find_node_args) => {
                         internal::DHTRequestSpecific::FindNode {
                             arguments: internal::DHTFindNodeRequestArguments {
-                                id: requester_id.to_vec(),
-                                target: find_node_args.target.to_vec(),
+                                id: requester_id.into(),
+                                target: find_node_args.target.into(),
                             },
                         }
                     }
                     RequestTypeSpecific::GetPeers(get_peers_args) => {
                         internal::DHTRequestSpecific::GetPeers {
                             arguments: internal::DHTGetPeersRequestArguments {
-                                id: requester_id.to_vec(),
+                                id: requester_id.into(),
                                 info_hash: get_peers_args.info_hash.to_vec(),
                             },
                         }
@@ -238,8 +236,8 @@ impl Message {
                     RequestTypeSpecific::GetValue(get_mutable_args) => {
                         internal::DHTRequestSpecific::GetValue {
                             arguments: internal::DHTGetValueRequestArguments {
-                                id: requester_id.to_vec(),
-                                target: get_mutable_args.target.to_vec(),
+                                id: requester_id.into(),
+                                target: get_mutable_args.target.into(),
                                 seq: get_mutable_args.seq,
                             },
                         }
@@ -251,7 +249,7 @@ impl Message {
                         PutRequestSpecific::AnnouncePeer(announce_peer_args) => {
                             internal::DHTRequestSpecific::AnnouncePeer {
                                 arguments: internal::DHTAnnouncePeerRequestArguments {
-                                    id: requester_id.to_vec(),
+                                    id: requester_id.into(),
                                     token,
 
                                     info_hash: announce_peer_args.info_hash.to_vec(),
@@ -267,10 +265,10 @@ impl Message {
                         PutRequestSpecific::PutImmutable(put_immutable_arguments) => {
                             internal::DHTRequestSpecific::PutValue {
                                 arguments: internal::DHTPutValueRequestArguments {
-                                    id: requester_id.to_vec(),
+                                    id: requester_id.into(),
                                     token,
 
-                                    target: put_immutable_arguments.target.to_vec(),
+                                    target: put_immutable_arguments.target.into(),
                                     v: put_immutable_arguments.v,
                                     k: None,
                                     seq: None,
@@ -283,12 +281,12 @@ impl Message {
                         PutRequestSpecific::PutMutable(put_mutable_arguments) => {
                             internal::DHTRequestSpecific::PutValue {
                                 arguments: internal::DHTPutValueRequestArguments {
-                                    id: requester_id.to_vec(),
+                                    id: requester_id.into(),
                                     token,
 
-                                    target: put_mutable_arguments.target.to_vec(),
+                                    target: put_mutable_arguments.target.into(),
                                     v: put_mutable_arguments.v,
-                                    k: Some(put_mutable_arguments.k.to_vec()),
+                                    k: Some(put_mutable_arguments.k),
                                     seq: Some(put_mutable_arguments.seq),
                                     sig: Some(put_mutable_arguments.sig),
                                     salt: put_mutable_arguments.salt,
@@ -302,13 +300,13 @@ impl Message {
                 MessageType::Response(res) => internal::DHTMessageVariant::Response(match res {
                     ResponseSpecific::Ping(ping_args) => internal::DHTResponseSpecific::Ping {
                         arguments: internal::DHTPingResponseArguments {
-                            id: ping_args.responder_id.to_vec(),
+                            id: ping_args.responder_id.into(),
                         },
                     },
                     ResponseSpecific::FindNode(find_node_args) => {
                         internal::DHTResponseSpecific::FindNode {
                             arguments: internal::DHTFindNodeResponseArguments {
-                                id: find_node_args.responder_id.to_vec(),
+                                id: find_node_args.responder_id.into(),
                                 nodes: nodes4_to_bytes(&find_node_args.nodes),
                             },
                         }
@@ -316,7 +314,7 @@ impl Message {
                     ResponseSpecific::GetPeers(get_peers_args) => {
                         internal::DHTResponseSpecific::GetPeers {
                             arguments: internal::DHTGetPeersResponseArguments {
-                                id: get_peers_args.responder_id.to_vec(),
+                                id: get_peers_args.responder_id.into(),
                                 token: get_peers_args.token.clone(),
                                 nodes: get_peers_args
                                     .nodes
@@ -329,7 +327,7 @@ impl Message {
                     ResponseSpecific::NoValues(no_values_arguments) => {
                         internal::DHTResponseSpecific::NoValues {
                             arguments: internal::DHTNoValuesResponseArguments {
-                                id: no_values_arguments.responder_id.to_vec(),
+                                id: no_values_arguments.responder_id.into(),
                                 token: no_values_arguments.token.clone(),
                                 nodes: no_values_arguments
                                     .nodes
@@ -341,7 +339,7 @@ impl Message {
                     ResponseSpecific::GetImmutable(get_immutable_args) => {
                         internal::DHTResponseSpecific::GetImmutable {
                             arguments: internal::DHTGetImmutableResponseArguments {
-                                id: get_immutable_args.responder_id.to_vec(),
+                                id: get_immutable_args.responder_id.into(),
                                 token: get_immutable_args.token.clone(),
                                 nodes: get_immutable_args
                                     .nodes
@@ -354,7 +352,7 @@ impl Message {
                     ResponseSpecific::GetMutable(get_mutable_args) => {
                         internal::DHTResponseSpecific::GetMutable {
                             arguments: internal::DHTGetMutableResponseArguments {
-                                id: get_mutable_args.responder_id.to_vec(),
+                                id: get_mutable_args.responder_id.into(),
                                 token: get_mutable_args.token.clone(),
                                 nodes: get_mutable_args
                                     .nodes
@@ -370,7 +368,7 @@ impl Message {
                     ResponseSpecific::NoMoreRecentValue(args) => {
                         internal::DHTResponseSpecific::NoMoreRecentValue {
                             arguments: internal::DHTNoMoreRecentValueResponseArguments {
-                                id: args.responder_id.to_vec(),
+                                id: args.responder_id.into(),
                                 token: args.token.clone(),
                                 nodes: args.nodes.as_ref().map(|nodes| nodes4_to_bytes(nodes)),
                                 seq: args.seq,
@@ -393,7 +391,7 @@ impl Message {
 
     fn from_serde_message(msg: internal::DHTMessage) -> Result<Message, DecodeMessageError> {
         Ok(Message {
-            transaction_id: transaction_id(msg.transaction_id)?,
+            transaction_id: u16::from_be_bytes(msg.transaction_id),
             version: msg.version,
             requester_ip: match msg.ip {
                 Some(ip) => Some(bytes_to_sockaddr(ip)?),
@@ -502,13 +500,13 @@ impl Message {
                         }
                         internal::DHTResponseSpecific::FindNode { arguments } => {
                             ResponseSpecific::FindNode(FindNodeResponseArguments {
-                                responder_id: Id::from_bytes(&arguments.id)?,
+                                responder_id: Id::from_bytes(arguments.id)?,
                                 nodes: bytes_to_nodes4(&arguments.nodes)?,
                             })
                         }
                         internal::DHTResponseSpecific::GetPeers { arguments } => {
                             ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                                responder_id: Id::from_bytes(&arguments.id)?,
+                                responder_id: Id::from_bytes(arguments.id)?,
                                 token: arguments.token.clone(),
                                 nodes: match arguments.nodes {
                                     Some(nodes) => Some(bytes_to_nodes4(nodes)?),
@@ -601,9 +599,7 @@ impl Message {
         self.clone().into_serde_message().to_bytes()
     }
 
-    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<Message, DecodeMessageError> {
-        let bytes = bytes.as_ref();
-
+    pub fn from_bytes(bytes: &[u8]) -> Result<Message, DecodeMessageError> {
         if bytes.len() < 15 {
             return Err(DecodeMessageError::TooShort);
         } else if bytes[0] != 100 {
@@ -680,17 +676,6 @@ impl Message {
             _ => None,
         }
     }
-}
-
-// Return the transaction Id as a u16
-fn transaction_id(bytes: Vec<u8>) -> Result<u16, DecodeMessageError> {
-    if bytes.len() == 2 {
-        return Ok(((bytes[0] as u16) << 8) | (bytes[1] as u16));
-    } else if bytes.len() == 1 {
-        return Ok(bytes[0] as u16);
-    }
-
-    Err(DecodeMessageError::InvalidTransactionId(bytes))
 }
 
 fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr, DecodeMessageError> {
@@ -795,10 +780,6 @@ pub enum DecodeMessageError {
     #[error("Wrong number of bytes for nodes")]
     InvalidNodes4,
 
-    /// Message transaction_id is not two bytes.
-    #[error("Invalid transaction_id: {0:?}")]
-    InvalidTransactionId(Vec<u8>),
-
     #[error("wrong number of bytes for port")]
     InvalidPortEncoding,
 
@@ -829,13 +810,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_transaction_id() {
-        assert_eq!(transaction_id(vec![255]).unwrap(), 255);
-        assert_eq!(transaction_id(vec![1, 2]).unwrap(), 258);
-        assert!(transaction_id(vec![]).is_err());
-    }
-
-    #[test]
     fn test_ping_request() {
         let original_msg = Message {
             transaction_id: 258,
@@ -850,7 +824,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -869,7 +843,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -891,7 +865,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -913,7 +887,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -935,7 +909,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
         assert_eq!(
@@ -965,7 +939,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -992,7 +966,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
 
         assert_eq!(parsed_msg.transaction_id, original_msg.transaction_id);
@@ -1028,7 +1002,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -1038,12 +1012,12 @@ mod tests {
         let serde_message = internal::DHTMessage {
             ip: None,
             read_only: None,
-            transaction_id: vec![1, 2],
+            transaction_id: [1, 2],
             version: None,
             variant: internal::DHTMessageVariant::Response(
                 internal::DHTResponseSpecific::NoValues {
                     arguments: internal::DHTNoValuesResponseArguments {
-                        id: Id::random().to_vec(),
+                        id: Id::random().into(),
                         token: vec![0, 1],
                         nodes: None,
                     },
@@ -1076,7 +1050,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -1100,7 +1074,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -1128,7 +1102,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }
@@ -1147,9 +1121,9 @@ mod tests {
                     put_request_type: PutRequestSpecific::PutMutable(PutMutableRequestArguments {
                         target: Id::random(),
                         v: vec![99, 100, 101, 102],
-                        k: vec![100, 101, 102, 103],
+                        k: [100; 32],
                         seq: 100,
-                        sig: vec![0, 1, 2, 3],
+                        sig: [0; 64],
                         salt: Some(vec![0, 2, 4, 8]),
                         cas: Some(100),
                     }),
@@ -1159,7 +1133,7 @@ mod tests {
 
         let serde_msg = original_msg.clone().into_serde_message();
         let bytes = serde_msg.to_bytes().unwrap();
-        let parsed_serde_msg = internal::DHTMessage::from_bytes(bytes).unwrap();
+        let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
     }

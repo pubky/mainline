@@ -1,6 +1,5 @@
 //! AsyncDht node.
 
-use bytes::Bytes;
 use std::net::SocketAddr;
 
 use crate::{
@@ -164,8 +163,8 @@ impl AsyncDht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub async fn get_immutable(&self, target: Id) -> Result<Option<Bytes>, DhtWasShutdown> {
-        let (sender, receiver) = flume::unbounded::<Bytes>();
+    pub async fn get_immutable(&self, target: Id) -> Result<Option<Box<[u8]>>, DhtWasShutdown> {
+        let (sender, receiver) = flume::unbounded::<Box<[u8]>>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
             target,
@@ -186,14 +185,14 @@ impl AsyncDht {
     }
 
     /// Put an immutable data to the DHT.
-    pub async fn put_immutable(&self, value: Bytes) -> Result<Id, DhtPutError> {
-        let target: Id = hash_immutable(&value).into();
+    pub async fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
+        let target: Id = hash_immutable(value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
             target,
-            v: value.clone().into(),
+            v: value.to_vec(),
         });
 
         self.0
@@ -213,14 +212,18 @@ impl AsyncDht {
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
-        salt: Option<Bytes>,
+        salt: Option<&[u8]>,
         seq: Option<i64>,
     ) -> Result<flume::r#async::RecvStream<MutableItem>, DhtWasShutdown> {
-        let target = MutableItem::target_from_key(public_key, &salt);
+        let target = MutableItem::target_from_key(public_key, salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
+        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+            target,
+            seq,
+            salt: salt.map(|s| s.to_vec().into_boxed_slice()),
+        });
 
         self.0
              .0
@@ -240,12 +243,12 @@ impl AsyncDht {
 
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
             target: *item.target(),
-            v: item.value().clone().into(),
-            k: item.key().to_vec(),
-            seq: *item.seq(),
-            sig: item.signature().to_vec(),
-            salt: item.salt().clone().map(|s| s.to_vec()),
-            cas: *item.cas(),
+            v: item.value().to_vec(),
+            k: *item.key(),
+            seq: item.seq(),
+            sig: *item.signature(),
+            salt: item.salt().map(|s| s.to_vec()),
+            cas: item.cas(),
         });
 
         self.0
@@ -338,14 +341,14 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let value: Bytes = "Hello World!".into();
+            let value = b"Hello World!";
             let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-            let target = a.put_immutable(value.clone()).await.unwrap();
+            let target = a.put_immutable(value).await.unwrap();
             assert_eq!(target, expected_target);
 
             let response = b.get_immutable(target).await.unwrap();
-            assert_eq!(response, Some(value));
+            assert_eq!(response, Some(value.to_vec().into_boxed_slice()));
         }
 
         futures::executor::block_on(test());
@@ -373,7 +376,7 @@ mod test {
             ]);
 
             let seq = 1000;
-            let value: Bytes = "Hello World!".into();
+            let value = b"Hello World!";
 
             let item = MutableItem::new(signer.clone(), value, seq, None);
 
@@ -414,7 +417,7 @@ mod test {
             ]);
 
             let seq = 1000;
-            let value: Bytes = "Hello World!".into();
+            let value = b"Hello World!";
 
             let item = MutableItem::new(signer.clone(), value, seq, None);
 
@@ -443,8 +446,8 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let first = a.put_immutable(vec![1, 2, 3].into());
-            let second = a.put_immutable(vec![1, 2, 3].into());
+            let first = a.put_immutable(&[1, 2, 3]);
+            let second = a.put_immutable(&[1, 2, 3]);
 
             assert_eq!(first.await.unwrap(), second.await.unwrap());
         }

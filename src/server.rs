@@ -5,7 +5,6 @@ pub mod tokens;
 
 use std::{net::SocketAddr, num::NonZeroUsize};
 
-use bytes::Bytes;
 use lru::LruCache;
 use tracing::debug;
 
@@ -44,7 +43,7 @@ pub trait Server: std::fmt::Debug + Send + Sync {
         &mut self,
         routing_table: &RoutingTable,
         from: SocketAddr,
-        request: &RequestSpecific,
+        request: RequestSpecific,
     ) -> (MessageType, Option<Vec<SocketAddr>>);
 }
 
@@ -60,7 +59,7 @@ pub struct DefaultServer {
     /// Peers store
     pub peers: PeersStore,
     /// Immutable values store
-    pub immutable_values: LruCache<Id, Bytes>,
+    pub immutable_values: LruCache<Id, Box<[u8]>>,
     /// Mutable values store
     pub mutable_values: LruCache<Id, MutableItem>,
 }
@@ -121,12 +120,12 @@ impl DefaultServer {
         &mut self,
         routing_table: &RoutingTable,
         from: SocketAddr,
-        target: &Id,
-        seq: &Option<i64>,
+        target: Id,
+        seq: Option<i64>,
     ) -> ResponseSpecific {
-        match self.mutable_values.get(target) {
+        match self.mutable_values.get(&target) {
             Some(item) => {
-                let no_more_recent_values = seq.map(|request_seq| item.seq() <= &request_seq);
+                let no_more_recent_values = seq.map(|request_seq| item.seq() <= request_seq);
 
                 match no_more_recent_values {
                     Some(true) => {
@@ -134,7 +133,7 @@ impl DefaultServer {
                             responder_id: *routing_table.id(),
                             token: self.tokens.generate_token(from).into(),
                             nodes: Some(routing_table.closest(target)),
-                            seq: *item.seq(),
+                            seq: item.seq(),
                         })
                     }
                     _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
@@ -142,9 +141,9 @@ impl DefaultServer {
                         token: self.tokens.generate_token(from).into(),
                         nodes: Some(routing_table.closest(target)),
                         v: item.value().to_vec(),
-                        k: item.key().to_vec(),
-                        seq: *item.seq(),
-                        sig: item.signature().to_vec(),
+                        k: *item.key(),
+                        seq: item.seq(),
+                        sig: *item.signature(),
                     }),
                 }
             }
@@ -162,7 +161,7 @@ impl Server for DefaultServer {
         &mut self,
         routing_table: &RoutingTable,
         from: SocketAddr,
-        request: &RequestSpecific,
+        request: RequestSpecific,
     ) -> (MessageType, Option<Vec<SocketAddr>>) {
         // Lazily rotate secrets before handling a request
         if self.tokens.should_update() {
@@ -171,7 +170,7 @@ impl Server for DefaultServer {
 
         let requester_id = request.requester_id;
 
-        let message = match &request.request_type {
+        let message = match request.request_type {
             RequestTypeSpecific::Ping => {
                 MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                     responder_id: *routing_table.id(),
@@ -184,7 +183,7 @@ impl Server for DefaultServer {
                 }))
             }
             RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
-                MessageType::Response(match self.peers.get_random_peers(info_hash) {
+                MessageType::Response(match self.peers.get_random_peers(&info_hash) {
                     Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
                         responder_id: *routing_table.id(),
                         token: self.tokens.generate_token(from).into(),
@@ -201,7 +200,7 @@ impl Server for DefaultServer {
             RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, .. }) => {
                 if seq.is_some() {
                     MessageType::Response(self.handle_get_mutable(routing_table, from, target, seq))
-                } else if let Some(v) = self.immutable_values.get(target) {
+                } else if let Some(v) = self.immutable_values.get(&target) {
                     MessageType::Response(ResponseSpecific::GetImmutable(
                         GetImmutableResponseArguments {
                             responder_id: *routing_table.id(),
@@ -224,12 +223,11 @@ impl Server for DefaultServer {
                     implied_port,
                     ..
                 }) => {
-                    if !self.tokens.validate(from, token) {
+                    if !self.tokens.validate(from, &token) {
                         debug!(
                             ?info_hash,
                             ?requester_id,
                             ?from,
-                            ?token,
                             request_type = "announce_peer",
                             "Invalid token"
                         );
@@ -245,11 +243,11 @@ impl Server for DefaultServer {
 
                     let peer = match implied_port {
                         Some(true) => from,
-                        _ => SocketAddr::new(from.ip(), *port),
+                        _ => SocketAddr::new(from.ip(), port),
                     };
 
                     self.peers
-                        .add_peer(*info_hash, (&request.requester_id, peer));
+                        .add_peer(info_hash, (&request.requester_id, peer));
 
                     MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                         responder_id: *routing_table.id(),
@@ -260,12 +258,11 @@ impl Server for DefaultServer {
                     target,
                     ..
                 }) => {
-                    if !self.tokens.validate(from, token) {
+                    if !self.tokens.validate(from, &token) {
                         debug!(
                             ?target,
                             ?requester_id,
                             ?from,
-                            ?token,
                             request_type = "put_immutable",
                             "Invalid token"
                         );
@@ -288,7 +285,7 @@ impl Server for DefaultServer {
                             None,
                         );
                     }
-                    if !validate_immutable(v, target) {
+                    if !validate_immutable(&v, target) {
                         debug!(?target, ?requester_id, ?from, v = ?v, "Target doesn't match the sha1 hash of v field.");
                         return (
                             MessageType::Error(ErrorSpecific {
@@ -300,7 +297,7 @@ impl Server for DefaultServer {
                         );
                     }
 
-                    self.immutable_values.put(*target, v.to_owned().into());
+                    self.immutable_values.put(target, v.to_owned().into());
 
                     MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                         responder_id: *routing_table.id(),
@@ -316,12 +313,11 @@ impl Server for DefaultServer {
                     cas,
                     ..
                 }) => {
-                    if !self.tokens.validate(from, token) {
+                    if !self.tokens.validate(from, &token) {
                         debug!(
                             ?target,
                             ?requester_id,
                             ?from,
-                            ?token,
                             request_type = "put_mutable",
                             "Invalid token"
                         );
@@ -342,7 +338,7 @@ impl Server for DefaultServer {
                             None,
                         );
                     }
-                    if let Some(salt) = salt {
+                    if let Some(ref salt) = salt {
                         if salt.len() > 64 {
                             return (
                                 MessageType::Error(ErrorSpecific {
@@ -353,7 +349,7 @@ impl Server for DefaultServer {
                             );
                         }
                     }
-                    if let Some(previous) = self.mutable_values.get(target) {
+                    if let Some(previous) = self.mutable_values.get(&target) {
                         if let Some(cas) = cas {
                             if previous.seq() != cas {
                                 debug!(
@@ -394,15 +390,15 @@ impl Server for DefaultServer {
 
                     match MutableItem::from_dht_message(
                         target,
-                        k,
+                        &k,
                         v.to_owned().into(),
                         seq,
-                        sig,
-                        salt.to_owned().map(|v| v.into()),
+                        &sig,
+                        salt.as_deref(),
                         cas,
                     ) {
                         Ok(item) => {
-                            self.mutable_values.put(*target, item);
+                            self.mutable_values.put(target, item);
 
                             MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                                 responder_id: *routing_table.id(),

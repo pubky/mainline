@@ -17,7 +17,7 @@ impl Server for MyCustomServer {
         &mut self,
         routing_table: &RoutingTable,
         from: std::net::SocketAddr,
-        request: &mainline::rpc::messages::RequestSpecific,
+        request: mainline::rpc::messages::RequestSpecific,
     ) -> (MessageType, Option<Vec<SocketAddr>>) {
         info!(?request, ?from, "Got Request");
 

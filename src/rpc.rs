@@ -12,7 +12,6 @@ use std::num::NonZeroUsize;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
 use lru::LruCache;
 use tracing::{debug, error, info};
 
@@ -298,13 +297,13 @@ impl Rpc {
         let query_response =
             self.socket
                 .recv_from()
-                .and_then(|(message, from)| match &message.message_type {
+                .and_then(|(message, from)| match message.message_type {
                     MessageType::Request(request_specific) => {
                         self.handle_request(from, message.transaction_id, request_specific);
 
                         None
                     }
-                    _ => self.handle_response(from, &message),
+                    _ => self.handle_response(from, message),
                 });
 
         RpcTickReport {
@@ -438,7 +437,7 @@ impl Rpc {
         // bootstrapping nodes if the closest nodes are not enough.
 
         let routing_table_closest = self.routing_table.closest_secure(
-            &target,
+            target,
             self.responders_based_dht_size_estimate(),
             self.average_subnets(),
         );
@@ -485,8 +484,10 @@ impl Rpc {
         &mut self,
         from: SocketAddr,
         transaction_id: u16,
-        request_specific: &RequestSpecific,
+        request_specific: RequestSpecific,
     ) {
+        let is_ping = matches!(request_specific.request_type, RequestTypeSpecific::Ping);
+
         if self.server_mode() {
             let server = &mut self.server;
 
@@ -531,9 +532,7 @@ impl Rpc {
 
         if let Some(our_adress) = self.public_address {
             if let SocketAddr::V4(from) = from {
-                if from == our_adress
-                    && matches!(request_specific.request_type, RequestTypeSpecific::Ping)
-                {
+                if from == our_adress && is_ping {
                     self.firewalled = false;
 
                     let ipv4 = our_adress.ip();
@@ -563,7 +562,7 @@ impl Rpc {
         }
     }
 
-    fn handle_response(&mut self, from: SocketAddr, message: &Message) -> Option<(Id, Response)> {
+    fn handle_response(&mut self, from: SocketAddr, message: Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
         if message.read_only {
             return None;
@@ -575,12 +574,12 @@ impl Rpc {
             .values_mut()
             .find(|query| query.inflight(message.transaction_id))
         {
-            match &message.message_type {
+            match message.message_type {
                 MessageType::Response(ResponseSpecific::Ping(_)) => {
                     // Mark storage at that node as a success.
                     query.success();
                 }
-                MessageType::Error(error) => query.error(error.clone()),
+                MessageType::Error(error) => query.error(error),
                 _ => {}
             };
 
@@ -588,6 +587,7 @@ impl Rpc {
         }
 
         let mut should_add_node = false;
+        let author_id = message.get_author_id();
 
         // Get corresponing query for message.transaction_id
         if let Some(query) = self
@@ -618,12 +618,12 @@ impl Rpc {
 
             let target = query.target();
 
-            match &message.message_type {
+            match message.message_type {
                 MessageType::Response(ResponseSpecific::GetPeers(GetPeersResponseArguments {
                     values,
                     ..
                 })) => {
-                    let response = Response::Peers(values.to_owned());
+                    let response = Response::Peers(values);
                     query.response(from, response.clone());
 
                     return Some((target, response));
@@ -633,8 +633,8 @@ impl Rpc {
                         v, responder_id, ..
                     },
                 )) => {
-                    if validate_immutable(v, &query.target()) {
-                        let response = Response::Immutable(v.to_owned().into());
+                    if validate_immutable(&v, query.target()) {
+                        let response = Response::Immutable(v.into());
                         query.response(from, response.clone());
 
                         return Some((target, response));
@@ -659,32 +659,31 @@ impl Rpc {
                     };
                     let target = query.target();
 
-                    if let Ok(item) = MutableItem::from_dht_message(
-                        &query.target(),
-                        k,
-                        v.to_owned().into(),
+                    match MutableItem::from_dht_message(
+                        query.target(),
+                        &k,
+                        v.into(),
                         seq,
-                        sig,
-                        salt.to_owned(),
-                        &None,
+                        &sig,
+                        salt.as_deref(),
+                        None,
                     ) {
-                        let response = Response::Mutable(item);
-                        query.response(from, response.clone());
+                        Ok(item) => {
+                            let response = Response::Mutable(item);
+                            query.response(from, response.clone());
 
-                        return Some((target, response));
+                            return Some((target, response));
+                        }
+                        Err(error) => {
+                            debug!(
+                                ?error,
+                                ?from,
+                                ?responder_id,
+                                from_version = ?message.version,
+                                "Invalid mutable record"
+                            );
+                        }
                     }
-
-                    debug!(
-                        ?v,
-                        ?seq,
-                        ?sig,
-                        ?salt,
-                        ?target,
-                        ?from,
-                        ?responder_id,
-                        from_version = ?message.version,
-                        "Invalid mutable record"
-                    );
                 }
                 MessageType::Response(ResponseSpecific::NoMoreRecentValue(
                     NoMoreRecentValueResponseArguments {
@@ -721,7 +720,7 @@ impl Rpc {
                     );
                 }
                 MessageType::Error(error) => {
-                    debug!(?error, ?message, from_version = ?message.version, "Get query got error response");
+                    debug!(?error, from_version = ?message.version, "Get query got error response");
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()
@@ -734,16 +733,13 @@ impl Rpc {
 
         if should_add_node {
             // Add a node to our routing table on any expected incoming response.
-            self.add_node(message, from);
+
+            if let Some(id) = author_id {
+                self.routing_table.add(Node::new(id, from));
+            }
         }
 
         None
-    }
-
-    fn add_node(&mut self, message: &Message, from: SocketAddr) {
-        if let Some(id) = message.get_author_id() {
-            self.routing_table.add(Node::new(id, from));
-        }
     }
 
     fn periodic_node_maintainance(&mut self) {
@@ -770,7 +766,7 @@ impl Rpc {
 
             for node in self.routing_table.to_vec() {
                 if node.is_stale() {
-                    self.routing_table.remove(&node.id);
+                    self.routing_table.remove(node.id);
                 } else if node.should_ping() {
                     self.ping(node.address);
                 }
@@ -927,6 +923,6 @@ pub struct RpcTickReport {
 #[derive(Debug, Clone)]
 pub enum Response {
     Peers(Vec<SocketAddr>),
-    Immutable(Bytes),
+    Immutable(Box<[u8]>),
     Mutable(MutableItem),
 }

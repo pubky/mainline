@@ -68,8 +68,8 @@ impl RoutingTable {
         bucket.add(node)
     }
 
-    pub fn remove(&mut self, node_id: &Id) {
-        let distance = self.id.distance(node_id);
+    pub fn remove(&mut self, node_id: Id) {
+        let distance = self.id.distance(&node_id);
 
         if let Some(bucket) = self.buckets.get_mut(&distance) {
             bucket.remove(node_id)
@@ -78,8 +78,8 @@ impl RoutingTable {
 
     /// Return the closest nodes to the target while prioritizing secure nodes,
     /// as defined in [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
-    pub fn closest(&self, target: &Id) -> Vec<Rc<Node>> {
-        let mut closest = ClosestNodes::new(*target);
+    pub fn closest(&self, target: Id) -> Vec<Rc<Node>> {
+        let mut closest = ClosestNodes::new(target);
 
         for bucket in self.buckets.values() {
             for node in &bucket.nodes {
@@ -93,11 +93,11 @@ impl RoutingTable {
     /// Secure version of [Self::closest] that tries to circumvent sybil attacks.
     pub fn closest_secure(
         &self,
-        target: &Id,
+        target: Id,
         dht_size_estimate: usize,
         subnets: usize,
     ) -> Vec<Rc<Node>> {
-        let mut closest = ClosestNodes::new(*target);
+        let mut closest = ClosestNodes::new(target);
 
         for node in self.to_vec() {
             closest.add(node);
@@ -223,8 +223,8 @@ impl KBucket {
         }
     }
 
-    pub fn remove(&mut self, node_id: &Id) {
-        self.nodes.retain(|node| node.id != *node_id);
+    pub fn remove(&mut self, node_id: Id) {
+        self.nodes.retain(|node| node.id != node_id);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -309,7 +309,7 @@ mod test {
         table.add(node.clone());
         assert!(table.contains(&node.id));
 
-        table.remove(&node.id);
+        table.remove(node.id);
         assert!(!table.contains(&node.id));
     }
 
@@ -586,7 +586,7 @@ mod test {
             .collect();
 
             let target = local_id;
-            let closest = table.closest(&target);
+            let closest = table.closest(target);
 
             let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
             closest_ids.sort();
@@ -622,7 +622,7 @@ mod test {
             .collect();
 
             let target = Id::from_str("d1406a3d3a8354d566f21dba8bd06c537cde2a20").unwrap();
-            let closest = table.closest(&target);
+            let closest = table.closest(target);
 
             let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
             closest_ids.sort();

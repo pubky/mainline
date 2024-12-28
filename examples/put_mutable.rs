@@ -39,7 +39,7 @@ fn main() {
         .expect("time drift")
         .as_micros() as i64;
 
-    let item = MutableItem::new(signer, cli.value.as_bytes().to_owned().into(), seq, None);
+    let item = MutableItem::new(signer, cli.value.as_bytes(), seq, None);
 
     println!("\n=== COLD QUERY ===");
     put(&dht, &item);

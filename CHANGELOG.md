@@ -23,6 +23,10 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Id::from_ipv4()`.
 - Add `Id::is_valid_for_ipv4`.
 
+### Removed
+
+- Remove `bytes` dependency.
+
 ### Changed
 
 - `Dht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
@@ -36,6 +40,9 @@ All notable changes to mainline dht will be documented in this file.
 - `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
   and `RpcTickReport::qurey_response` are added.
 - `Info::local_addr()` is infallible.
+- `MutableItem::seq()` returns `i64` instead of a refernece.
+- `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes` 
+- `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes` 
 
 ### Removed
 

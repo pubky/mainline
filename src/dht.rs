@@ -8,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
 use flume::{Receiver, Sender};
 
 use tracing::info;
@@ -277,8 +276,8 @@ impl Dht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub fn get_immutable(&self, target: Id) -> Result<Option<Bytes>, DhtWasShutdown> {
-        let (sender, receiver) = flume::unbounded::<Bytes>();
+    pub fn get_immutable(&self, target: Id) -> Result<Option<Box<[u8]>>, DhtWasShutdown> {
+        let (sender, receiver) = flume::unbounded::<Box<[u8]>>();
 
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
             target,
@@ -298,14 +297,14 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Bytes) -> Result<Id, DhtPutError> {
-        let target: Id = hash_immutable(&value).into();
+    pub fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
+        let target: Id = hash_immutable(value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
             target,
-            v: value.clone().into(),
+            v: value.to_vec(),
         });
 
         self.0
@@ -323,10 +322,12 @@ impl Dht {
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
-        salt: Option<Bytes>,
+        salt: Option<&[u8]>,
         seq: Option<i64>,
     ) -> Result<flume::IntoIter<MutableItem>, DhtWasShutdown> {
-        let target = MutableItem::target_from_key(public_key, &salt);
+        let salt = salt.map(|s| s.to_owned().into_boxed_slice());
+
+        let target = MutableItem::target_from_key(public_key, salt.as_deref());
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
@@ -349,12 +350,12 @@ impl Dht {
 
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
             target: *item.target(),
-            v: item.value().clone().into(),
-            k: item.key().to_vec(),
-            seq: *item.seq(),
-            sig: item.signature().to_vec(),
-            salt: item.salt().clone().map(|s| s.to_vec()),
-            cas: *item.cas(),
+            v: item.value().to_vec(),
+            k: *item.key(),
+            seq: item.seq(),
+            sig: *item.signature(),
+            salt: item.salt().map(|s| s.to_vec()),
+            cas: item.cas(),
         });
 
         self.0
@@ -482,7 +483,7 @@ pub enum ResponseSender {
     ClosestNodes(Sender<Vec<Node>>),
     Peers(Sender<Vec<SocketAddr>>),
     Mutable(Sender<MutableItem>),
-    Immutable(Sender<Bytes>),
+    Immutable(Sender<Box<[u8]>>),
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
@@ -606,15 +607,15 @@ mod test {
             .build()
             .unwrap();
 
-        let value: Bytes = "Hello World!".into();
+        let value = b"Hello World!";
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        let target = a.put_immutable(value.clone()).unwrap();
+        let target = a.put_immutable(value).unwrap();
         assert_eq!(target, expected_target);
 
         let response = b.get_immutable(target).unwrap().unwrap();
 
-        assert_eq!(response, value);
+        assert_eq!(response, value.to_vec().into_boxed_slice());
     }
 
     #[test]
@@ -650,7 +651,7 @@ mod test {
         ]);
 
         let seq = 1000;
-        let value: Bytes = "Hello World!".into();
+        let value = b"Hello World!";
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
@@ -684,7 +685,7 @@ mod test {
         ]);
 
         let seq = 1000;
-        let value: Bytes = "Hello World!".into();
+        let value = b"Hello World!";
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
@@ -707,8 +708,8 @@ mod test {
             .build()
             .unwrap();
 
-        let id = a.put_immutable(vec![1, 2, 3].into()).unwrap();
+        let id = a.put_immutable(&[1, 2, 3]).unwrap();
 
-        assert_eq!(a.put_immutable(vec![1, 2, 3].into()).unwrap(), id);
+        assert_eq!(a.put_immutable(&[1, 2, 3]).unwrap(), id);
     }
 }
