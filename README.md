@@ -57,7 +57,9 @@ However, that limit/block will only apply _after_ parsing incoming messages, and
 ### Adaptive mode
 
 The default Adaptive mode will start the node in client mode, and after 15 minutes of running with a publicly accessible address,
-it will switch to server mode. If you want to explicitly start in Server mode, because you know you are not running behind firewall,
+it will switch to server mode. This way nodes that can serve as routing nodes (accessible and less likely to churn), serve as such.
+
+If you want to explicitly start in Server mode, because you know you are not running behind firewall,
 you can call `Dht::builder().server_mode().build()`, and you can optionally add your known public ip so the node doesn't have to depend on,
 votes from responding nodes: `Dht::builder().server_mode().public_ip().build()`.
 
