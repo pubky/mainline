@@ -168,7 +168,7 @@ pub struct DHTFindNodeResponseArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub nodes: Vec<u8>,
+    pub nodes: Box<[u8]>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -181,7 +181,7 @@ pub struct DHTNoValuesResponseArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 }
 
 // === Get Peers ===
@@ -205,7 +205,7 @@ pub struct DHTGetPeersResponseArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     // values are not optional, because if they are missing this missing
     // we can just treat this as DHTNoValuesResponseArguments
@@ -255,7 +255,7 @@ pub struct DHTGetImmutableResponseArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     #[serde(with = "serde_bytes")]
     pub v: Box<[u8]>,
@@ -271,7 +271,7 @@ pub struct DHTNoMoreRecentValueResponseArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     pub seq: i64,
 }
@@ -286,7 +286,7 @@ pub struct DHTGetMutableResponseArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     #[serde(with = "serde_bytes")]
     pub v: Box<[u8]>,

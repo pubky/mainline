@@ -100,7 +100,7 @@ pub struct FindNodeRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FindNodeResponseArguments {
     pub responder_id: Id,
-    pub nodes: Vec<Rc<Node>>,
+    pub nodes: Box<[Rc<Node>]>,
 }
 
 // Get anything
@@ -119,7 +119,7 @@ pub struct GetValueRequestArguments {
 pub struct NoValuesResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Vec<Rc<Node>>>,
+    pub nodes: Option<Box<[Rc<Node>]>>,
 }
 
 // === Get Peers ===
@@ -134,7 +134,7 @@ pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
     pub values: Vec<SocketAddr>,
-    pub nodes: Option<Vec<Rc<Node>>>,
+    pub nodes: Option<Box<[Rc<Node>]>>,
 }
 
 // === Announce Peer ===
@@ -152,7 +152,7 @@ pub struct AnnouncePeerRequestArguments {
 pub struct GetImmutableResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Vec<Rc<Node>>>,
+    pub nodes: Option<Box<[Rc<Node>]>>,
     pub v: Box<[u8]>,
 }
 
@@ -162,7 +162,7 @@ pub struct GetImmutableResponseArguments {
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Vec<Rc<Node>>>,
+    pub nodes: Option<Box<[Rc<Node>]>>,
     pub v: Box<[u8]>,
     pub k: [u8; 32],
     pub seq: i64,
@@ -173,7 +173,7 @@ pub struct GetMutableResponseArguments {
 pub struct NoMoreRecentValueResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Vec<Rc<Node>>>,
+    pub nodes: Option<Box<[Rc<Node>]>>,
     pub seq: i64,
 }
 
@@ -205,7 +205,7 @@ impl Message {
             version: self.version,
             ip: self
                 .requester_ip
-                .map(|sockaddr| sockaddr_to_bytes(&sockaddr)),
+                .map(|sockaddr| sockaddr_to_bytes(&sockaddr).to_vec()),
             read_only: if self.read_only { Some(1) } else { Some(0) },
             variant: match self.message_type {
                 MessageType::Request(RequestSpecific {
@@ -637,16 +637,16 @@ impl Message {
     }
 
     /// If the response contains a closer nodes to the target, return that!
-    pub fn get_closer_nodes(&self) -> Option<&Vec<Rc<Node>>> {
+    pub fn get_closer_nodes(&self) -> Option<&[Rc<Node>]> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(_) => None,
                 ResponseSpecific::FindNode(arguments) => Some(&arguments.nodes),
-                ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_ref(),
-                ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_ref(),
-                ResponseSpecific::GetImmutable(arguments) => arguments.nodes.as_ref(),
-                ResponseSpecific::NoValues(arguments) => arguments.nodes.as_ref(),
-                ResponseSpecific::NoMoreRecentValue(arguments) => arguments.nodes.as_ref(),
+                ResponseSpecific::GetPeers(arguments) => arguments.nodes.as_deref(),
+                ResponseSpecific::GetMutable(arguments) => arguments.nodes.as_deref(),
+                ResponseSpecific::GetImmutable(arguments) => arguments.nodes.as_deref(),
+                ResponseSpecific::NoValues(arguments) => arguments.nodes.as_deref(),
+                ResponseSpecific::NoMoreRecentValue(arguments) => arguments.nodes.as_deref(),
             },
             _ => None,
         }
@@ -699,42 +699,42 @@ fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddr, DecodeMessa
     }
 }
 
-pub fn sockaddr_to_bytes(sockaddr: &SocketAddr) -> Vec<u8> {
-    let mut bytes = Vec::new();
+pub fn sockaddr_to_bytes(sockaddr: &SocketAddr) -> [u8; 6] {
+    let mut bytes = [0u8; 6];
 
     match sockaddr {
         SocketAddr::V4(v4) => {
-            let ip_bytes = v4.ip().octets();
-            for item in ip_bytes {
-                bytes.push(item);
-            }
+            bytes[0..4].copy_from_slice(&v4.ip().octets());
         }
 
-        SocketAddr::V6(v6) => {
-            let ip_bytes = v6.ip().octets();
-            for item in ip_bytes {
-                bytes.push(item);
-            }
+        SocketAddr::V6(_v6) => {
+            unimplemented!("ipv6 is not supported");
+            // let ip_bytes = v6.ip().octets();
+            // for item in ip_bytes {
+            //     bytes.push(item);
+            // }
         }
     }
 
-    let port_bytes = sockaddr.port().to_be_bytes();
-    bytes.extend(port_bytes);
+    bytes[4..6].copy_from_slice(&sockaddr.port().to_be_bytes());
 
     bytes
 }
 
-fn nodes4_to_bytes(nodes: &[Rc<Node>]) -> Vec<u8> {
-    let node4_byte_size: usize = ID_SIZE + 6;
-    let mut vec = Vec::with_capacity(node4_byte_size * nodes.len());
+const NODE_BYTE_SIZE: usize = ID_SIZE + 6;
+
+fn nodes4_to_bytes(nodes: &[Rc<Node>]) -> Box<[u8]> {
+    let mut bytes = Vec::with_capacity(NODE_BYTE_SIZE * nodes.len());
+
     for node in nodes {
-        vec.append(&mut node.id.to_vec());
-        vec.append(&mut sockaddr_to_bytes(&node.address));
+        bytes.extend_from_slice(node.id.as_bytes());
+        bytes.extend_from_slice(&sockaddr_to_bytes(&node.address));
     }
-    vec
+
+    bytes.into_boxed_slice()
 }
 
-fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Rc<Node>>, DecodeMessageError> {
+fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Rc<Node>]>, DecodeMessageError> {
     let bytes = bytes.as_ref();
     let node4_byte_size: usize = ID_SIZE + 6;
     if bytes.len() % node4_byte_size != 0 {
@@ -751,7 +751,7 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Vec<Rc<Node>>, DecodeMess
         to_ret.push(node.into());
     }
 
-    Ok(to_ret)
+    Ok(to_ret.into_boxed_slice())
 }
 
 fn peers_to_bytes(peers: Vec<SocketAddr>) -> Vec<serde_bytes::ByteBuf> {
@@ -902,7 +902,8 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::FindNode(
                 FindNodeResponseArguments {
                     responder_id: Id::random(),
-                    nodes: vec![Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap()).into()],
+                    nodes: [Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap()).into()]
+                        .into(),
                 },
             )),
         };
@@ -955,11 +956,10 @@ mod tests {
                 NoValuesResponseArguments {
                     responder_id: Id::random(),
                     token: [99, 100, 101, 102].into(),
-                    nodes: Some(vec![Node::new(
-                        Id::random(),
-                        "49.50.52.52:5354".parse().unwrap(),
-                    )
-                    .into()]),
+                    nodes: Some(
+                        [Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap()).into()]
+                            .into(),
+                    ),
                 },
             )),
         };

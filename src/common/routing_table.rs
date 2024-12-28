@@ -78,7 +78,7 @@ impl RoutingTable {
 
     /// Return the closest nodes to the target while prioritizing secure nodes,
     /// as defined in [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
-    pub fn closest(&self, target: Id) -> Vec<Rc<Node>> {
+    pub fn closest(&self, target: Id) -> Box<[Rc<Node>]> {
         let mut closest = ClosestNodes::new(target);
 
         for bucket in self.buckets.values() {
@@ -87,7 +87,7 @@ impl RoutingTable {
             }
         }
 
-        closest.nodes()[..MAX_BUCKET_SIZE_K.min(closest.len())].to_vec()
+        closest.nodes()[..MAX_BUCKET_SIZE_K.min(closest.len())].into()
     }
 
     /// Secure version of [Self::closest] that tries to circumvent sybil attacks.
