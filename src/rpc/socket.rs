@@ -174,39 +174,30 @@ impl KrpcSocket {
             match Message::from_bytes(bytes) {
                 Ok(message) => {
                     // Parsed correctly.
-                    match message.message_type {
-                        // Positive or an error response or to an inflight request.
-                        MessageType::Response(_) | MessageType::Error(_) => {
-                            match self.inflight_requests.binary_search_by(|request| {
-                                request.tid.cmp(&message.transaction_id)
-                            }) {
-                                Ok(index) => {
-                                    let inflight_request = self
-                                        .inflight_requests
-                                        .get(index)
-                                        .expect("should be infallible");
+                    let should_return = match message.message_type {
+                        MessageType::Request(_) => {
+                            trace!(?message, ?from, "Received request message");
 
-                                    if compare_socket_addr(&inflight_request.to, &from) {
-                                        // Confirm that it is a response we actually sent.
-                                        self.inflight_requests.remove(index);
-                                    } else {
-                                        trace!(?message, "Response from the wrong address");
-
-                                        return None;
-                                    }
-                                }
-                                Err(_) => {
-                                    trace!(?message, "Unexpected response id");
-                                }
-                            }
+                            true
                         }
-                        _ => {}
+                        MessageType::Response(_) => {
+                            trace!(?message, ?from, "Received response message");
+
+                            self.is_expected_response(&message, &from)
+                        }
+                        MessageType::Error(_) => {
+                            trace!(?message, ?from, "Received response message");
+
+                            self.is_expected_response(&message, &from)
+                        }
                     };
 
-                    return Some((message, from));
+                    if should_return {
+                        return Some((message, from));
+                    }
                 }
                 Err(error) => {
-                    trace!(?error, ?bytes, "Received invalid message");
+                    trace!(?error, ?from, ?bytes, "Received invalid message");
                 }
             };
         };
@@ -215,6 +206,35 @@ impl KrpcSocket {
     }
 
     // === Private Methods ===
+
+    fn is_expected_response(&mut self, message: &Message, from: &SocketAddr) -> bool {
+        // Positive or an error response or to an inflight request.
+        match self
+            .inflight_requests
+            .binary_search_by(|request| request.tid.cmp(&message.transaction_id))
+        {
+            Ok(index) => {
+                let inflight_request = self
+                    .inflight_requests
+                    .get(index)
+                    .expect("should be infallible");
+
+                if compare_socket_addr(&inflight_request.to, from) {
+                    // Confirm that it is a response we actually sent.
+                    self.inflight_requests.remove(index);
+
+                    return true;
+                } else {
+                    trace!(?message, "Response from the wrong address");
+                }
+            }
+            Err(_) => {
+                trace!(?message, "Unexpected response id");
+            }
+        }
+
+        false
+    }
 
     /// Increments self.next_tid and returns the previous value.
     fn tid(&mut self) -> u16 {
