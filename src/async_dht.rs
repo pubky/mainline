@@ -51,12 +51,14 @@ impl AsyncDht {
     }
 
     /// Wait until the bootstraping query is done.
-    pub async fn bootstrapped(&self) -> Result<(), DhtWasShutdown> {
+    ///
+    /// Returns true if the bootstraping was successful.
+    pub async fn bootstrapped(&self) -> Result<bool, DhtWasShutdown> {
         let info = self.info().await?;
 
-        let _ = self.find_node(*info.id()).await;
+        let nodes = self.find_node(*info.id()).await?;
 
-        Ok(())
+        Ok(!nodes.is_empty())
     }
 
     // === Find nodes ===

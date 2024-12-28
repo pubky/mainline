@@ -165,12 +165,14 @@ impl Dht {
     }
 
     /// Block until the bootstraping query is done.
-    pub fn bootstrapped(&self) -> Result<(), DhtWasShutdown> {
+    ///
+    /// Returns true if the bootstraping was successful.
+    pub fn bootstrapped(&self) -> Result<bool, DhtWasShutdown> {
         let info = self.info()?;
 
-        let _ = self.find_node(*info.id());
+        let nodes = self.find_node(*info.id())?;
 
-        Ok(())
+        Ok(!nodes.is_empty())
     }
 
     // === Find nodes ===
