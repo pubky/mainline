@@ -63,7 +63,7 @@ pub enum RequestTypeSpecific {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct PutRequest {
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
     pub put_request_type: PutRequestSpecific,
 }
 
@@ -118,7 +118,7 @@ pub struct GetValueRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct NoValuesResponseArguments {
     pub responder_id: Id,
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
     pub nodes: Option<Vec<Rc<Node>>>,
 }
 
@@ -132,7 +132,7 @@ pub struct GetPeersRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct GetPeersResponseArguments {
     pub responder_id: Id,
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
     pub values: Vec<SocketAddr>,
     pub nodes: Option<Vec<Rc<Node>>>,
 }
@@ -151,7 +151,7 @@ pub struct AnnouncePeerRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct GetImmutableResponseArguments {
     pub responder_id: Id,
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
     pub nodes: Option<Vec<Rc<Node>>>,
     pub v: Vec<u8>,
 }
@@ -161,7 +161,7 @@ pub struct GetImmutableResponseArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
     pub nodes: Option<Vec<Rc<Node>>>,
     pub v: Vec<u8>,
     pub k: [u8; 32],
@@ -172,7 +172,7 @@ pub struct GetMutableResponseArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct NoMoreRecentValueResponseArguments {
     pub responder_id: Id,
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
     pub nodes: Option<Vec<Rc<Node>>>,
     pub seq: i64,
 }
@@ -315,7 +315,7 @@ impl Message {
                         internal::DHTResponseSpecific::GetPeers {
                             arguments: internal::DHTGetPeersResponseArguments {
                                 id: get_peers_args.responder_id.into(),
-                                token: get_peers_args.token.clone(),
+                                token: get_peers_args.token,
                                 nodes: get_peers_args
                                     .nodes
                                     .as_ref()
@@ -328,7 +328,7 @@ impl Message {
                         internal::DHTResponseSpecific::NoValues {
                             arguments: internal::DHTNoValuesResponseArguments {
                                 id: no_values_arguments.responder_id.into(),
-                                token: no_values_arguments.token.clone(),
+                                token: no_values_arguments.token,
                                 nodes: no_values_arguments
                                     .nodes
                                     .as_ref()
@@ -340,7 +340,7 @@ impl Message {
                         internal::DHTResponseSpecific::GetImmutable {
                             arguments: internal::DHTGetImmutableResponseArguments {
                                 id: get_immutable_args.responder_id.into(),
-                                token: get_immutable_args.token.clone(),
+                                token: get_immutable_args.token,
                                 nodes: get_immutable_args
                                     .nodes
                                     .as_ref()
@@ -353,7 +353,7 @@ impl Message {
                         internal::DHTResponseSpecific::GetMutable {
                             arguments: internal::DHTGetMutableResponseArguments {
                                 id: get_mutable_args.responder_id.into(),
-                                token: get_mutable_args.token.clone(),
+                                token: get_mutable_args.token,
                                 nodes: get_mutable_args
                                     .nodes
                                     .as_ref()
@@ -369,7 +369,7 @@ impl Message {
                         internal::DHTResponseSpecific::NoMoreRecentValue {
                             arguments: internal::DHTNoMoreRecentValueResponseArguments {
                                 id: args.responder_id.into(),
-                                token: args.token.clone(),
+                                token: args.token,
                                 nodes: args.nodes.as_ref().map(|nodes| nodes4_to_bytes(nodes)),
                                 seq: args.seq,
                             },
@@ -507,7 +507,7 @@ impl Message {
                         internal::DHTResponseSpecific::GetPeers { arguments } => {
                             ResponseSpecific::GetPeers(GetPeersResponseArguments {
                                 responder_id: Id::from_bytes(arguments.id)?,
-                                token: arguments.token.clone(),
+                                token: arguments.token,
                                 nodes: match arguments.nodes {
                                     Some(nodes) => Some(bytes_to_nodes4(nodes)?),
                                     None => None,
@@ -652,25 +652,25 @@ impl Message {
         }
     }
 
-    pub fn get_token(&self) -> Option<(Id, Vec<u8>)> {
+    pub fn get_token(&self) -> Option<(Id, &[u8])> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(_) => None,
                 ResponseSpecific::FindNode(_) => None,
                 ResponseSpecific::GetPeers(arguments) => {
-                    Some((arguments.responder_id, arguments.token.clone()))
+                    Some((arguments.responder_id, &arguments.token))
                 }
                 ResponseSpecific::GetImmutable(arguments) => {
-                    Some((arguments.responder_id, arguments.token.clone()))
+                    Some((arguments.responder_id, &arguments.token))
                 }
                 ResponseSpecific::GetMutable(arguments) => {
-                    Some((arguments.responder_id, arguments.token.clone()))
+                    Some((arguments.responder_id, &arguments.token))
                 }
                 ResponseSpecific::NoValues(arguments) => {
-                    Some((arguments.responder_id, arguments.token.clone()))
+                    Some((arguments.responder_id, &arguments.token))
                 }
                 ResponseSpecific::NoMoreRecentValue(arguments) => {
-                    Some((arguments.responder_id, arguments.token.clone()))
+                    Some((arguments.responder_id, &arguments.token))
                 }
             },
             _ => None,
@@ -954,7 +954,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::NoValues(
                 NoValuesResponseArguments {
                     responder_id: Id::random(),
-                    token: vec![99, 100, 101, 102],
+                    token: vec![99, 100, 101, 102].into_boxed_slice(),
                     nodes: Some(vec![Node::new(
                         Id::random(),
                         "49.50.52.52:5354".parse().unwrap(),
@@ -993,7 +993,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::GetPeers(
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
-                    token: vec![99, 100, 101, 102],
+                    token: vec![99, 100, 101, 102].into_boxed_slice(),
                     nodes: None,
                     values: vec!["123.123.123.123:123".parse().unwrap()],
                 },
@@ -1018,7 +1018,7 @@ mod tests {
                 internal::DHTResponseSpecific::NoValues {
                     arguments: internal::DHTNoValuesResponseArguments {
                         id: Id::random().into(),
-                        token: vec![0, 1],
+                        token: vec![0, 1].into_boxed_slice(),
                         nodes: None,
                     },
                 },
@@ -1065,7 +1065,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::GetImmutable(
                 GetImmutableResponseArguments {
                     responder_id: Id::random(),
-                    token: vec![99, 100, 101, 102],
+                    token: vec![99, 100, 101, 102].into_boxed_slice(),
                     nodes: None,
                     v: vec![99, 100, 101, 102],
                 },
@@ -1089,7 +1089,7 @@ mod tests {
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Put(PutRequest {
-                    token: vec![99, 100, 101, 102],
+                    token: vec![99, 100, 101, 102].into_boxed_slice(),
                     put_request_type: PutRequestSpecific::PutImmutable(
                         PutImmutableRequestArguments {
                             target: Id::random(),
@@ -1117,7 +1117,7 @@ mod tests {
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Put(PutRequest {
-                    token: vec![99, 100, 101, 102],
+                    token: vec![99, 100, 101, 102].into_boxed_slice(),
                     put_request_type: PutRequestSpecific::PutMutable(PutMutableRequestArguments {
                         target: Id::random(),
                         v: vec![99, 100, 101, 102],

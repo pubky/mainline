@@ -588,6 +588,7 @@ impl Rpc {
 
         let mut should_add_node = false;
         let author_id = message.get_author_id();
+        let from_version = message.version.to_owned();
 
         // Get corresponing query for message.transaction_id
         if let Some(query) = self
@@ -607,7 +608,7 @@ impl Rpc {
             if let Some((responder_id, token)) = message.get_token() {
                 query.add_responding_node(
                     Node::new(responder_id, from)
-                        .with_token(token.clone())
+                        .with_token(token.to_vec().into_boxed_slice())
                         .into(),
                 );
             }
@@ -641,7 +642,14 @@ impl Rpc {
                     }
 
                     let target = query.target();
-                    debug!(?v, ?target, ?responder_id, ?from, from_version = ?message.version, "Invalid immutable value");
+                    debug!(
+                        ?v,
+                        ?target,
+                        ?responder_id,
+                        ?from,
+                        ?from_version,
+                        "Invalid immutable value"
+                    );
                 }
                 MessageType::Response(ResponseSpecific::GetMutable(
                     GetMutableResponseArguments {
@@ -679,7 +687,7 @@ impl Rpc {
                                 ?error,
                                 ?from,
                                 ?responder_id,
-                                from_version = ?message.version,
+                                ?from_version,
                                 "Invalid mutable record"
                             );
                         }
@@ -699,7 +707,7 @@ impl Rpc {
                         ?seq,
                         ?from,
                         ?responder_id,
-                        from_version = ?message.version,
+                        ?from_version,
                         "No more recent value"
                     );
                 }
@@ -715,12 +723,12 @@ impl Rpc {
                         },
                         ?from,
                         ?responder_id,
-                        from_version = ?message.version,
+                        ?from_version ,
                         "No values"
                     );
                 }
                 MessageType::Error(error) => {
-                    debug!(?error, from_version = ?message.version, "Get query got error response");
+                    debug!(?error, ?from_version, "Get query got error response");
                 }
                 // Ping response is already handled in add_node()
                 // FindNode response is already handled in query.add_candidate()

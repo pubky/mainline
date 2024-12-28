@@ -19,7 +19,7 @@ pub const TOKEN_ROTATE_INTERVAL: Duration = Duration::from_secs(60 * 5);
 pub struct Node {
     pub(crate) id: Id,
     pub(crate) address: SocketAddr,
-    pub(crate) token: Option<Vec<u8>>,
+    pub(crate) token: Option<Box<[u8]>>,
     pub(crate) last_seen: Instant,
 }
 
@@ -81,7 +81,7 @@ impl Node {
         self
     }
 
-    pub fn with_token(mut self, token: Vec<u8>) -> Self {
+    pub fn with_token(mut self, token: Box<[u8]>) -> Self {
         self.token = Some(token);
         self
     }

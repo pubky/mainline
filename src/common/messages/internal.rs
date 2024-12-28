@@ -177,7 +177,7 @@ pub struct DHTNoValuesResponseArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
@@ -201,7 +201,7 @@ pub struct DHTGetPeersResponseArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
@@ -225,7 +225,7 @@ pub struct DHTAnnouncePeerRequestArguments {
     pub port: u16,
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(default)]
     pub implied_port: Option<u8>,
@@ -251,7 +251,7 @@ pub struct DHTGetImmutableResponseArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
@@ -267,7 +267,7 @@ pub struct DHTNoMoreRecentValueResponseArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
@@ -282,7 +282,7 @@ pub struct DHTGetMutableResponseArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
@@ -311,7 +311,7 @@ pub struct DHTPutValueRequestArguments {
     pub target: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     pub v: Vec<u8>,
