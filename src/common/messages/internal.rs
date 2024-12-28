@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTMessage {
     #[serde(rename = "t", with = "serde_bytes")]
+    // Only few messages received seems to not use exactly 2 bytes,
+    // and they don't seem to have a version.
     pub transaction_id: [u8; 2],
 
     #[serde(default)]
@@ -14,7 +16,8 @@ pub struct DHTMessage {
 
     #[serde(default)]
     #[serde(with = "serde_bytes")]
-    pub ip: Option<Vec<u8>>,
+    // Ipv6 is not supported anyways.
+    pub ip: Option<[u8; 6]>,
 
     #[serde(default)]
     #[serde(rename = "ro")]
@@ -127,7 +130,7 @@ pub enum DHTResponseSpecific {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTErrorSpecific {
     #[serde(rename = "e")]
-    pub error_info: Vec<serde_bencode::value::Value>,
+    pub error_info: (i32, String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

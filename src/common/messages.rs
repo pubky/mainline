@@ -205,7 +205,7 @@ impl Message {
             version: self.version,
             ip: self
                 .requester_ip
-                .map(|sockaddr| sockaddr_to_bytes(&sockaddr).to_vec()),
+                .map(|sockaddr| sockaddr_to_bytes(&sockaddr)),
             read_only: if self.read_only { Some(1) } else { Some(0) },
             variant: match self.message_type {
                 MessageType::Request(RequestSpecific {
@@ -379,10 +379,7 @@ impl Message {
 
                 MessageType::Error(err) => {
                     internal::DHTMessageVariant::Error(internal::DHTErrorSpecific {
-                        error_info: vec![
-                            serde_bencode::value::Value::Int(err.code.into()),
-                            serde_bencode::value::Value::Bytes(err.description.into()),
-                        ],
+                        error_info: (err.code, err.description),
                     })
                 }
             },
@@ -566,31 +563,10 @@ impl Message {
                     })
                 }
 
-                internal::DHTMessageVariant::Error(err) => {
-                    if err.error_info.len() < 2 {
-                        return Err(DecodeMessageError::InvalidErrorDescription);
-                    }
-                    MessageType::Error(ErrorSpecific {
-                        code: match err.error_info[0] {
-                            serde_bencode::value::Value::Int(code) => match code.try_into() {
-                                Ok(code) => code,
-                                Err(_) => return Err(DecodeMessageError::InvalidErrorCode),
-                            },
-                            _ => return Err(DecodeMessageError::InvalidErrorCode),
-                        },
-                        description: match &err.error_info[1] {
-                            serde_bencode::value::Value::Bytes(desc) => {
-                                match std::str::from_utf8(desc) {
-                                    Ok(desc) => desc.to_string(),
-                                    Err(_) => {
-                                        return Err(DecodeMessageError::InvalidErrorDescription)
-                                    }
-                                }
-                            }
-                            _ => return Err(DecodeMessageError::InvalidErrorDescription),
-                        },
-                    })
-                }
+                internal::DHTMessageVariant::Error(err) => MessageType::Error(ErrorSpecific {
+                    code: err.error_info.0,
+                    description: err.error_info.1,
+                }),
             },
         })
     }
@@ -797,12 +773,6 @@ pub enum DecodeMessageError {
 
     #[error("Error packet should have at least 2 elements")]
     InvalidErrorPacket,
-
-    #[error("error parsing error code")]
-    InvalidErrorCode,
-
-    #[error("error parsing error description")]
-    InvalidErrorDescription,
 }
 
 #[cfg(test)]

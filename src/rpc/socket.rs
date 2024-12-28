@@ -197,7 +197,7 @@ impl KrpcSocket {
                     }
                 }
                 Err(error) => {
-                    trace!(?error, ?from, ?bytes, "Received invalid message");
+                    trace!(?error, ?from, message = ?String::from_utf8_lossy(bytes), "Received invalid message");
                 }
             };
         };
