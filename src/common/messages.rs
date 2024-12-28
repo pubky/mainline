@@ -153,7 +153,7 @@ pub struct GetImmutableResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
     pub nodes: Option<Vec<Rc<Node>>>,
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 }
 
 // === Get Mutable ===
@@ -163,7 +163,7 @@ pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
     pub nodes: Option<Vec<Rc<Node>>>,
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
     pub k: [u8; 32],
     pub seq: i64,
     pub sig: [u8; 64],
@@ -1067,7 +1067,7 @@ mod tests {
                     responder_id: Id::random(),
                     token: [99, 100, 101, 102].into(),
                     nodes: None,
-                    v: vec![99, 100, 101, 102],
+                    v: [99, 100, 101, 102].into(),
                 },
             )),
         };

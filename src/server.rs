@@ -140,7 +140,7 @@ impl DefaultServer {
                         responder_id: *routing_table.id(),
                         token: self.tokens.generate_token(from).into(),
                         nodes: Some(routing_table.closest(target)),
-                        v: item.value().to_vec(),
+                        v: item.value().into(),
                         k: *item.key(),
                         seq: item.seq(),
                         sig: *item.signature(),
@@ -206,7 +206,7 @@ impl Server for DefaultServer {
                             responder_id: *routing_table.id(),
                             token: self.tokens.generate_token(from).into(),
                             nodes: Some(routing_table.closest(target)),
-                            v: v.to_vec(),
+                            v: v.clone(),
                         },
                     ))
                 } else {

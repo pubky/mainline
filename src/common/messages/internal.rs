@@ -258,7 +258,7 @@ pub struct DHTGetImmutableResponseArguments {
     pub nodes: Option<Vec<u8>>,
 
     #[serde(with = "serde_bytes")]
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -289,7 +289,7 @@ pub struct DHTGetMutableResponseArguments {
     pub nodes: Option<Vec<u8>>,
 
     #[serde(with = "serde_bytes")]
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     pub k: [u8; 32],

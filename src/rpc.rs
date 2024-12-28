@@ -636,7 +636,7 @@ impl Rpc {
                     },
                 )) => {
                     if validate_immutable(&v, query.target()) {
-                        let response = Response::Immutable(v.into());
+                        let response = Response::Immutable(v);
                         query.response(from, response.clone());
 
                         return Some((target, response));
@@ -671,7 +671,7 @@ impl Rpc {
                     match MutableItem::from_dht_message(
                         query.target(),
                         &k,
-                        v.into(),
+                        v,
                         seq,
                         &sig,
                         salt,
