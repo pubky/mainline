@@ -192,7 +192,7 @@ pub struct DHTGetPeersRequestArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub info_hash: Vec<u8>,
+    pub info_hash: [u8; 20],
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -220,7 +220,7 @@ pub struct DHTAnnouncePeerRequestArguments {
     pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub info_hash: Vec<u8>,
+    pub info_hash: [u8; 20],
 
     pub port: u16,
 

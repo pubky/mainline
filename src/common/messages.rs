@@ -229,7 +229,7 @@ impl Message {
                         internal::DHTRequestSpecific::GetPeers {
                             arguments: internal::DHTGetPeersRequestArguments {
                                 id: requester_id.into(),
-                                info_hash: get_peers_args.info_hash.to_vec(),
+                                info_hash: get_peers_args.info_hash.into(),
                             },
                         }
                     }
@@ -252,7 +252,7 @@ impl Message {
                                     id: requester_id.into(),
                                     token,
 
-                                    info_hash: announce_peer_args.info_hash.to_vec(),
+                                    info_hash: announce_peer_args.info_hash.into(),
                                     port: announce_peer_args.port,
                                     implied_port: if announce_peer_args.implied_port.is_some() {
                                         Some(1)
@@ -440,7 +440,7 @@ impl Message {
                                             implied_port: arguments
                                                 .implied_port
                                                 .map(|implied_port| implied_port != 0),
-                                            info_hash: Id::from_bytes(&arguments.info_hash)?,
+                                            info_hash: arguments.info_hash.into(),
                                             port: arguments.port,
                                         },
                                     ),
