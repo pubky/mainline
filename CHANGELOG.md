@@ -41,7 +41,7 @@ All notable changes to mainline dht will be documented in this file.
   and `RpcTickReport::qurey_response` are added.
 - `Info::local_addr()` is infallible.
 - `MutableItem::seq()` returns `i64` instead of a refernece.
-- `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes` 
+- `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `Box<[u8]>` instead of `bytes::Bytes` 
 - `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes` 
 
 ### Removed

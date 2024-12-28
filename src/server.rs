@@ -297,7 +297,7 @@ impl Server for DefaultServer {
                         );
                     }
 
-                    self.immutable_values.put(target, v.to_owned().into());
+                    self.immutable_values.put(target, v);
 
                     MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                         responder_id: *routing_table.id(),
@@ -388,15 +388,7 @@ impl Server for DefaultServer {
                         }
                     }
 
-                    match MutableItem::from_dht_message(
-                        target,
-                        &k,
-                        v.to_owned().into(),
-                        seq,
-                        &sig,
-                        salt.as_deref(),
-                        cas,
-                    ) {
+                    match MutableItem::from_dht_message(target, &k, v, seq, &sig, salt, cas) {
                         Ok(item) => {
                             self.mutable_values.put(target, item);
 

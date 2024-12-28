@@ -297,15 +297,13 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
-        let target: Id = hash_immutable(value).into();
+    pub fn put_immutable(&self, value: Box<[u8]>) -> Result<Id, DhtPutError> {
+        let target: Id = hash_immutable(&value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
-        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
-            target,
-            v: value.to_vec(),
-        });
+        let request =
+            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, v: value });
 
         self.0
             .send(ActorMessage::Put(target, request, sender))
@@ -348,18 +346,12 @@ impl Dht {
     pub fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
-        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
-            target: *item.target(),
-            v: item.value().to_vec(),
-            k: *item.key(),
-            seq: item.seq(),
-            sig: *item.signature(),
-            salt: item.salt().map(|s| s.to_vec()),
-            cas: item.cas(),
-        });
+        let target = *item.target();
+
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item));
 
         self.0
-            .send(ActorMessage::Put(*item.target(), request, sender))
+            .send(ActorMessage::Put(target, request, sender))
             .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
@@ -610,7 +602,7 @@ mod test {
         let value = b"Hello World!";
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        let target = a.put_immutable(value).unwrap();
+        let target = a.put_immutable(value.as_slice().into()).unwrap();
         assert_eq!(target, expected_target);
 
         let response = b.get_immutable(target).unwrap().unwrap();
@@ -653,7 +645,7 @@ mod test {
         let seq = 1000;
         let value = b"Hello World!";
 
-        let item = MutableItem::new(signer.clone(), value, seq, None);
+        let item = MutableItem::new(signer.clone(), value.as_slice().into(), seq, None);
 
         a.put_mutable(item.clone()).unwrap();
 
@@ -687,7 +679,7 @@ mod test {
         let seq = 1000;
         let value = b"Hello World!";
 
-        let item = MutableItem::new(signer.clone(), value, seq, None);
+        let item = MutableItem::new(signer.clone(), value.as_slice().into(), seq, None);
 
         a.put_mutable(item.clone()).unwrap();
 
@@ -708,8 +700,8 @@ mod test {
             .build()
             .unwrap();
 
-        let id = a.put_immutable(&[1, 2, 3]).unwrap();
+        let id = a.put_immutable([1, 2, 3].into()).unwrap();
 
-        assert_eq!(a.put_immutable(&[1, 2, 3]).unwrap(), id);
+        assert_eq!(a.put_immutable([1, 2, 3].into()).unwrap(), id);
     }
 }

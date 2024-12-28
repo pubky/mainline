@@ -7,6 +7,8 @@ use std::convert::TryFrom;
 
 use crate::Id;
 
+use super::PutMutableRequestArguments;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// [Bep_0044](https://www.bittorrent.org/beps/bep_0044.html)'s Mutable item.
 pub struct MutableItem {
@@ -29,8 +31,8 @@ pub struct MutableItem {
 
 impl MutableItem {
     /// Create a new mutable item from a signing key, value, sequence number and optional salt.
-    pub fn new(signer: SigningKey, value: &[u8], seq: i64, salt: Option<&[u8]>) -> Self {
-        let signable = encode_signable(seq, value, salt);
+    pub fn new(signer: SigningKey, value: Box<[u8]>, seq: i64, salt: Option<Box<[u8]>>) -> Self {
+        let signable = encode_signable(seq, &value, salt.as_deref());
         let signature = signer.sign(&signable);
 
         Self::new_signed_unchecked(
@@ -69,17 +71,17 @@ impl MutableItem {
     pub fn new_signed_unchecked(
         key: [u8; 32],
         signature: [u8; 64],
-        value: &[u8],
+        value: Box<[u8]>,
         seq: i64,
-        salt: Option<&[u8]>,
+        salt: Option<Box<[u8]>>,
     ) -> Self {
         Self {
-            target: MutableItem::target_from_key(&key, salt),
+            target: MutableItem::target_from_key(&key, salt.as_deref()),
             key,
-            value: value.to_vec().into_boxed_slice(),
+            value,
             seq,
             signature,
-            salt: salt.map(|s| s.to_vec().into_boxed_slice()),
+            salt,
             cas: None,
         }
     }
@@ -90,7 +92,7 @@ impl MutableItem {
         v: Box<[u8]>,
         seq: i64,
         signature: &[u8],
-        salt: Option<&[u8]>,
+        salt: Option<Box<[u8]>>,
         cas: Option<i64>,
     ) -> Result<Self, MutableError> {
         let key = VerifyingKey::try_from(key).map_err(|_| MutableError::InvalidMutablePublicKey)?;
@@ -98,7 +100,7 @@ impl MutableItem {
         let signature =
             Signature::from_slice(signature).map_err(|_| MutableError::InvalidMutableSignature)?;
 
-        key.verify(&encode_signable(seq, &v, salt), &signature)
+        key.verify(&encode_signable(seq, &v, salt.as_deref()), &signature)
             .map_err(|_| MutableError::InvalidMutableSignature)?;
 
         Ok(Self {
@@ -107,7 +109,7 @@ impl MutableItem {
             value: v,
             seq,
             signature: signature.to_bytes(),
-            salt: salt.map(|s| s.to_vec().into_boxed_slice()),
+            salt,
             cas,
         })
     }
@@ -165,6 +167,20 @@ pub enum MutableError {
 
     #[error("Invalid mutable item public key")]
     InvalidMutablePublicKey,
+}
+
+impl From<MutableItem> for PutMutableRequestArguments {
+    fn from(item: MutableItem) -> Self {
+        Self {
+            target: item.target,
+            v: item.value,
+            k: item.key,
+            seq: item.seq,
+            sig: item.signature,
+            salt: item.salt,
+            cas: item.cas,
+        }
+    }
 }
 
 #[cfg(test)]

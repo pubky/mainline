@@ -314,7 +314,7 @@ pub struct DHTPutValueRequestArguments {
     pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
@@ -332,5 +332,5 @@ pub struct DHTPutValueRequestArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub salt: Option<Vec<u8>>,
+    pub salt: Option<Box<[u8]>>,
 }

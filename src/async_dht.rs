@@ -185,15 +185,13 @@ impl AsyncDht {
     }
 
     /// Put an immutable data to the DHT.
-    pub async fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
-        let target: Id = hash_immutable(value).into();
+    pub async fn put_immutable(&self, value: Box<[u8]>) -> Result<Id, DhtPutError> {
+        let target: Id = hash_immutable(&value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
-        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
-            target,
-            v: value.to_vec(),
-        });
+        let request =
+            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, v: value });
 
         self.0
              .0
@@ -241,19 +239,13 @@ impl AsyncDht {
     pub async fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
-        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments {
-            target: *item.target(),
-            v: item.value().to_vec(),
-            k: *item.key(),
-            seq: item.seq(),
-            sig: *item.signature(),
-            salt: item.salt().map(|s| s.to_vec()),
-            cas: item.cas(),
-        });
+        let target = *item.target();
+
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item));
 
         self.0
              .0
-            .send(ActorMessage::Put(*item.target(), request, sender))
+            .send(ActorMessage::Put(target, request, sender))
             .map_err(|_| DhtWasShutdown)?;
 
         Ok(receiver
@@ -341,10 +333,10 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let value = b"Hello World!";
+            let value = *b"Hello World!";
             let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-            let target = a.put_immutable(value).await.unwrap();
+            let target = a.put_immutable(value.into()).await.unwrap();
             assert_eq!(target, expected_target);
 
             let response = b.get_immutable(target).await.unwrap();
@@ -376,9 +368,9 @@ mod test {
             ]);
 
             let seq = 1000;
-            let value = b"Hello World!";
+            let value = *b"Hello World!";
 
-            let item = MutableItem::new(signer.clone(), value, seq, None);
+            let item = MutableItem::new(signer.clone(), value.into(), seq, None);
 
             a.put_mutable(item.clone()).await.unwrap();
 
@@ -417,9 +409,9 @@ mod test {
             ]);
 
             let seq = 1000;
-            let value = b"Hello World!";
+            let value = *b"Hello World!";
 
-            let item = MutableItem::new(signer.clone(), value, seq, None);
+            let item = MutableItem::new(signer.clone(), value.into(), seq, None);
 
             a.put_mutable(item.clone()).await.unwrap();
 
@@ -446,8 +438,8 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let first = a.put_immutable(&[1, 2, 3]);
-            let second = a.put_immutable(&[1, 2, 3]);
+            let first = a.put_immutable([1, 2, 3].into());
+            let second = a.put_immutable([1, 2, 3].into());
 
             assert_eq!(first.await.unwrap(), second.await.unwrap());
         }

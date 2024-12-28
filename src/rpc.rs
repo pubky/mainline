@@ -375,7 +375,7 @@ impl Rpc {
                 RequestTypeSpecific::GetValue(GetValueRequestArguments {
                     target,
                     seq: None,
-                    salt: salt.map(|s| s.into()),
+                    salt,
                 }),
                 None,
             );
@@ -674,7 +674,7 @@ impl Rpc {
                         v.into(),
                         seq,
                         &sig,
-                        salt.as_deref(),
+                        salt,
                         None,
                     ) {
                         Ok(item) => {

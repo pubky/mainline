@@ -182,7 +182,7 @@ pub struct NoMoreRecentValueResponseArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct PutImmutableRequestArguments {
     pub target: Id,
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 }
 
 // === Put Mutable ===
@@ -190,11 +190,11 @@ pub struct PutImmutableRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct PutMutableRequestArguments {
     pub target: Id,
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
     pub k: [u8; 32],
     pub seq: i64,
     pub sig: [u8; 64],
-    pub salt: Option<Vec<u8>>,
+    pub salt: Option<Box<[u8]>>,
     pub cas: Option<i64>,
 }
 
@@ -954,7 +954,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::NoValues(
                 NoValuesResponseArguments {
                     responder_id: Id::random(),
-                    token: vec![99, 100, 101, 102].into_boxed_slice(),
+                    token: [99, 100, 101, 102].into(),
                     nodes: Some(vec![Node::new(
                         Id::random(),
                         "49.50.52.52:5354".parse().unwrap(),
@@ -993,7 +993,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::GetPeers(
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
-                    token: vec![99, 100, 101, 102].into_boxed_slice(),
+                    token: vec![99, 100, 101, 102].into(),
                     nodes: None,
                     values: vec!["123.123.123.123:123".parse().unwrap()],
                 },
@@ -1018,7 +1018,7 @@ mod tests {
                 internal::DHTResponseSpecific::NoValues {
                     arguments: internal::DHTNoValuesResponseArguments {
                         id: Id::random().into(),
-                        token: vec![0, 1].into_boxed_slice(),
+                        token: vec![0, 1].into(),
                         nodes: None,
                     },
                 },
@@ -1065,7 +1065,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::GetImmutable(
                 GetImmutableResponseArguments {
                     responder_id: Id::random(),
-                    token: vec![99, 100, 101, 102].into_boxed_slice(),
+                    token: [99, 100, 101, 102].into(),
                     nodes: None,
                     v: vec![99, 100, 101, 102],
                 },
@@ -1089,11 +1089,11 @@ mod tests {
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Put(PutRequest {
-                    token: vec![99, 100, 101, 102].into_boxed_slice(),
+                    token: [99, 100, 101, 102].into(),
                     put_request_type: PutRequestSpecific::PutImmutable(
                         PutImmutableRequestArguments {
                             target: Id::random(),
-                            v: vec![99, 100, 101, 102],
+                            v: [99, 100, 101, 102].into(),
                         },
                     ),
                 }),
@@ -1117,14 +1117,14 @@ mod tests {
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Put(PutRequest {
-                    token: vec![99, 100, 101, 102].into_boxed_slice(),
+                    token: [99, 100, 101, 102].into(),
                     put_request_type: PutRequestSpecific::PutMutable(PutMutableRequestArguments {
                         target: Id::random(),
-                        v: vec![99, 100, 101, 102],
+                        v: [99, 100, 101, 102].into(),
                         k: [100; 32],
                         seq: 100,
                         sig: [0; 64],
-                        salt: Some(vec![0, 2, 4, 8]),
+                        salt: Some([0, 2, 4, 8].into()),
                         cas: Some(100),
                     }),
                 }),
