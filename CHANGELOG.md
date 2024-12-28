@@ -14,11 +14,11 @@ All notable changes to mainline dht will be documented in this file.
 - Export `RoutingTable`.
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
 - Add `Dht::bootstrapped` and `AsyncDht::bootstrapped` to wait for the routing table to be bootstrapped.
-- Add `RoutingTable::to_bootstrap()` to export the addresses nodes in the routing table.
+- Add `RoutingTable::to_bootstrap()`, `Dht::to_bootstrap()`, and `AsyncDht::to_bootstrap()` to export the addresses nodes in the routing table.
 - Add `Rpc::public_address()` and `Info::public_address()` which returns the best estimate for this node's public address.
 - Add `Rpc::firewalled()` and `Info::firewalled()` which returns whether or not this node is firewalled, or publicly accessible.
 - Add `Rpc::server_mode()` and `Info::server_mode()` which returns whether or not this node is running in server mode.
-- Add `Info::routing_table()` to get a snapshot of the node's routing table.
+- Add `Rpc::info()` to export a thread safe and lightweight summary of the node's information and statistics.
 - Add `cache_bootstrap.rs` example to show how you can store your routing table to disk and use it for subsequent bootstrapping.
 - Add `Id::from_ipv4()`.
 - Add `Id::is_valid_for_ipv4`.
