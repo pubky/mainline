@@ -22,11 +22,13 @@ All notable changes to mainline dht will be documented in this file.
 - Add `cache_bootstrap.rs` example to show how you can store your routing table to disk and use it for subsequent bootstrapping.
 - Add `Id::from_ipv4()`.
 - Add `Id::is_valid_for_ipv4`.
+- Add `RoutingTable::nodes()` iterator.
 
 ### Removed
 
 - Remove `bytes` dependency.
 - Remove `ipv6` optionality and commit to `ipv4`.
+- Remove `Id::to_vec()`.
 
 ### Changed
 

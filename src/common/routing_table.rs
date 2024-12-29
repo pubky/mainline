@@ -99,7 +99,7 @@ impl RoutingTable {
     ) -> Vec<Rc<Node>> {
         let mut closest = ClosestNodes::new(target);
 
-        for node in self.to_vec() {
+        for node in self.nodes() {
             closest.add(node);
         }
 
@@ -118,30 +118,21 @@ impl RoutingTable {
             .fold(0, |acc, bucket| acc + bucket.nodes.len())
     }
 
-    /// Returns all nodes in the routing_table.
-    pub fn to_vec(&self) -> Vec<Rc<Node>> {
-        let mut nodes = vec![];
-
-        for bucket in self.buckets.values() {
-            for node in &bucket.nodes {
-                nodes.push(node.clone());
-            }
+    pub fn nodes(&self) -> RoutingTableIterator {
+        RoutingTableIterator {
+            bucket_index: 1,
+            node_index: 0,
+            table: self,
         }
-
-        nodes
     }
 
     pub fn to_owned_nodes(&self) -> Vec<Node> {
-        self.to_vec()
-            .into_iter()
-            .map(|rc| rc.as_ref().clone())
-            .collect()
+        self.nodes().map(|rc| rc.as_ref().clone()).collect()
     }
 
     /// Turn this routing table to a list of bootstraping nodes.   
     pub fn to_bootstrap(&self) -> Vec<String> {
-        self.to_vec()
-            .iter()
+        self.nodes()
             .filter(|n| !n.is_stale())
             .map(|n| n.address.to_string())
             .collect()
@@ -165,6 +156,37 @@ impl RoutingTable {
 impl Default for RoutingTable {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub struct RoutingTableIterator<'a> {
+    bucket_index: u8,
+    node_index: usize,
+    table: &'a RoutingTable,
+}
+
+impl Iterator for RoutingTableIterator<'_> {
+    type Item = Rc<Node>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.bucket_index <= 160 {
+            if let Some(current_bucket) = self.table.buckets.get(&self.bucket_index) {
+                if let Some(current_node) = current_bucket.nodes.get(self.node_index) {
+                    self.node_index += 1;
+
+                    if self.node_index == current_bucket.nodes.len() {
+                        self.node_index = 0;
+                        self.bucket_index += 1;
+                    }
+
+                    return Some(current_node.clone());
+                }
+            };
+
+            self.bucket_index += 1;
+        }
+
+        None
     }
 }
 
@@ -279,7 +301,7 @@ mod test {
             table.add(node.as_ref().clone());
         }
 
-        let mut sorted_table = table.to_vec();
+        let mut sorted_table = table.nodes().collect::<Vec<_>>();
         sorted_table.sort_by(|a, b| a.id.cmp(&b.id));
 
         let mut sorted_expected = expected_nodes.to_vec();
@@ -323,7 +345,7 @@ mod test {
         table.add(node1);
         table.add(node2);
 
-        assert_eq!(table.to_vec().len(), 1);
+        assert_eq!(table.size(), 1);
     }
 
     #[test]

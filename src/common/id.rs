@@ -80,10 +80,6 @@ impl Id {
         &self.0
     }
 
-    pub fn to_vec(&self) -> Vec<u8> {
-        self.0.to_vec()
-    }
-
     /// Create a new Id according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_addr(addr: &SocketAddr) -> Id {
         let ip = addr.ip();

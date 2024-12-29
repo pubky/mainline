@@ -778,12 +778,23 @@ impl Rpc {
         if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
             self.last_table_ping = Instant::now();
 
-            for node in self.routing_table.to_vec() {
+            let mut to_remove = Vec::with_capacity(self.routing_table.size());
+            let mut to_ping = Vec::with_capacity(self.routing_table.size());
+
+            for node in self.routing_table.nodes() {
                 if node.is_stale() {
-                    self.routing_table.remove(node.id);
+                    to_remove.push(node.id)
                 } else if node.should_ping() {
-                    self.ping(node.address);
+                    to_ping.push(node.address)
                 }
+            }
+
+            for id in to_remove {
+                self.routing_table.remove(id);
+            }
+
+            for address in to_ping {
+                self.ping(address);
             }
         }
     }
