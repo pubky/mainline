@@ -108,13 +108,13 @@ impl AsyncDht {
     pub fn get_peers(
         &self,
         info_hash: Id,
-    ) -> Result<flume::r#async::RecvStream<Box<[SocketAddrV4]>>, DhtWasShutdown> {
+    ) -> Result<flume::r#async::RecvStream<Vec<SocketAddrV4>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<Box<[SocketAddrV4]>>();
+        let (sender, receiver) = flume::unbounded::<Vec<SocketAddrV4>>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
@@ -185,13 +185,15 @@ impl AsyncDht {
     }
 
     /// Put an immutable data to the DHT.
-    pub async fn put_immutable(&self, value: Box<[u8]>) -> Result<Id, DhtPutError> {
-        let target: Id = hash_immutable(&value).into();
+    pub async fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
+        let target: Id = hash_immutable(value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
-        let request =
-            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, v: value });
+        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
+            target,
+            v: value.into(),
+        });
 
         self.0
              .0
@@ -220,7 +222,7 @@ impl AsyncDht {
         let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
             target,
             seq,
-            salt: salt.map(|s| s.to_vec().into_boxed_slice()),
+            salt: salt.map(|s| s.into()),
         });
 
         self.0

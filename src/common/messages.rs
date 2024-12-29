@@ -133,7 +133,7 @@ pub struct GetPeersRequestArguments {
 pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub values: Box<[SocketAddrV4]>,
+    pub values: Vec<SocketAddrV4>,
     pub nodes: Option<Box<[Rc<Node>]>>,
 }
 
@@ -509,7 +509,7 @@ impl Message {
                                     Some(nodes) => Some(bytes_to_nodes4(nodes)?),
                                     None => None,
                                 },
-                                values: bytes_to_peers(arguments.values)?.into_boxed_slice(),
+                                values: bytes_to_peers(arguments.values)?,
                             })
                         }
                         internal::DHTResponseSpecific::NoValues { arguments } => {

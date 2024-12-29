@@ -35,7 +35,7 @@ impl PeersStore {
         };
     }
 
-    pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Box<[SocketAddrV4]>> {
+    pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddrV4>> {
         if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
             let size = info_hash_lru.len();
             let target_size = 20;
@@ -48,8 +48,7 @@ impl PeersStore {
                     info_hash_lru
                         .iter()
                         .map(|n| n.1.to_owned())
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice(),
+                        .collect::<Vec<_>>(),
                 );
             }
 
@@ -72,7 +71,7 @@ impl PeersStore {
                 }
             }
 
-            return Some(results.into_boxed_slice());
+            return Some(results);
         }
 
         None

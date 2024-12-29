@@ -224,13 +224,13 @@ impl Dht {
     pub fn get_peers(
         &self,
         info_hash: Id,
-    ) -> Result<flume::IntoIter<Box<[SocketAddrV4]>>, DhtWasShutdown> {
+    ) -> Result<flume::IntoIter<Vec<SocketAddrV4>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
         //
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<Box<[SocketAddrV4]>>();
+        let (sender, receiver) = flume::unbounded::<Vec<SocketAddrV4>>();
 
         let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
@@ -297,13 +297,15 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: Box<[u8]>) -> Result<Id, DhtPutError> {
-        let target: Id = hash_immutable(&value).into();
+    pub fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
+        let target: Id = hash_immutable(value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
-        let request =
-            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, v: value });
+        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
+            target,
+            v: value.into(),
+        });
 
         self.0
             .send(ActorMessage::Put(target, request, sender))
@@ -323,7 +325,7 @@ impl Dht {
         salt: Option<&[u8]>,
         seq: Option<i64>,
     ) -> Result<flume::IntoIter<MutableItem>, DhtWasShutdown> {
-        let salt = salt.map(|s| s.to_vec().into_boxed_slice());
+        let salt = salt.map(|s| s.into());
 
         let target = MutableItem::target_from_key(public_key, salt.as_deref());
 
@@ -473,7 +475,7 @@ pub(crate) enum ActorMessage {
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
     ClosestNodes(Sender<Vec<Node>>),
-    Peers(Sender<Box<[SocketAddrV4]>>),
+    Peers(Sender<Vec<SocketAddrV4>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Box<[u8]>>),
 }

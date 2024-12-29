@@ -33,9 +33,7 @@ fn main() {
 fn put_immutable(dht: &Dht, value: &[u8]) {
     let start = Instant::now();
 
-    let info_hash = dht
-        .put_immutable(value.into())
-        .expect("put immutable failed");
+    let info_hash = dht.put_immutable(value).expect("put immutable failed");
 
     println!(
         "Stored immutable data as {:?} in {:?} milliseconds",

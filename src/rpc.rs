@@ -948,7 +948,7 @@ pub struct RpcTickReport {
 
 #[derive(Debug, Clone)]
 pub enum Response {
-    Peers(Box<[SocketAddrV4]>),
+    Peers(Vec<SocketAddrV4>),
     Immutable(Box<[u8]>),
     Mutable(MutableItem),
 }
