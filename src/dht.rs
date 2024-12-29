@@ -604,7 +604,7 @@ mod test {
         let value = b"Hello World!";
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-        let target = a.put_immutable(value.as_slice().into()).unwrap();
+        let target = a.put_immutable(value).unwrap();
         assert_eq!(target, expected_target);
 
         let response = b.get_immutable(target).unwrap().unwrap();
@@ -647,7 +647,7 @@ mod test {
         let seq = 1000;
         let value = b"Hello World!";
 
-        let item = MutableItem::new(signer.clone(), value.as_slice().into(), seq, None);
+        let item = MutableItem::new(signer.clone(), value, seq, None);
 
         a.put_mutable(item.clone()).unwrap();
 
@@ -681,7 +681,7 @@ mod test {
         let seq = 1000;
         let value = b"Hello World!";
 
-        let item = MutableItem::new(signer.clone(), value.as_slice().into(), seq, None);
+        let item = MutableItem::new(signer.clone(), value, seq, None);
 
         a.put_mutable(item.clone()).unwrap();
 
@@ -702,8 +702,8 @@ mod test {
             .build()
             .unwrap();
 
-        let id = a.put_immutable([1, 2, 3].into()).unwrap();
+        let id = a.put_immutable(&[1, 2, 3]).unwrap();
 
-        assert_eq!(a.put_immutable([1, 2, 3].into()).unwrap(), id);
+        assert_eq!(a.put_immutable(&[1, 2, 3]).unwrap(), id);
     }
 }

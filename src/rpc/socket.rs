@@ -71,12 +71,10 @@ impl KrpcSocket {
 
     #[cfg(test)]
     pub(crate) fn server() -> Result<Self, std::io::Error> {
-        use crate::server::DefaultServer;
-
-        let mut config = Config::default();
-        config.server = Some(Box::new(DefaultServer::default()));
-
-        Self::new(&config)
+        Self::new(&Config {
+            server_mode: true,
+            ..Default::default()
+        })
     }
 
     #[cfg(test)]
@@ -358,7 +356,7 @@ mod test {
             }
         });
 
-        client.request(server_address.into(), request);
+        client.request(server_address, request);
 
         server_thread.join().unwrap();
     }
@@ -381,7 +379,7 @@ mod test {
             loop {
                 server.inflight_requests.push(InflightRequest {
                     tid: 8,
-                    to: client_address.into(),
+                    to: client_address,
                     sent_at: Instant::now(),
                 });
 
@@ -403,7 +401,7 @@ mod test {
 
         let server_address = rx.recv().unwrap();
 
-        client.response(server_address.into(), 8, response);
+        client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
     }
@@ -437,7 +435,7 @@ mod test {
             );
         });
 
-        client.response(server_address.into(), 8, response);
+        client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
     }

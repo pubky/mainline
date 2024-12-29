@@ -106,6 +106,6 @@ mod test {
         let address = SocketAddrV4::new([127, 0, 0, 1].into(), 6881);
         let token = tokens.generate_token(address);
 
-        assert!(tokens.validate(address, &token.to_vec()))
+        assert!(tokens.validate(address, &token))
     }
 }

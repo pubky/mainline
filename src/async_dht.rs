@@ -335,10 +335,10 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let value = *b"Hello World!";
+            let value = b"Hello World!";
             let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
 
-            let target = a.put_immutable(value.into()).await.unwrap();
+            let target = a.put_immutable(value).await.unwrap();
             assert_eq!(target, expected_target);
 
             let response = b.get_immutable(target).await.unwrap();
@@ -370,9 +370,9 @@ mod test {
             ]);
 
             let seq = 1000;
-            let value = *b"Hello World!";
+            let value = b"Hello World!";
 
-            let item = MutableItem::new(signer.clone(), value.into(), seq, None);
+            let item = MutableItem::new(signer.clone(), value, seq, None);
 
             a.put_mutable(item.clone()).await.unwrap();
 
@@ -411,9 +411,9 @@ mod test {
             ]);
 
             let seq = 1000;
-            let value = *b"Hello World!";
+            let value = b"Hello World!";
 
-            let item = MutableItem::new(signer.clone(), value.into(), seq, None);
+            let item = MutableItem::new(signer.clone(), value, seq, None);
 
             a.put_mutable(item.clone()).await.unwrap();
 
@@ -440,8 +440,8 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let first = a.put_immutable([1, 2, 3].into());
-            let second = a.put_immutable([1, 2, 3].into());
+            let first = a.put_immutable(&[1, 2, 3]);
+            let second = a.put_immutable(&[1, 2, 3]);
 
             assert_eq!(first.await.unwrap(), second.await.unwrap());
         }
