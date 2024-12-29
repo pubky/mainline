@@ -21,8 +21,8 @@ impl Info {
         &self.id
     }
     /// Local UDP Ipv4 socket address that this node is listening on.
-    pub fn local_addr(&self) -> &SocketAddrV4 {
-        &self.local_addr
+    pub fn local_addr(&self) -> SocketAddrV4 {
+        self.local_addr
     }
     /// Returns the best guess for this node's Public addresss.
     ///
