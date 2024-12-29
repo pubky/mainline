@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTMessage {
@@ -212,7 +213,7 @@ pub struct DHTGetPeersResponseArguments {
 
     // values are not optional, because if they are missing this missing
     // we can just treat this as DHTNoValuesResponseArguments
-    pub values: Box<[u8]>,
+    pub values: Vec<ByteBuf>,
 }
 
 // === Announce Peer ===

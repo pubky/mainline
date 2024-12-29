@@ -186,7 +186,7 @@ impl KrpcSocket {
                             self.is_expected_response(&message, &from)
                         }
                         MessageType::Error(_) => {
-                            trace!(?message, ?from, "Received response message");
+                            trace!(?message, ?from, "Received error message");
 
                             self.is_expected_response(&message, &from)
                         }

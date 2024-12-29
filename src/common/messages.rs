@@ -320,7 +320,7 @@ impl Message {
                                     .nodes
                                     .as_ref()
                                     .map(|nodes| nodes4_to_bytes(nodes)),
-                                values: peers_to_bytes(get_peers_args.values),
+                                values: peers_to_bytes(&get_peers_args.values),
                             },
                         }
                     }
@@ -509,7 +509,7 @@ impl Message {
                                     Some(nodes) => Some(bytes_to_nodes4(nodes)?),
                                     None => None,
                                 },
-                                values: bytes_to_peers(arguments.values)?,
+                                values: bytes_to_peers(arguments.values)?.into_boxed_slice(),
                             })
                         }
                         internal::DHTResponseSpecific::NoValues { arguments } => {
@@ -716,34 +716,18 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Rc<Node>]>, DecodeMe
     Ok(to_ret.into_boxed_slice())
 }
 
-fn peers_to_bytes(peers: Box<[SocketAddrV4]>) -> Box<[u8]> {
-    let mut bytes = Vec::with_capacity(6 * peers.len());
-
-    for peer in peers {
-        bytes.extend_from_slice(&sockaddr_to_bytes(&peer));
-    }
-
-    bytes.into_boxed_slice()
+fn peers_to_bytes(peers: &[SocketAddrV4]) -> Vec<serde_bytes::ByteBuf> {
+    peers
+        .iter()
+        .map(|p| serde_bytes::ByteBuf::from(sockaddr_to_bytes(p)))
+        .collect()
 }
 
-fn bytes_to_peers<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[SocketAddrV4]>, DecodeMessageError> {
+fn bytes_to_peers<T: AsRef<[serde_bytes::ByteBuf]>>(
+    bytes: T,
+) -> Result<Vec<SocketAddrV4>, DecodeMessageError> {
     let bytes = bytes.as_ref();
-
-    // only works because we are fully committing to ipv4 only.
-    if bytes.len() % 6 != 0 {
-        return Err(DecodeMessageError::InvalidPeers);
-    }
-
-    let expected_num = bytes.len() / 6;
-    let mut to_ret = Vec::with_capacity(expected_num);
-
-    for i in 0..bytes.len() / 6 {
-        let i = i * 6;
-        let sockaddr = bytes_to_sockaddr(&bytes[i..i + 6])?;
-        to_ret.push(sockaddr);
-    }
-
-    Ok(to_ret.into_boxed_slice())
+    bytes.iter().map(bytes_to_sockaddr).collect()
 }
 
 #[derive(thiserror::Error, Debug)]
