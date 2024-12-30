@@ -413,7 +413,7 @@ impl Rpc {
     pub fn get(
         &mut self,
         request: RequestTypeSpecific,
-        extra_nodes: Option<Box<[SocketAddrV4]>>,
+        extra_nodes: Option<&[SocketAddrV4]>,
     ) -> Option<Vec<Response>> {
         let target = match request {
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }) => target,
@@ -461,7 +461,7 @@ impl Rpc {
 
         if let Some(extra_nodes) = extra_nodes {
             for extra_node in extra_nodes {
-                query.visit(&mut self.socket, extra_node)
+                query.visit(&mut self.socket, *extra_node)
             }
         }
 
@@ -533,7 +533,7 @@ impl Rpc {
                         }
                         RequestSpecific { request_type, .. } => {
                             tracing::trace!("custom server returned a GET request, sending it.");
-                            let _ = self.get(request_type, extra_nodes);
+                            let _ = self.get(request_type, extra_nodes.as_deref());
                         }
                     }
                 }
