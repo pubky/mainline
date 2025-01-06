@@ -801,6 +801,10 @@ impl Rpc {
 
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
+        if self.bootstrap.is_empty() {
+            return;
+        }
+
         self.get(
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: *self.id() }),
             None,
