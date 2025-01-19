@@ -23,4 +23,7 @@ pub use ed25519_dalek::SigningKey;
 pub mod errors {
     //! Exported errors
     pub use super::rpc::PutError;
+
+    pub use super::dht::DhtPutError;
+    pub use super::dht::DhtWasShutdown;
 }
