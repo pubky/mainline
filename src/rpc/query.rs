@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddrV4;
 use std::{collections::HashSet, rc::Rc};
 
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 use super::{socket::KrpcSocket, ClosestNodes};
 use crate::{
@@ -253,7 +253,7 @@ impl PutQuery {
 
     pub fn error(&mut self, error: ErrorSpecific) {
         if error.code >= 300 && error.code < 400 {
-            warn!(target = ?self.target, ?error, "PutQuery got 3xx error");
+            debug!(target = ?self.target, ?error, "PutQuery got 3xx error");
             self.error = Some(error)
         } else {
             debug!(target = ?self.target, ?error, "PutQuery got non-3xx error");
@@ -274,7 +274,7 @@ impl PutQuery {
             let target = self.target;
             if self.stored_at == 0 {
                 if let Some(error) = self.error.clone() {
-                    error!(?target, ?error, "Put Query: failed");
+                    debug!(?target, ?error, "Put Query: failed");
 
                     return Err(PutError::ErrorResponse(error));
                 }
