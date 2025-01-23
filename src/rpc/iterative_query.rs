@@ -7,6 +7,7 @@ use std::{collections::HashSet, rc::Rc};
 use tracing::{debug, trace};
 
 use super::{socket::KrpcSocket, ClosestNodes};
+use crate::common::{FindNodeRequestArguments, GetPeersRequestArguments, GetValueRequestArguments};
 use crate::{
     common::{Id, Node, RequestSpecific, RequestTypeSpecific, MAX_BUCKET_SIZE_K},
     rpc::Response,
@@ -26,12 +27,28 @@ pub(crate) struct IterativeQuery {
     public_address_votes: HashMap<SocketAddrV4, u16>,
 }
 
+#[derive(Debug)]
+pub enum GetRequestSpecific {
+    FindNode(FindNodeRequestArguments),
+    GetPeers(GetPeersRequestArguments),
+    GetValue(GetValueRequestArguments),
+}
+
 impl IterativeQuery {
-    pub fn new(target: Id, request: RequestSpecific) -> Self {
-        trace!(?target, ?request, "New Query");
+    pub fn new(requester_id: Id, target: Id, request: GetRequestSpecific) -> Self {
+        let request_type = match request {
+            GetRequestSpecific::FindNode(s) => RequestTypeSpecific::FindNode(s),
+            GetRequestSpecific::GetPeers(s) => RequestTypeSpecific::GetPeers(s),
+            GetRequestSpecific::GetValue(s) => RequestTypeSpecific::GetValue(s),
+        };
+
+        trace!(?target, ?request_type, "New Query");
 
         Self {
-            request,
+            request: RequestSpecific {
+                requester_id,
+                request_type,
+            },
 
             closest: ClosestNodes::new(target),
             responders: ClosestNodes::new(target),

@@ -7,10 +7,9 @@ use crate::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-        RequestTypeSpecific,
     },
     dht::{ActorMessage, Dht, DhtPutError, DhtWasShutdown, ResponseSender},
-    rpc::{Info, PutError},
+    rpc::{GetRequestSpecific, Info, PutError},
 };
 
 impl Dht {
@@ -77,7 +76,7 @@ impl AsyncDht {
     pub async fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 
-        let request = RequestTypeSpecific::FindNode(FindNodeRequestArguments { target });
+        let request = GetRequestSpecific::FindNode(FindNodeRequestArguments { target });
 
         self.0
              .0
@@ -116,7 +115,7 @@ impl AsyncDht {
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
         let (sender, receiver) = flume::unbounded::<Vec<SocketAddrV4>>();
 
-        let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
+        let request = GetRequestSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
         self.0
              .0
@@ -166,7 +165,7 @@ impl AsyncDht {
     pub async fn get_immutable(&self, target: Id) -> Result<Option<Box<[u8]>>, DhtWasShutdown> {
         let (sender, receiver) = flume::unbounded::<Box<[u8]>>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+        let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
             target,
             seq: None,
             salt: None,
@@ -219,7 +218,7 @@ impl AsyncDht {
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+        let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
             target,
             seq,
             salt: salt.map(|s| s.into()),

@@ -17,9 +17,8 @@ use crate::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
-        RequestTypeSpecific,
     },
-    rpc::{Info, PutError, Response, Rpc},
+    rpc::{GetRequestSpecific, Info, PutError, Response, Rpc},
     server::Server,
     Node,
 };
@@ -195,7 +194,7 @@ impl Dht {
     pub fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
 
-        let request = RequestTypeSpecific::FindNode(FindNodeRequestArguments { target });
+        let request = GetRequestSpecific::FindNode(FindNodeRequestArguments { target });
 
         self.0
             .send(ActorMessage::Get(
@@ -232,7 +231,7 @@ impl Dht {
         // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
         let (sender, receiver) = flume::unbounded::<Vec<SocketAddrV4>>();
 
-        let request = RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash });
+        let request = GetRequestSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
         self.0
             .send(ActorMessage::Get(
@@ -279,7 +278,7 @@ impl Dht {
     pub fn get_immutable(&self, target: Id) -> Result<Option<Box<[u8]>>, DhtWasShutdown> {
         let (sender, receiver) = flume::unbounded::<Box<[u8]>>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments {
+        let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
             target,
             seq: None,
             salt: None,
@@ -331,7 +330,7 @@ impl Dht {
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let request = RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
+        let request = GetRequestSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
 
         self.0
             .send(ActorMessage::Get(
@@ -399,7 +398,9 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                                 }
                             };
 
-                            get_senders.insert(target, sender);
+                            let senders = get_senders.entry(target).or_insert(vec![]);
+
+                            senders.push(sender);
                         }
                         ActorMessage::ToBootstrap(sender) => {
                             let _ = sender.send(rpc.routing_table().to_bootstrap());
@@ -411,16 +412,22 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
                 // Response for an ongoing GET query
                 if let Some((target, response)) = report.query_response {
-                    if let Some(sender) = get_senders.get(&target) {
-                        send(sender, response);
+                    if let Some(senders) = get_senders.get(&target) {
+                        for sender in senders {
+                            send(sender, response.clone());
+                        }
                     }
                 }
 
                 // Response for finished FIND_NODE query
                 for (id, closest_nodes) in report.done_find_node_queries {
-                    if let Some(ResponseSender::ClosestNodes(sender)) = get_senders.remove(&id) {
-                        let _ = sender.send(closest_nodes);
-                    };
+                    if let Some(senders) = get_senders.remove(&id) {
+                        for sender in senders {
+                            if let ResponseSender::ClosestNodes(sender) = sender {
+                                let _ = sender.send(closest_nodes.clone());
+                            }
+                        }
+                    }
                 }
 
                 // Cleanup done PUT query and send a resulting error if any.
@@ -466,7 +473,7 @@ fn send(sender: &ResponseSender, response: Response) {
 pub(crate) enum ActorMessage {
     Info(Sender<Info>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
-    Get(Id, RequestTypeSpecific, ResponseSender),
+    Get(Id, GetRequestSpecific, ResponseSender),
     Shutdown(Sender<()>),
     Check(Sender<Result<(), std::io::Error>>),
     ToBootstrap(Sender<Vec<String>>),

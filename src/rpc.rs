@@ -34,6 +34,7 @@ pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
 pub use config::Config;
 pub use info::Info;
+pub use iterative_query::GetRequestSpecific;
 pub use put_query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
@@ -384,7 +385,7 @@ impl Rpc {
             };
 
             self.get(
-                RequestTypeSpecific::GetValue(GetValueRequestArguments {
+                GetRequestSpecific::GetValue(GetValueRequestArguments {
                     target,
                     seq: None,
                     salt,
@@ -415,16 +416,13 @@ impl Rpc {
     ///     through the query otherwise.
     pub fn get(
         &mut self,
-        request: RequestTypeSpecific,
+        request: GetRequestSpecific,
         extra_nodes: Option<&[SocketAddrV4]>,
     ) -> Option<Vec<Response>> {
         let target = match request {
-            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target }) => target,
-            RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => info_hash,
-            RequestTypeSpecific::GetValue(GetValueRequestArguments { target, .. }) => target,
-            _ => {
-                return None;
-            }
+            GetRequestSpecific::FindNode(FindNodeRequestArguments { target }) => target,
+            GetRequestSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => info_hash,
+            GetRequestSpecific::GetValue(GetValueRequestArguments { target, .. }) => target,
         };
 
         // If query is still active, no need to create a new one.
@@ -438,13 +436,7 @@ impl Rpc {
             debug!(?node_id, "Bootstraping the routing table");
         }
 
-        let mut query = IterativeQuery::new(
-            target,
-            RequestSpecific {
-                requester_id: *node_id,
-                request_type: request,
-            },
-        );
+        let mut query = IterativeQuery::new(*self.id(), target, request);
 
         // Seed the query either with the closest nodes from the routing table, or the
         // bootstrapping nodes if the closest nodes are not enough.
@@ -536,7 +528,15 @@ impl Rpc {
                         }
                         RequestSpecific { request_type, .. } => {
                             tracing::trace!("custom server returned a GET request, sending it.");
-                            let _ = self.get(request_type, extra_nodes.as_deref());
+
+                            let request = match request_type {
+                                RequestTypeSpecific::FindNode(s) => GetRequestSpecific::FindNode(s),
+                                RequestTypeSpecific::GetValue(s) => GetRequestSpecific::GetValue(s),
+                                RequestTypeSpecific::GetPeers(s) => GetRequestSpecific::GetPeers(s),
+                                _ => unreachable!(),
+                            };
+
+                            let _ = self.get(request, extra_nodes.as_deref());
                         }
                     }
                 }
@@ -561,7 +561,7 @@ impl Rpc {
                     );
 
                     self.get(
-                        RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: new_id }),
+                        GetRequestSpecific::FindNode(FindNodeRequestArguments { target: new_id }),
                         None,
                     );
 
@@ -809,7 +809,7 @@ impl Rpc {
         }
 
         self.get(
-            RequestTypeSpecific::FindNode(FindNodeRequestArguments { target: *self.id() }),
+            GetRequestSpecific::FindNode(FindNodeRequestArguments { target: *self.id() }),
             None,
         );
     }

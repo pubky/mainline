@@ -456,7 +456,6 @@ impl Message {
                                                 target: Id::from_bytes(arguments.target)?,
                                                 v: arguments.v,
                                                 k,
-                                                // Should panic if missing.
                                                 seq: arguments.seq.expect(
                                                     "Put mutable message to have sequence number",
                                                 ),

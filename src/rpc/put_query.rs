@@ -40,9 +40,8 @@ impl PutQuery {
         socket: &mut KrpcSocket,
         nodes: Box<[Rc<Node>]>,
     ) -> Result<(), PutError> {
-        // Already started.
         if !self.inflight_requests.is_empty() {
-            panic!("should not call PutQuery.start() twice");
+            return Err(PutError::PutQueryIsInflight(self.target));
         };
 
         let target = self.target;
