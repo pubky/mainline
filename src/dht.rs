@@ -388,7 +388,9 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             if let Err(error) = rpc.put(request) {
                                 let _ = sender.send(Err(error));
                             } else {
-                                put_senders.insert(target, sender);
+                                let senders = put_senders.entry(target).or_insert(vec![]);
+
+                                senders.push(sender);
                             };
                         }
                         ActorMessage::Get(target, request, sender) => {
@@ -432,12 +434,16 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
                 // Cleanup done PUT query and send a resulting error if any.
                 for (id, error) in report.done_put_queries {
-                    if let Some(sender) = put_senders.remove(&id) {
-                        let _ = sender.send(if let Some(error) = error {
+                    if let Some(senders) = put_senders.remove(&id) {
+                        let result = if let Some(error) = error {
                             Err(error)
                         } else {
                             Ok(id)
-                        });
+                        };
+
+                        for sender in senders {
+                            let _ = sender.send(result.clone());
+                        }
                     }
                 }
 
@@ -712,5 +718,126 @@ mod test {
         let id = a.put_immutable(&[1, 2, 3]).unwrap();
 
         assert_eq!(a.put_immutable(&[1, 2, 3]).unwrap(), id);
+    }
+
+    #[test]
+    fn concurrent_get_mutable() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+        let b = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+        let value = b"Hello World!";
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        a.put_mutable(item.clone()).unwrap();
+
+        let _response_first = b
+            .get_mutable(signer.verifying_key().as_bytes(), None, None)
+            .unwrap()
+            .next()
+            .expect("No mutable values");
+
+        let response_second = b
+            .get_mutable(signer.verifying_key().as_bytes(), None, None)
+            .unwrap()
+            .next()
+            .expect("No mutable values");
+
+        assert_eq!(&response_second, &item);
+    }
+
+    #[test]
+    fn concurrent_put_mutable_same() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+        let value = b"Hello World!";
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        let mut handles = vec![];
+
+        for _ in 0..2 {
+            let client = client.clone();
+            let item = item.clone();
+
+            let handle = std::thread::spawn(move || client.put_mutable(item).unwrap());
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn concurrent_put_mutable_different() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let mut handles = vec![];
+
+        for i in 0..2 {
+            let client = client.clone();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let seq = 1000;
+
+            let mut value = b"Hello World!".to_vec();
+            value.push(i);
+
+            let item = MutableItem::new(signer.clone(), &value, seq, None);
+
+            let handle = std::thread::spawn(move || {
+                let result = client.put_mutable(item);
+                if i == 0 {
+                    assert!(matches!(result, Ok(_)))
+                } else {
+                    assert!(matches!(
+                        result,
+                        Err(DhtPutError::PutError(PutError::ConcurrentPutMutable(_)))
+                    ))
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }

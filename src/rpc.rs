@@ -285,9 +285,12 @@ impl Rpc {
                 self.responders_based_dht_size_estimates_count += 1;
 
                 if let Some(put_query) = self.put_queries.get_mut(id) {
-                    if let Err(error) = put_query.start(&mut self.socket, closest_responding_nodes)
-                    {
-                        done_put_queries.push((*id, Some(error)))
+                    if !put_query.started() {
+                        if let Err(error) =
+                            put_query.start(&mut self.socket, closest_responding_nodes)
+                        {
+                            done_put_queries.push((*id, Some(error)))
+                        }
                     }
                 }
             };
@@ -361,10 +364,28 @@ impl Rpc {
             PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, .. }) => target,
         };
 
-        if self.put_queries.contains_key(&target) {
-            debug!(?target, "Put query for the same target is already inflight");
+        if let Some(PutRequestSpecific::PutMutable(PutMutableRequestArguments {
+            sig: existing_sig,
+            ..
+        })) = self
+            .put_queries
+            .get(&target)
+            .map(|existing| &existing.request)
+        {
+            if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
+                sig: incoming_sig,
+                ..
+            }) = &request
+            {
+                if incoming_sig != existing_sig {
+                    debug!(?target, "ConcurrentPutMutable");
 
-            return Err(PutError::PutQueryIsInflight(target));
+                    return Err(PutError::ConcurrentPutMutable(target));
+                }
+            };
+
+            // Noop
+            return Ok(());
         }
 
         let mut query = PutQuery::new(target, request.clone());

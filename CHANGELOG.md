@@ -48,6 +48,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes` 
 - All tracing logs are either `TRACE` (for krpcsocket), `DEBUG`, or `INFO` only for rare and singular events, 
   like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
+- Enable calling `Rpc::put()` multiple times concurrently except for different `MutableItem`, where we return `PutError::ConcurrentPutMutable`.
 
 ### Removed
 

@@ -20,7 +20,7 @@ pub struct PutQuery {
     /// Nodes that confirmed success
     stored_at: u8,
     inflight_requests: Vec<u16>,
-    request: PutRequestSpecific,
+    pub request: PutRequestSpecific,
     errors: Vec<(u8, ErrorSpecific)>,
 }
 
@@ -40,8 +40,8 @@ impl PutQuery {
         socket: &mut KrpcSocket,
         nodes: Box<[Rc<Node>]>,
     ) -> Result<(), PutError> {
-        if !self.inflight_requests.is_empty() {
-            return Err(PutError::PutQueryIsInflight(self.target));
+        if self.started() {
+            panic!("should not call PutQuery::start() twice");
         };
 
         let target = self.target;
@@ -74,6 +74,10 @@ impl PutQuery {
         }
 
         Ok(())
+    }
+
+    pub fn started(&self) -> bool {
+        !self.inflight_requests.is_empty()
     }
 
     pub fn inflight(&self, tid: u16) -> bool {
@@ -197,7 +201,8 @@ pub enum PutError {
     #[error("Query Error Response")]
     ErrorResponse(Option<ErrorSpecific>),
 
-    /// [crate::rpc::Rpc::put] query is already inflight to the same target
-    #[error("Put query is already inflight to the same target: {0}")]
-    PutQueryIsInflight(Id),
+    /// Calling [crate::rpc::Rpc::put] twice for the same target with different
+    /// [crate::MutableItem] risks losing data.
+    #[error("Concurrent PUT queries for different mutable items with the same target ({0})")]
+    ConcurrentPutMutable(Id),
 }

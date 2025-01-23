@@ -447,4 +447,139 @@ mod test {
 
         futures::executor::block_on(test());
     }
+
+    #[test]
+    fn concurrent_get_mutable() {
+        async fn test() {
+            let testnet = Testnet::new(10).unwrap();
+
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+            let b = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let seq = 1000;
+            let value = b"Hello World!";
+
+            let item = MutableItem::new(signer.clone(), value, seq, None);
+
+            a.put_mutable(item.clone()).await.unwrap();
+
+            let _response_first = b
+                .get_mutable(signer.verifying_key().as_bytes(), None, None)
+                .unwrap()
+                .next()
+                .await
+                .expect("No mutable values");
+
+            let response_second = b
+                .get_mutable(signer.verifying_key().as_bytes(), None, None)
+                .unwrap()
+                .next()
+                .await
+                .expect("No mutable values");
+
+            assert_eq!(&response_second, &item);
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn concurrent_put_mutable_same() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap()
+            .as_async();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+        let value = b"Hello World!";
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        let mut handles = vec![];
+
+        for _ in 0..2 {
+            let client = client.clone();
+            let item = item.clone();
+
+            let handle = std::thread::spawn(move || {
+                futures::executor::block_on(async { client.put_mutable(item).await.unwrap() });
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn concurrent_put_mutable_different() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap()
+            .as_async();
+
+        let mut handles = vec![];
+
+        for i in 0..2 {
+            let client = client.clone();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let seq = 1000;
+
+            let mut value = b"Hello World!".to_vec();
+            value.push(i);
+
+            let item = MutableItem::new(signer.clone(), &value, seq, None);
+
+            let handle = std::thread::spawn(move || {
+                futures::executor::block_on(async {
+                    let result = client.put_mutable(item).await;
+                    if i == 0 {
+                        assert!(matches!(result, Ok(_)))
+                    } else {
+                        assert!(matches!(
+                            result,
+                            Err(DhtPutError::PutError(PutError::ConcurrentPutMutable(_)))
+                        ))
+                    }
+                });
+            });
+
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
 }
