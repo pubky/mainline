@@ -133,9 +133,9 @@ impl PutQuery {
                     "Put Query: failed"
                 );
 
-                return Err(PutError::ErrorResponse(
-                    most_common_error.cloned().map(|(_, error)| error),
-                ));
+                return Err(most_common_error
+                    .map(|(_, error)| PutError::ErrorResponse(error.clone()))
+                    .unwrap_or(PutError::Timeout));
             }
 
             debug!(?target, stored_at = ?self.stored_at, "PutQuery Done successfully");
@@ -152,9 +152,9 @@ impl PutQuery {
                 "PutQuery for MutableItem was rejected by most nodes with 3xx code."
             );
 
-            return Err(PutError::ErrorResponse(
-                most_common_error.cloned().map(|(_, error)| error),
-            ));
+            return Err(most_common_error
+                .map(|(_, error)| PutError::ErrorResponse(error.clone()))
+                .unwrap_or(PutError::Timeout));
         }
 
         Ok(false)
@@ -197,9 +197,13 @@ pub enum PutError {
     /// Either Put Query faild to store at any nodes,
     /// OR during [PUT_MUTABLE](https://www.bittorrent.org/beps/bep_0044.html) request, majority of nodes responded with a 3xx error.
     ///
-    /// Either way; contains the most common error response if any.
+    /// Either way; contains the most common error response.
     #[error("Query Error Response")]
-    ErrorResponse(Option<ErrorSpecific>),
+    ErrorResponse(ErrorSpecific),
+
+    /// PutQuery timed out with no responses neither success or errors
+    #[error("PutQuery timed out with no responses neither success or errors")]
+    Timeout,
 
     /// Calling [crate::rpc::Rpc::put] twice for the same target with different
     /// [crate::MutableItem] risks losing data.
