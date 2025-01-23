@@ -3,7 +3,8 @@
 mod closest_nodes;
 mod config;
 mod info;
-mod query;
+mod iterative_query;
+mod put_query;
 mod socket;
 
 use std::collections::HashMap;
@@ -15,6 +16,9 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 use tracing::{debug, error, info};
 
+use iterative_query::IterativeQuery;
+use put_query::PutQuery;
+
 use crate::common::{
     validate_immutable, ErrorSpecific, FindNodeRequestArguments, GetImmutableResponseArguments,
     GetMutableResponseArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, Message,
@@ -24,14 +28,13 @@ use crate::common::{
 };
 use crate::server::{DefaultServer, Server};
 
-use query::{IterativeQuery, PutQuery};
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
 pub use config::Config;
 pub use info::Info;
-pub use query::PutError;
+pub use put_query::PutError;
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
@@ -230,7 +233,7 @@ impl Rpc {
         // === Tick Queries ===
 
         for (id, query) in self.put_queries.iter_mut() {
-            match query.tick(&mut self.socket) {
+            match query.tick(&self.socket) {
                 Ok(done) => {
                     if done {
                         done_put_queries.push((*id, None));
