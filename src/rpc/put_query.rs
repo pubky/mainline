@@ -168,15 +168,12 @@ impl PutQuery {
     }
 
     fn majority_nodes_rejected_put_mutable(&self) -> bool {
-        let threshold = (self.inflight_requests.len() / 2) as u8;
+        let half = ((self.inflight_requests.len() / 2) + 1) as u8;
 
         matches!(self.request, PutRequestSpecific::PutMutable(_))
             && self
                 .most_common_error()
-                .as_ref()
-                .map(|(count, error)| {
-                    (error.code == 301 || error.code == 302) && *count >= threshold
-                })
+                .map(|(count, error)| (error.code == 301 || error.code == 302) && *count >= half)
                 .unwrap_or(false)
     }
 
