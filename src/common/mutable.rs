@@ -31,8 +31,8 @@ pub struct MutableItem {
 
 impl MutableItem {
     /// Create a new mutable item from a signing key, value, sequence number and optional salt.
-    pub fn new(signer: SigningKey, value: &[u8], seq: i64, salt: Option<Box<[u8]>>) -> Self {
-        let signable = encode_signable(seq, value, salt.as_deref());
+    pub fn new(signer: SigningKey, value: &[u8], seq: i64, salt: Option<&[u8]>) -> Self {
+        let signable = encode_signable(seq, value, salt);
         let signature = signer.sign(&signable);
 
         Self::new_signed_unchecked(
@@ -73,15 +73,15 @@ impl MutableItem {
         signature: [u8; 64],
         value: &[u8],
         seq: i64,
-        salt: Option<Box<[u8]>>,
+        salt: Option<&[u8]>,
     ) -> Self {
         Self {
-            target: MutableItem::target_from_key(&key, salt.as_deref()),
+            target: MutableItem::target_from_key(&key, salt),
             key,
             value: value.into(),
             seq,
             signature,
-            salt,
+            salt: salt.map(|s| s.into()),
             cas: None,
         }
     }

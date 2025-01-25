@@ -260,6 +260,72 @@ impl AsyncDht {
     }
 
     /// Put a mutable data to the DHT.
+    ///
+    /// # Lost Update Problem
+    ///
+    /// As mainline DHT is a distributed system, it is vulnerable to
+    /// [Write–write conflict](https://en.wikipedia.org/wiki/Write-write_conflict).
+    ///
+    /// ## Read first
+    ///
+    /// To mitigate this risk, you should call the [Self::get_mutable_most_recent] method
+    /// before authoring the new [MutableItem].
+    ///
+    /// If you found a most recent item, create your new [MutableItem] based on the most recent:
+    ///     1. Optionally Create a new value to take the most recent's value in consideration.
+    ///     2. Increment the sequence number to be higher than the most recent's.
+    ///     3. Set the [MutableItem::cas] field to the most recent [MutableItem::seq].
+    /// Optionally change the value of the new item value based on the most recent's.
+    ///
+    ///```rust
+    /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
+    ///
+    /// let testnet = Testnet::new(3).unwrap();
+    /// let client = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap().as_async();
+    ///
+    /// let signing_key = SigningKey::from_bytes(&[0; 32]);
+    /// let salt = Some(b"salt".as_ref());
+    ///
+    /// futures::executor::block_on(async move {
+    ///     let item = if let Some(most_recent) = client
+    ///         .get_mutable_most_recent(signing_key.as_bytes(), salt)
+    ///         .await
+    ///         .unwrap()
+    ///     {
+    ///         let mut new_value = most_recent.value().to_vec();
+    ///         new_value.extend_from_slice(b" more data");
+    ///
+    ///         let most_recent_seq = most_recent.seq();
+    ///         let new_seq = most_recent_seq + 1;
+    ///
+    ///         MutableItem::new(signing_key, &new_value, new_seq, salt)
+    ///             .with_cas(most_recent_seq)
+    ///     } else {
+    ///         MutableItem::new(signing_key, b"first value", 1, salt)
+    ///     };
+    ///
+    ///     client.put_mutable(item).await.unwrap();
+    /// });
+    /// ```
+    ///
+    /// ## Conflict error
+    ///
+    /// If you are lucky, you will get a [PutError::Conflict] error.
+    ///
+    /// This will happen if:
+    ///
+    /// 1. Any of the local checks fail:
+    ///     - [MutableItem::cas] field is more than or equal [MutableItem::seq].
+    ///     - There is a concurrent put mutable query, with different signature
+    ///         (not the same item) and the new item `cas` doesn't match the inflight
+    ///         query's item (you are not aware of the concurrent query).
+    /// 2. Most remote nodes respond with either of these errors:
+    ///     - `301 the CAS hash mismatched, re-read value and try again.`
+    ///     - `302 sequence number less than current.`
+    ///
+    /// ## Read again
+    ///
+    /// If you get a [PutError::Conflict] error, repeat the process (read first) again.
     pub async fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 

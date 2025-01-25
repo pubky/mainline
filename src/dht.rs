@@ -376,12 +376,38 @@ impl Dht {
     /// To mitigate this risk, you should call the [Self::get_mutable_most_recent] method
     /// before authoring the new [MutableItem].
     ///
-    /// Then set the [MutableItem::cas] field to the most recent [MutableItem::seq] if any.
+    /// If you found a most recent item, create your new [MutableItem] based on the most recent:
+    ///     1. Optionally Create a new value to take the most recent's value in consideration.
+    ///     2. Increment the sequence number to be higher than the most recent's.
+    ///     3. Set the [MutableItem::cas] field to the most recent [MutableItem::seq].
+    /// Optionally change the value of the new item value based on the most recent's.
     ///
-    /// ```rust
-    /// if let Some(cas) = most_recent.map(|item| item.seq) {
-    ///     new_item.with_cas(cas);
-    /// }
+    ///```rust
+    /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
+    ///
+    /// let testnet = Testnet::new(3).unwrap();
+    /// let client = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
+    ///
+    /// let signing_key = SigningKey::from_bytes(&[0; 32]);
+    /// let salt = Some(b"salt".as_ref());
+    ///
+    /// let item = if let Some(most_recent) = client
+    ///     .get_mutable_most_recent(signing_key.as_bytes(), salt)
+    ///     .unwrap()
+    /// {
+    ///     let mut new_value = most_recent.value().to_vec();
+    ///     new_value.extend_from_slice(b" more data");
+    ///
+    ///     let most_recent_seq = most_recent.seq();
+    ///     let new_seq = most_recent_seq + 1;
+    ///
+    ///     MutableItem::new(signing_key, &new_value, new_seq, salt)
+    ///         .with_cas(most_recent_seq)
+    /// } else {
+    ///     MutableItem::new(signing_key, b"first value", 1, salt)
+    /// };
+    ///
+    /// client.put_mutable(item).unwrap();
     /// ```
     ///
     /// ## Conflict error
@@ -951,11 +977,10 @@ mod test {
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
             228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
         ]);
-        let value = b"Hello World!".to_vec();
 
         // First
         {
-            let item = MutableItem::new(signer.clone(), &value, 1000, None);
+            let item = MutableItem::new(signer.clone(), &[], 1000, None);
 
             let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
             let target = *item.target();
@@ -971,7 +996,7 @@ mod test {
 
         // Second
         {
-            let mut item = MutableItem::new(signer, &value, 1001, None);
+            let mut item = MutableItem::new(signer, &[], 1001, None);
 
             let most_recent = client.get_mutable_most_recent(item.key(), None).unwrap();
 
@@ -996,14 +1021,13 @@ mod test {
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
             228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
         ]);
-        let value = b"Hello World!".to_vec();
 
         client
-            .put_mutable(MutableItem::new(signer.clone(), &value, 1001, None))
+            .put_mutable(MutableItem::new(signer.clone(), &[], 1001, None))
             .unwrap();
 
         assert!(matches!(
-            client.put_mutable(MutableItem::new(signer, &value, 1000, None)),
+            client.put_mutable(MutableItem::new(signer, &[], 1000, None)),
             Err(DhtPutError::PutError(PutError::Conflict))
         ));
     }
@@ -1021,14 +1045,13 @@ mod test {
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
             228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
         ]);
-        let value = b"Hello World!".to_vec();
 
         client
-            .put_mutable(MutableItem::new(signer.clone(), &value, 1001, None))
+            .put_mutable(MutableItem::new(signer.clone(), &[], 1001, None))
             .unwrap();
 
         assert!(matches!(
-            client.put_mutable(MutableItem::new(signer, &value, 1002, None).with_cas(1000)),
+            client.put_mutable(MutableItem::new(signer, &[], 1002, None).with_cas(1000)),
             Err(DhtPutError::PutError(PutError::Conflict))
         ));
     }
