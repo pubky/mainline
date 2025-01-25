@@ -35,7 +35,7 @@ pub use closest_nodes::ClosestNodes;
 pub use config::Config;
 pub use info::Info;
 pub use iterative_query::GetRequestSpecific;
-pub use put_query::PutError;
+pub use put_query::{ConcurrencyError, PutError, PutQueryError};
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
@@ -373,20 +373,30 @@ impl Rpc {
             .get(&target)
             .map(|existing| &existing.request)
         {
-            if let PutRequestSpecific::PutMutable(PutMutableRequestArguments { sig, cas, .. }) =
-                &request
+            if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
+                sig,
+                cas,
+                seq,
+                ..
+            }) = &request
             {
                 if sig == inflight_sig {
                     // Noop, the inflight query is sufficient.
                     return Ok(());
-                } else if cas.map(|cas| cas == *inflight_seq).unwrap_or_default() {
-                    // The user is aware of the inflight query and whiches to overrides it.
-                    //
-                    // Remove the inflight request, and create a new one.
-                    self.put_queries.remove(&target);
+                } else if seq < inflight_seq {
+                    return Err(ConcurrencyError::NotMostRecent)?;
+                } else if let Some(cas) = cas {
+                    if cas == inflight_seq {
+                        // The user is aware of the inflight query and whiches to overrides it.
+                        //
+                        // Remove the inflight request, and create a new one.
+                        self.put_queries.remove(&target);
+                    } else {
+                        return Err(ConcurrencyError::ConflictRisk)?;
+                    }
                 } else {
-                    return Err(PutError::Conflict);
-                }
+                    return Err(ConcurrencyError::ConflictRisk)?;
+                };
             };
         }
 

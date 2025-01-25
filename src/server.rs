@@ -370,7 +370,7 @@ impl Server for DefaultServer {
                             }
                         };
 
-                        if seq <= previous.seq() {
+                        if seq < previous.seq() {
                             debug!(
                                 ?target,
                                 ?requester_id,

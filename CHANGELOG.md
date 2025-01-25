@@ -24,8 +24,8 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Id::is_valid_for_ipv4`.
 - Add `RoutingTable::nodes()` iterator.
 - Add `Dht::get_mutable_most_recent` and `AsyncDht::get_mutable_most_recent` to get the most recent mutable item from the network.
-- Add `PutError::Conflict` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
-- Add `PutError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
+- Add `PutQueryError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
+- Add `PutMutableError::Concurrrency(ConcurrrencyError)` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
 
 ### Removed
 
@@ -47,14 +47,15 @@ All notable changes to mainline dht will be documented in this file.
   and `RpcTickReport::qurey_response` are added.
 - `Info::local_addr()` is infallible.
 - `MutableItem::seq()` returns `i64` instead of a refernece.
-- `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes` 
-- `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes` 
+- `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.
+- `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes`.
+- `Dht::put_immutable()` and `AsyncDh::put_immutable()` return `PutImmutableError`.
+- `Dht::announce_peer()` and `AsyncDh::announce_peer()` return `AnnouncePeerError`.
+- `Dht::put_mutable()` and `AsyncDh::put_mutable()` return `PutMutableError`.
+- Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
 - All tracing logs are either `TRACE` (for krpcsocket), `DEBUG`, or `INFO` only for rare and singular events, 
   like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
-- Return `PutError::Conflict` from `Dht::put_mutable` and `AsyncDht::put_mutable` if the `MutableItem::cas` is more
-  than or equal the `MutableItem::seq`.
-- Enable calling `Rpc::put()` multiple times concurrently except for different `MutableItem` and `cas` is not set to
-  the inflight put mutable query, where we return `PutError::Conflict`.
+- Change `PutError` to contain transparent elements for generic `PutQueryError`, and more specialized `ConcurrrencyError`.
 
 ### Removed
 

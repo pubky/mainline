@@ -48,7 +48,7 @@ impl PutQuery {
         trace!(?target, "PutQuery start");
 
         if nodes.is_empty() {
-            Err(PutError::NoClosestNodes)?;
+            Err(PutQueryError::NoClosestNodes)?;
         }
 
         if nodes.len() > u8::MAX as usize {
@@ -124,7 +124,7 @@ impl PutQuery {
             let target = self.target;
 
             if self.stored_at == 0 {
-                let most_common_error = self.errors.first();
+                let most_common_error = self.most_common_error();
 
                 debug!(
                     ?target,
@@ -134,22 +134,15 @@ impl PutQuery {
                 );
 
                 return Err(most_common_error
-                    .map(|(_, error)| {
-                        if error.code == 301 || error.code == 302 {
-                            PutError::Conflict
-                        } else {
-                            PutError::ErrorResponse(error.clone())
-                        }
-                    })
-                    .unwrap_or(PutError::Timeout));
+                    .map(|(_, error)| error)
+                    .unwrap_or(PutQueryError::Timeout.into()));
             }
 
             debug!(?target, stored_at = ?self.stored_at, "PutQuery Done successfully");
 
             return Ok(true);
-        } else if self.majority_nodes_rejected_put_mutable() {
+        } else if let Some(most_common_error) = self.majority_nodes_rejected_put_mutable() {
             let target = self.target;
-            let most_common_error = self.most_common_error();
 
             debug!(
                 ?target,
@@ -158,7 +151,7 @@ impl PutQuery {
                 "PutQuery for MutableItem was rejected by most nodes with 3xx code."
             );
 
-            return Err(PutError::Conflict);
+            return Err(most_common_error)?;
         }
 
         Ok(false)
@@ -171,24 +164,50 @@ impl PutQuery {
             .any(|&tid| socket.inflight(&tid))
     }
 
-    fn majority_nodes_rejected_put_mutable(&self) -> bool {
+    fn majority_nodes_rejected_put_mutable(&self) -> Option<ConcurrencyError> {
         let half = ((self.inflight_requests.len() / 2) + 1) as u8;
 
-        matches!(self.request, PutRequestSpecific::PutMutable(_))
-            && self
-                .most_common_error()
-                .map(|(count, error)| (error.code == 301 || error.code == 302) && *count >= half)
-                .unwrap_or(false)
+        if matches!(self.request, PutRequestSpecific::PutMutable(_)) {
+            return self.most_common_error().and_then(|(count, error)| {
+                if count >= half {
+                    if let PutError::Concurrency(err) = error {
+                        Some(err)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+        };
+
+        None
     }
 
-    fn most_common_error(&self) -> Option<&(u8, ErrorSpecific)> {
-        self.errors.first()
+    fn most_common_error(&self) -> Option<(u8, PutError)> {
+        self.errors
+            .first()
+            .and_then(|(count, error)| match error.code {
+                301 => Some((*count, PutError::from(ConcurrencyError::CasFailed))),
+                302 => Some((*count, PutError::from(ConcurrencyError::NotMostRecent))),
+                _ => None,
+            })
     }
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
-/// Query errors
+/// PutQuery errors
 pub enum PutError {
+    #[error(transparent)]
+    Query(#[from] PutQueryError),
+
+    #[error(transparent)]
+    Concurrency(#[from] ConcurrencyError),
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+/// Common PutQuery errors
+pub enum PutQueryError {
     /// Failed to find any nodes close, usually means dht node failed to bootstrap,
     /// so the routing table is empty. Check the machine's access to UDP socket,
     /// or find better bootstrapping nodes.
@@ -205,11 +224,30 @@ pub enum PutError {
     /// PutQuery timed out with no responses neither success or errors
     #[error("PutQuery timed out with no responses neither success or errors")]
     Timeout,
+}
 
-    /// Conflict risk (similar to 409 Conflict HTTP error) caused by CAS mismatch,
-    /// or a more recent mutable item or concurrently write with no CAS risking losing data.
+#[derive(thiserror::Error, Debug, Clone)]
+/// PutQuery for [crate::MutableItem] errors
+pub enum ConcurrencyError {
+    /// Trying to PUT mutable items with the same `key`, and `salt` but different `seq`.
+    ///
+    /// Moreover, the more recent item does _NOT_ mention the the earlier
+    /// item's `seq` in its `cas` field.
+    ///
+    /// This risks a [Lost Update Problem](https://en.wikipedia.org/wiki/Write-write_conflict).
+    ///
+    /// Try reading most recent mutable item before writing again,
+    /// and make sure to set the `cas` field.
+    #[error("Conflict risk, try reading most recent item before writing again.")]
+    ConflictRisk,
+
+    /// The [crate::MutableItem::seq] is less than or equal the sequence from another signed item.
     ///
     /// Try reading most recent mutable item before writing again.
-    #[error("Conflict risk, read before writing again.")]
-    Conflict,
+    #[error("MutableItem::seq is not the most recent, try reading most recent item before writing again.")]
+    NotMostRecent,
+
+    /// The [crate::MutableItem::cas] field does not match the most recent knonw signed item.
+    #[error("MutableItem::cas check failed, try reading most recent item before writing again.")]
+    CasFailed,
 }

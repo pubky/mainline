@@ -18,7 +18,7 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    rpc::{GetRequestSpecific, Info, PutError, Response, Rpc},
+    rpc::{ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Response, Rpc},
     server::Server,
     Node,
 };
@@ -249,7 +249,7 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
-    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, DhtPutError> {
+    pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, AnnouncePeerError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let (port, implied_port) = match port {
@@ -269,7 +269,13 @@ impl Dht {
 
         Ok(receiver
             .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")?)
+            .expect("Query was dropped before sending a response, please open an issue.")
+            .map_err(|error| match error {
+                PutError::Query(error) => error,
+                PutError::Concurrency(_) => {
+                    unreachable!("should not receieve a concurrency error from announce peer query")
+                }
+            })?)
     }
 
     // === Immutable data ===
@@ -296,7 +302,7 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
-    pub fn put_immutable(&self, value: &[u8]) -> Result<Id, DhtPutError> {
+    pub fn put_immutable(&self, value: &[u8]) -> Result<Id, PutImmutableError> {
         let target: Id = hash_immutable(value).into();
 
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
@@ -312,7 +318,13 @@ impl Dht {
 
         Ok(receiver
             .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")?)
+            .expect("Query was dropped before sending a response, please open an issue.")
+            .map_err(|error| match error {
+                PutError::Query(error) => error,
+                PutError::Concurrency(_) => {
+                    unreachable!("should not receieve a concurrency error from put immutable query")
+                }
+            })?)
     }
 
     // === Mutable data ===
@@ -368,19 +380,12 @@ impl Dht {
     ///
     /// # Lost Update Problem
     ///
-    /// As mainline DHT is a distributed system, it is vulnerable to
-    /// [Write–write conflict](https://en.wikipedia.org/wiki/Write-write_conflict).
+    /// As mainline DHT is a distributed system, it is vulnerable to [Write–write conflict](https://en.wikipedia.org/wiki/Write-write_conflict).
     ///
     /// ## Read first
     ///
-    /// To mitigate this risk, you should call the [Self::get_mutable_most_recent] method
-    /// before authoring the new [MutableItem].
-    ///
-    /// If you found a most recent item, create your new [MutableItem] based on the most recent:
-    ///     1. Optionally Create a new value to take the most recent's value in consideration.
-    ///     2. Increment the sequence number to be higher than the most recent's.
-    ///     3. Set the [MutableItem::cas] field to the most recent [MutableItem::seq].
-    /// Optionally change the value of the new item value based on the most recent's.
+    /// To mitigate the risk of lost updates, you should call the [Self::get_mutable_most_recent] method
+    /// before authoring the new [MutableItem], then modify the new item based on the most recent as in the following example:
     ///
     ///```rust
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
@@ -395,13 +400,16 @@ impl Dht {
     ///     .get_mutable_most_recent(signing_key.as_bytes(), salt)
     ///     .unwrap()
     /// {
+    ///     // 1. Optionally Create a new value to take the most recent's value in consideration.
     ///     let mut new_value = most_recent.value().to_vec();
     ///     new_value.extend_from_slice(b" more data");
     ///
+    ///     // 2. Increment the sequence number to be higher than the most recent's.
     ///     let most_recent_seq = most_recent.seq();
     ///     let new_seq = most_recent_seq + 1;
     ///
     ///     MutableItem::new(signing_key, &new_value, new_seq, salt)
+    ///     // 3. Set the [MutableItem::cas] field to the most recent [MutableItem::seq].
     ///         .with_cas(most_recent_seq)
     /// } else {
     ///     MutableItem::new(signing_key, b"first value", 1, salt)
@@ -410,29 +418,15 @@ impl Dht {
     /// client.put_mutable(item).unwrap();
     /// ```
     ///
-    /// ## Conflict error
+    /// ## Errors
     ///
-    /// If you are lucky, you will get a [PutError::Conflict] error.
+    /// In addition to the [PutQueryError] common with all PUT queries, PUT mutable item
+    /// query has other [Concurrency errors][ConcurrencyError], that try to detect write conflict
+    /// risks or obvious conflicts.
     ///
-    /// This will happen if:
-    ///
-    /// 1. Any of the local checks fail:
-    ///     - [MutableItem::cas] field is more than or equal [MutableItem::seq].
-    ///     - There is a concurrent put mutable query, with different signature
-    ///         (not the same item) and the new item `cas` doesn't match the inflight
-    ///         query's item (you are not aware of the concurrent query).
-    /// 2. Most remote nodes respond with either of these errors:
-    ///     - `301 the CAS hash mismatched, re-read value and try again.`
-    ///     - `302 sequence number less than current.`
-    ///
-    /// ## Read again
-    ///
-    /// If you get a [PutError::Conflict] error, repeat the process (read first) again.
-    pub fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
-        if item.cas().map(|cas| cas >= item.seq()).unwrap_or_default() {
-            return Err(PutError::Conflict)?;
-        }
-
+    /// If you are lucky to get one of these errors (which is not guaranteed), then you should
+    /// read the most recent item again, and repeat the steps in the previous example.
+    pub fn put_mutable(&self, item: MutableItem) -> Result<Id, PutMutableError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let target = *item.target();
@@ -443,9 +437,13 @@ impl Dht {
             .send(ActorMessage::Put(target, request, sender))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver
+        receiver
             .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")?)
+            .expect("Query was dropped before sending a response, please open an issue.")
+            .map_err(|error| match error {
+                PutError::Query(err) => PutMutableError::Query(err),
+                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+            })
     }
 }
 
@@ -614,13 +612,36 @@ impl Testnet {
 }
 
 #[derive(thiserror::Error, Debug)]
-/// Dht Actor errors
-pub enum DhtPutError {
+/// Announce Peer errors.
+pub enum AnnouncePeerError {
     #[error(transparent)]
-    PutError(#[from] PutError),
+    Query(#[from] PutQueryError),
 
     #[error(transparent)]
-    DhtWasShutdown(#[from] DhtWasShutdown),
+    Shutdown(#[from] DhtWasShutdown),
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Put Immutable errors.
+pub enum PutImmutableError {
+    #[error(transparent)]
+    Query(#[from] PutQueryError),
+
+    #[error(transparent)]
+    Shutdown(#[from] DhtWasShutdown),
+}
+
+#[derive(thiserror::Error, Debug)]
+/// Put MutableItem errors.
+pub enum PutMutableError {
+    #[error(transparent)]
+    Query(#[from] PutQueryError),
+
+    #[error(transparent)]
+    Concurrency(#[from] ConcurrencyError),
+
+    #[error(transparent)]
+    Shutdown(#[from] DhtWasShutdown),
 }
 
 #[derive(Debug)]
@@ -639,6 +660,8 @@ mod test {
     use std::str::FromStr;
 
     use ed25519_dalek::SigningKey;
+
+    use crate::rpc::ConcurrencyError;
 
     use super::*;
 
@@ -884,41 +907,6 @@ mod test {
     }
 
     #[test]
-    fn conflict_cas_more_or_equal_than_seq() {
-        let testnet = Testnet::new(10).unwrap();
-
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .build()
-            .unwrap();
-
-        let client = client.clone();
-
-        let signer = SigningKey::from_bytes(&[
-            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
-            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
-        ]);
-
-        let seq = 1000;
-
-        let value = b"Hello World!".to_vec();
-
-        let item = MutableItem::new(signer.clone(), &value, seq, None);
-
-        client.put_mutable(item.clone()).unwrap();
-
-        assert!(matches!(
-            client.put_mutable(item.clone().with_cas(item.seq())),
-            Err(DhtPutError::PutError(PutError::Conflict))
-        ));
-
-        assert!(matches!(
-            client.put_mutable(item.clone().with_cas(item.seq() + 1)),
-            Err(DhtPutError::PutError(PutError::Conflict))
-        ));
-    }
-
-    #[test]
     fn concurrent_put_mutable_different() {
         let testnet = Testnet::new(10).unwrap();
 
@@ -951,7 +939,7 @@ mod test {
                 } else {
                     assert!(matches!(
                         result,
-                        Err(DhtPutError::PutError(PutError::Conflict))
+                        Err(PutMutableError::Concurrency(ConcurrencyError::ConflictRisk))
                     ))
                 }
             });
@@ -1028,7 +1016,9 @@ mod test {
 
         assert!(matches!(
             client.put_mutable(MutableItem::new(signer, &[], 1000, None)),
-            Err(DhtPutError::PutError(PutError::Conflict))
+            Err(PutMutableError::Concurrency(
+                ConcurrencyError::NotMostRecent
+            ))
         ));
     }
 
@@ -1052,7 +1042,7 @@ mod test {
 
         assert!(matches!(
             client.put_mutable(MutableItem::new(signer, &[], 1002, None).with_cas(1000)),
-            Err(DhtPutError::PutError(PutError::Conflict))
+            Err(PutMutableError::Concurrency(ConcurrencyError::CasFailed))
         ));
     }
 }
