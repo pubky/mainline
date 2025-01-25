@@ -17,7 +17,7 @@ pub struct MutableItem {
     /// ed25519 public key
     key: [u8; 32],
     /// sequence number
-    seq: i64,
+    pub(crate) seq: i64,
     /// mutable value
     value: Box<[u8]>,
     /// ed25519 signature
@@ -179,6 +179,20 @@ impl From<MutableItem> for PutMutableRequestArguments {
             sig: item.signature,
             salt: item.salt,
             cas: item.cas,
+        }
+    }
+}
+
+impl From<PutMutableRequestArguments> for MutableItem {
+    fn from(request: PutMutableRequestArguments) -> Self {
+        Self {
+            target: request.target,
+            value: request.v,
+            key: request.k,
+            seq: request.seq,
+            signature: request.sig,
+            salt: request.salt,
+            cas: request.cas,
         }
     }
 }

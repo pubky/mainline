@@ -22,7 +22,7 @@ Running as a client, means you can store and query for values on the DHT, but no
 ```rust
 use mainline::Dht;
 
-let dht = Dht::client(); // or `Dht::default();`
+let dht = Dht::client().unwrap();
 ```
 
 Supported BEPs:
@@ -40,7 +40,7 @@ Running as a server is the same as a client, but you also respond to incoming re
 ```rust
 use mainline::Dht;
 
-let dht = Dht::server(); // or `Dht::builder::server().build();` for more control.
+let dht = Dht::server().unwrap(); // or `Dht::builder::server_mode().build();` 
 ```
 
 Supported BEPs:

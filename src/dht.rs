@@ -343,8 +343,70 @@ impl Dht {
         Ok(receiver.into_iter())
     }
 
+    /// Get the most recent [MutableItem] from the network.
+    pub fn get_mutable_most_recent(
+        &self,
+        public_key: &[u8; 32],
+        salt: Option<&[u8]>,
+    ) -> Result<Option<MutableItem>, DhtWasShutdown> {
+        let mut most_recent = None;
+
+        let iter = self.get_mutable(public_key, salt, None)?;
+
+        for item in iter {
+            if let Some(MutableItem { seq, .. }) = most_recent {
+                if item.seq() > seq {
+                    most_recent = Some(item)
+                }
+            }
+        }
+
+        Ok(most_recent)
+    }
+
     /// Put a mutable data to the DHT.
+    ///
+    /// # Lost Update Problem
+    ///
+    /// As mainline DHT is a distributed system, it is vulnerable to
+    /// [Write–write conflict](https://en.wikipedia.org/wiki/Write-write_conflict).
+    ///
+    /// ## Read first
+    ///
+    /// To mitigate this risk, you should call the [Self::get_mutable_most_recent] method
+    /// before authoring the new [MutableItem].
+    ///
+    /// Then set the [MutableItem::cas] field to the most recent [MutableItem::seq] if any.
+    ///
+    /// ```rust
+    /// if let Some(cas) = most_recent.map(|item| item.seq) {
+    ///     new_item.with_cas(cas);
+    /// }
+    /// ```
+    ///
+    /// ## Conflict error
+    ///
+    /// If you are lucky, you will get a [PutError::Conflict] error.
+    ///
+    /// This will happen if:
+    ///
+    /// 1. Any of the local checks fail:
+    ///     - [MutableItem::cas] field is more than or equal [MutableItem::seq].
+    ///     - There is a concurrent put mutable query, with different signature
+    ///         (not the same item) and the new item `cas` doesn't match the inflight
+    ///         query's item (you are not aware of the concurrent query).
+    /// 2. Most remote nodes respond with either of these errors:
+    ///     - `301 the CAS hash mismatched, re-read value and try again.`
+    ///     - `302 sequence number less than current.`
+    ///
+    /// ## Read again
+    ///
+    /// If you get a [PutError::Conflict] error, repeat the process (read first) again.
     pub fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
+        if item.cas().map(|cas| cas >= item.seq()).unwrap_or_default() {
+            return Err(PutError::Conflict)?;
+        }
+
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let target = *item.target();
@@ -796,6 +858,41 @@ mod test {
     }
 
     #[test]
+    fn conflict_cas_more_or_equal_than_seq() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let client = client.clone();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let seq = 1000;
+
+        let value = b"Hello World!".to_vec();
+
+        let item = MutableItem::new(signer.clone(), &value, seq, None);
+
+        client.put_mutable(item.clone()).unwrap();
+
+        assert!(matches!(
+            client.put_mutable(item.clone().with_cas(item.seq())),
+            Err(DhtPutError::PutError(PutError::Conflict))
+        ));
+
+        assert!(matches!(
+            client.put_mutable(item.clone().with_cas(item.seq() + 1)),
+            Err(DhtPutError::PutError(PutError::Conflict))
+        ));
+    }
+
+    #[test]
     fn concurrent_put_mutable_different() {
         let testnet = Testnet::new(10).unwrap();
 
@@ -828,7 +925,7 @@ mod test {
                 } else {
                     assert!(matches!(
                         result,
-                        Err(DhtPutError::PutError(PutError::ConcurrentPutMutable(_)))
+                        Err(DhtPutError::PutError(PutError::Conflict))
                     ))
                 }
             });
@@ -839,5 +936,100 @@ mod test {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn concurrent_put_mutable_different_with_cas() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+        let value = b"Hello World!".to_vec();
+
+        // First
+        {
+            let item = MutableItem::new(signer.clone(), &value, 1000, None);
+
+            let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+            let target = *item.target();
+            let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item));
+            client
+                .0
+                .send(ActorMessage::Put(target, request, sender))
+                .map_err(|_| DhtWasShutdown)
+                .unwrap();
+        }
+
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Second
+        {
+            let mut item = MutableItem::new(signer, &value, 1001, None);
+
+            let most_recent = client.get_mutable_most_recent(item.key(), None).unwrap();
+
+            if let Some(cas) = most_recent.map(|item| item.seq()) {
+                item = item.with_cas(cas);
+            }
+
+            client.put_mutable(item).unwrap();
+        }
+    }
+
+    #[test]
+    fn conflict_302_seq_less_than_current() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+        let value = b"Hello World!".to_vec();
+
+        client
+            .put_mutable(MutableItem::new(signer.clone(), &value, 1001, None))
+            .unwrap();
+
+        assert!(matches!(
+            client.put_mutable(MutableItem::new(signer, &value, 1000, None)),
+            Err(DhtPutError::PutError(PutError::Conflict))
+        ));
+    }
+
+    #[test]
+    fn conflict_301_cas() {
+        let testnet = Testnet::new(10).unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+        let value = b"Hello World!".to_vec();
+
+        client
+            .put_mutable(MutableItem::new(signer.clone(), &value, 1001, None))
+            .unwrap();
+
+        assert!(matches!(
+            client.put_mutable(MutableItem::new(signer, &value, 1002, None).with_cas(1000)),
+            Err(DhtPutError::PutError(PutError::Conflict))
+        ));
     }
 }

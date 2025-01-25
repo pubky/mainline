@@ -2,6 +2,8 @@
 
 use std::net::SocketAddrV4;
 
+use futures_lite::StreamExt;
+
 use crate::{
     common::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
@@ -236,6 +238,27 @@ impl AsyncDht {
         Ok(receiver.into_stream())
     }
 
+    /// Get the most recent [MutableItem] from the network.
+    pub async fn get_mutable_most_recent(
+        &self,
+        public_key: &[u8; 32],
+        salt: Option<&[u8]>,
+    ) -> Result<Option<MutableItem>, DhtWasShutdown> {
+        let mut most_recent = None;
+
+        let mut stream = self.get_mutable(public_key, salt, None)?;
+
+        while let Some(item) = stream.next().await {
+            if let Some(MutableItem { seq, .. }) = most_recent {
+                if item.seq() > seq {
+                    most_recent = Some(item)
+                }
+            }
+        }
+
+        Ok(most_recent)
+    }
+
     /// Put a mutable data to the DHT.
     pub async fn put_mutable(&self, item: MutableItem) -> Result<Id, DhtPutError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
@@ -258,7 +281,7 @@ impl AsyncDht {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use std::{str::FromStr, time::Duration};
 
     use ed25519_dalek::SigningKey;
     use futures::StreamExt;
@@ -535,6 +558,48 @@ mod test {
     }
 
     #[test]
+    fn conflict_cas_more_or_equal_than_seq() {
+        async fn test() {
+            let testnet = Testnet::new(10).unwrap();
+
+            let client = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let client = client.clone();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let seq = 1000;
+
+            let value = b"Hello World!".to_vec();
+
+            let item = MutableItem::new(signer.clone(), &value, seq, None);
+
+            client.put_mutable(item.clone()).await.unwrap();
+
+            assert!(matches!(
+                client.put_mutable(item.clone().with_cas(item.seq())).await,
+                Err(DhtPutError::PutError(PutError::Conflict))
+            ));
+
+            assert!(matches!(
+                client
+                    .put_mutable(item.clone().with_cas(item.seq() + 1))
+                    .await,
+                Err(DhtPutError::PutError(PutError::Conflict))
+            ));
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
     fn concurrent_put_mutable_different() {
         let testnet = Testnet::new(10).unwrap();
 
@@ -569,10 +634,10 @@ mod test {
                     } else {
                         assert!(matches!(
                             result,
-                            Err(DhtPutError::PutError(PutError::ConcurrentPutMutable(_)))
+                            Err(DhtPutError::PutError(PutError::Conflict))
                         ))
                     }
-                });
+                })
             });
 
             handles.push(handle);
@@ -581,5 +646,126 @@ mod test {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn concurrent_put_mutable_different_with_cas() {
+        async fn test() {
+            let testnet = Testnet::new(10).unwrap();
+
+            let client = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+            let value = b"Hello World!".to_vec();
+
+            // First
+            {
+                let item = MutableItem::new(signer.clone(), &value, 1000, None);
+
+                let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+                let target = *item.target();
+                let request =
+                    PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item));
+                client
+                    .0
+                     .0
+                    .send(ActorMessage::Put(target, request, sender))
+                    .map_err(|_| DhtWasShutdown)
+                    .unwrap();
+            }
+
+            std::thread::sleep(Duration::from_millis(100));
+
+            // Second
+            {
+                let mut item = MutableItem::new(signer, &value, 1001, None);
+
+                let most_recent = client
+                    .get_mutable_most_recent(item.key(), None)
+                    .await
+                    .unwrap();
+
+                if let Some(cas) = most_recent.map(|item| item.seq()) {
+                    item = item.with_cas(cas);
+                }
+
+                client.put_mutable(item).await.unwrap();
+            }
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn conflict_302_seq_less_than_current() {
+        async fn test() {
+            let testnet = Testnet::new(10).unwrap();
+
+            let client = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+            let value = b"Hello World!".to_vec();
+
+            client
+                .put_mutable(MutableItem::new(signer.clone(), &value, 1001, None))
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                client
+                    .put_mutable(MutableItem::new(signer, &value, 1000, None))
+                    .await,
+                Err(DhtPutError::PutError(PutError::Conflict))
+            ));
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn conflict_301_cas() {
+        async fn test() {
+            let testnet = Testnet::new(10).unwrap();
+
+            let client = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+            let value = b"Hello World!".to_vec();
+
+            client
+                .put_mutable(MutableItem::new(signer.clone(), &value, 1001, None))
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                client
+                    .put_mutable(MutableItem::new(signer, &value, 1002, None).with_cas(1000))
+                    .await,
+                Err(DhtPutError::PutError(PutError::Conflict))
+            ));
+        }
+
+        futures::executor::block_on(test());
     }
 }

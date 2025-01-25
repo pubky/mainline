@@ -134,7 +134,13 @@ impl PutQuery {
                 );
 
                 return Err(most_common_error
-                    .map(|(_, error)| PutError::ErrorResponse(error.clone()))
+                    .map(|(_, error)| {
+                        if error.code == 301 || error.code == 302 {
+                            PutError::Conflict
+                        } else {
+                            PutError::ErrorResponse(error.clone())
+                        }
+                    })
                     .unwrap_or(PutError::Timeout));
             }
 
@@ -152,9 +158,7 @@ impl PutQuery {
                 "PutQuery for MutableItem was rejected by most nodes with 3xx code."
             );
 
-            return Err(most_common_error
-                .map(|(_, error)| PutError::ErrorResponse(error.clone()))
-                .unwrap_or(PutError::Timeout));
+            return Err(PutError::Conflict);
         }
 
         Ok(false)
@@ -191,8 +195,8 @@ pub enum PutError {
     #[error("Failed to find any nodes close to store value at")]
     NoClosestNodes,
 
-    /// Either Put Query faild to store at any nodes,
-    /// OR during [PUT_MUTABLE](https://www.bittorrent.org/beps/bep_0044.html) request, majority of nodes responded with a 3xx error.
+    /// Either Put Query faild to store at any nodes, and most nodes responded
+    /// with a non `301` nor `302` errors.
     ///
     /// Either way; contains the most common error response.
     #[error("Query Error Response")]
@@ -202,8 +206,10 @@ pub enum PutError {
     #[error("PutQuery timed out with no responses neither success or errors")]
     Timeout,
 
-    /// Calling [crate::rpc::Rpc::put] twice for the same target with different
-    /// [crate::MutableItem] risks losing data.
-    #[error("Concurrent PUT queries for different mutable items with the same target ({0})")]
-    ConcurrentPutMutable(Id),
+    /// Conflict risk (similar to 409 Conflict HTTP error) caused by CAS mismatch,
+    /// or a more recent mutable item or concurrently write with no CAS risking losing data.
+    ///
+    /// Try reading most recent mutable item before writing again.
+    #[error("Conflict risk, read before writing again.")]
+    Conflict,
 }

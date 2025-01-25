@@ -23,6 +23,9 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Id::from_ipv4()`.
 - Add `Id::is_valid_for_ipv4`.
 - Add `RoutingTable::nodes()` iterator.
+- Add `Dht::get_mutable_most_recent` and `AsyncDht::get_mutable_most_recent` to get the most recent mutable item from the network.
+- Add `PutError::Conflict` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
+- Add `PutError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
 
 ### Removed
 
@@ -48,7 +51,10 @@ All notable changes to mainline dht will be documented in this file.
 - `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes` 
 - All tracing logs are either `TRACE` (for krpcsocket), `DEBUG`, or `INFO` only for rare and singular events, 
   like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
-- Enable calling `Rpc::put()` multiple times concurrently except for different `MutableItem`, where we return `PutError::ConcurrentPutMutable`.
+- Return `PutError::Conflict` from `Dht::put_mutable` and `AsyncDht::put_mutable` if the `MutableItem::cas` is more
+  than or equal the `MutableItem::seq`.
+- Enable calling `Rpc::put()` multiple times concurrently except for different `MutableItem` and `cas` is not set to
+  the inflight put mutable query, where we return `PutError::Conflict`.
 
 ### Removed
 

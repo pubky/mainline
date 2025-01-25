@@ -27,6 +27,9 @@ document-features = "0.2.10"
 # `node` dependencies
 flume = { version = "0.11.1", features = [], default-features = false, optional = true }
 
+# `async` dependencies
+futures-lite = { version = "2.6.0", default-features = false, optional = true }
+
 [dev-dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
 futures = "0.3.31"
@@ -41,7 +44,7 @@ flume = "0.11.1"
 ## Include [Dht] node, if this feature is disabled, you can still use the [rpc::Rpc] and build your own node.
 node = ["dep:flume"]
 ## Enable [Dht::as_async()] to use [async_dht::AsyncDht].
-async = ["node", "flume/async"]
+async = ["node", "flume/async", "dep:futures-lite"]
 
 full = ["async"]
 

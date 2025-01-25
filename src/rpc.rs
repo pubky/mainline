@@ -365,27 +365,29 @@ impl Rpc {
         };
 
         if let Some(PutRequestSpecific::PutMutable(PutMutableRequestArguments {
-            sig: existing_sig,
+            sig: inflight_sig,
+            seq: inflight_seq,
             ..
         })) = self
             .put_queries
             .get(&target)
             .map(|existing| &existing.request)
         {
-            if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
-                sig: incoming_sig,
-                ..
-            }) = &request
+            if let PutRequestSpecific::PutMutable(PutMutableRequestArguments { sig, cas, .. }) =
+                &request
             {
-                if incoming_sig != existing_sig {
-                    debug!(?target, "ConcurrentPutMutable");
-
-                    return Err(PutError::ConcurrentPutMutable(target));
+                if sig == inflight_sig {
+                    // Noop, the inflight query is sufficient.
+                    return Ok(());
+                } else if cas.map(|cas| cas == *inflight_seq).unwrap_or_default() {
+                    // The user is aware of the inflight query and whiches to overrides it.
+                    //
+                    // Remove the inflight request, and create a new one.
+                    self.put_queries.remove(&target);
+                } else {
+                    return Err(PutError::Conflict);
                 }
             };
-
-            // Noop
-            return Ok(());
         }
 
         let mut query = PutQuery::new(target, request.clone());
@@ -446,9 +448,24 @@ impl Rpc {
             GetRequestSpecific::GetValue(GetValueRequestArguments { target, .. }) => target,
         };
 
+        let response_from_inflight_put_mutable_request =
+            self.put_queries.get(&target).and_then(|existing| {
+                if let PutRequestSpecific::PutMutable(request) = &existing.request {
+                    Some(Response::Mutable(request.clone().into()))
+                } else {
+                    None
+                }
+            });
+
         // If query is still active, no need to create a new one.
         if let Some(query) = self.iterative_queries.get(&target) {
-            return Some(query.responses().to_vec());
+            let mut responses = query.responses().to_vec();
+
+            if let Some(response) = response_from_inflight_put_mutable_request {
+                responses.push(response);
+            }
+
+            return Some(responses);
         }
 
         let node_id = self.routing_table.id();
@@ -500,6 +517,11 @@ impl Rpc {
         query.start(&mut self.socket);
 
         self.iterative_queries.insert(target, query);
+
+        // If there is an inflight PutQuery for mutable item return its value
+        if let Some(response) = response_from_inflight_put_mutable_request {
+            return Some(vec![response]);
+        }
 
         None
     }

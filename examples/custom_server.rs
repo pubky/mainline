@@ -42,7 +42,7 @@ fn main() {
 
     let info = client.info().unwrap();
 
-    dbg!(info);
+    println!("{:?}", info);
 
     loop {}
 }
