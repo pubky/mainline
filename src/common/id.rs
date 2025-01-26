@@ -112,7 +112,7 @@ impl Id {
 
     /// Validate that this Id is valid with respect to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn is_valid_for_ip(&self, ipv4: Ipv4Addr) -> bool {
-        if ipv4.is_private() {
+        if ipv4.is_private() || ipv4.is_link_local() || ipv4.is_loopback() {
             return true;
         }
 
