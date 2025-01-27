@@ -56,6 +56,7 @@ All notable changes to mainline dht will be documented in this file.
 - All tracing logs are either `TRACE` (for krpcsocket), `DEBUG`, or `INFO` only for rare and singular events, 
   like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
 - Change `PutError` to contain transparent elements for generic `PutQueryError`, and more specialized `ConcurrrencyError`.
+- Remove `MutableItem::cas` field, and add optional `CAS` parameter to `Dht::put_mutable` and `AsyncDht::put_mutable`.
 
 ### Removed
 

@@ -5,7 +5,7 @@ use tracing_subscriber;
 
 use std::time::Instant;
 
-use mainline::Dht;
+use mainline::{Dht, MutableItem};
 
 use clap::Parser;
 
@@ -24,54 +24,58 @@ fn main() {
 
     let cli = Cli::parse();
 
-    let public_key = from_hex(cli.public_key.clone());
+    let public_key = from_hex(cli.public_key.clone()).to_bytes();
     let dht = Dht::client().unwrap();
 
     println!("Looking up mutable item: {} ...", cli.public_key);
+
     println!("\n=== COLD LOOKUP ===");
-    lookup(&dht, public_key);
+    get_first(&dht, &public_key);
 
     println!("\n=== SUBSEQUENT LOOKUP ===");
-    println!("Looking up mutable item: {} ...", cli.public_key);
-    lookup(&dht, public_key);
-}
+    get_first(&dht, &public_key);
 
-fn lookup(dht: &Dht, public_key: VerifyingKey) {
+    println!("\n=== GET MOST RECENT ===");
     let start = Instant::now();
-    let mut first = false;
-    let mut count = 0;
 
-    println!("Streaming mutable items:");
-    for item in dht.get_mutable(public_key.as_bytes(), None, None).unwrap() {
-        count += 1;
+    println!("\nLooking up the most recent value..");
+    let item = dht.get_mutable_most_recent(&public_key, None).unwrap();
 
-        if !first {
-            first = true;
-            println!(
-                "\nGot first result in {:?} milliseconds:",
-                start.elapsed().as_millis()
-            );
-
-            match String::from_utf8(item.value().to_vec()) {
-                Ok(string) => {
-                    println!("  mutable item: {:?}, seq: {:?}\n", string, item.seq());
-                }
-                Err(_) => {
-                    println!(
-                        "  mutable item: {:?}, seq: {:?}\n",
-                        item.value(),
-                        item.seq(),
-                    );
-                }
-            };
-        }
+    if let Some(item) = item {
+        println!("Found the most recent value:");
+        print_value(&item);
+    } else {
+        println!("Not found");
     }
 
     println!(
-        "\nQuery exhausted in {:?} seconds, got {:?} values.",
+        "\nQuery exhausted in {:?} seconds.",
         start.elapsed().as_secs_f32(),
-        count
     );
+}
+
+fn get_first(dht: &Dht, public_key: &[u8; 32]) {
+    let start = Instant::now();
+    if let Some(item) = dht.get_mutable(public_key, None, None).unwrap().next() {
+        println!(
+            "\nGot first result in {:?} milliseconds:",
+            start.elapsed().as_millis()
+        );
+        print_value(&item);
+    } else {
+        println!("Not Found")
+    }
+}
+
+fn print_value(item: &MutableItem) {
+    match String::from_utf8(item.value().to_vec()) {
+        Ok(string) => {
+            println!("  mutable item: {:?}, seq: {:?}", string, item.seq());
+        }
+        Err(_) => {
+            println!("  mutable item: {:?}, seq: {:?}", item.value(), item.seq(),);
+        }
+    };
 }
 
 fn from_hex(s: String) -> VerifyingKey {

@@ -329,7 +329,10 @@ impl Dht {
 
     // === Mutable data ===
 
-    /// Get a mutable data by its public_key and optional salt.
+    /// Get a mutable data by its `public_key` and optional `salt`.
+    ///
+    /// You can specify the exact `seq` you are looking for, otherwise,
+    /// nodes will respond with any item with the same `public_key` and `salt`.
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
@@ -361,15 +364,17 @@ impl Dht {
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
     ) -> Result<Option<MutableItem>, DhtWasShutdown> {
-        let mut most_recent = None;
+        let mut most_recent: Option<MutableItem> = None;
 
         let iter = self.get_mutable(public_key, salt, None)?;
 
         for item in iter {
-            if let Some(MutableItem { seq, .. }) = most_recent {
-                if item.seq() > seq {
+            if let Some(mr) = &most_recent {
+                if item.seq() == mr.seq && item.value() > &mr.value {
                     most_recent = Some(item)
                 }
+            } else {
+                most_recent = Some(item);
             }
         }
 
@@ -391,13 +396,14 @@ impl Dht {
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
     ///
     /// let testnet = Testnet::new(3).unwrap();
-    /// let client = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
+    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
+    /// let key = signing_key.verifying_key().to_bytes();
     /// let salt = Some(b"salt".as_ref());
     ///
-    /// let item = if let Some(most_recent) = client
-    ///     .get_mutable_most_recent(signing_key.as_bytes(), salt)
+    /// let (item, cas) = if let Some(most_recent) = dht
+    ///     .get_mutable_most_recent(&key, salt)
     ///     .unwrap()
     /// {
     ///     // 1. Optionally Create a new value to take the most recent's value in consideration.
@@ -408,14 +414,16 @@ impl Dht {
     ///     let most_recent_seq = most_recent.seq();
     ///     let new_seq = most_recent_seq + 1;
     ///
-    ///     MutableItem::new(signing_key, &new_value, new_seq, salt)
-    ///     // 3. Set the [MutableItem::cas] field to the most recent [MutableItem::seq].
-    ///         .with_cas(most_recent_seq)
+    ///     (
+    ///         MutableItem::new(signing_key, &new_value, new_seq, salt),
+    ///         // 3. Use the most recent [MutableItem::seq] as a `CAS`.
+    ///         Some(most_recent_seq)
+    ///     )
     /// } else {
-    ///     MutableItem::new(signing_key, b"first value", 1, salt)
+    ///     (MutableItem::new(signing_key, b"first value", 1, salt), None)
     /// };
     ///
-    /// client.put_mutable(item).unwrap();
+    /// dht.put_mutable(item, cas).unwrap();
     /// ```
     ///
     /// ## Errors
@@ -426,12 +434,12 @@ impl Dht {
     ///
     /// If you are lucky to get one of these errors (which is not guaranteed), then you should
     /// read the most recent item again, and repeat the steps in the previous example.
-    pub fn put_mutable(&self, item: MutableItem) -> Result<Id, PutMutableError> {
+    pub fn put_mutable(&self, item: MutableItem, cas: Option<i64>) -> Result<Id, PutMutableError> {
         let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
 
         let target = *item.target();
 
-        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item));
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
 
         self.0
             .send(ActorMessage::Put(target, request, sender))
@@ -773,7 +781,7 @@ mod test {
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        a.put_mutable(item.clone()).unwrap();
+        a.put_mutable(item.clone(), None).unwrap();
 
         let response = b
             .get_mutable(signer.verifying_key().as_bytes(), None, None)
@@ -807,7 +815,7 @@ mod test {
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        a.put_mutable(item.clone()).unwrap();
+        a.put_mutable(item.clone(), None).unwrap();
 
         let response = b
             .get_mutable(signer.verifying_key().as_bytes(), None, Some(seq))
@@ -849,21 +857,22 @@ mod test {
             228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
         ]);
 
+        let key = signer.verifying_key().to_bytes();
         let seq = 1000;
         let value = b"Hello World!";
 
         let item = MutableItem::new(signer.clone(), value, seq, None);
 
-        a.put_mutable(item.clone()).unwrap();
+        a.put_mutable(item.clone(), None).unwrap();
 
         let _response_first = b
-            .get_mutable(signer.verifying_key().as_bytes(), None, None)
+            .get_mutable(&key, None, None)
             .unwrap()
             .next()
             .expect("No mutable values");
 
         let response_second = b
-            .get_mutable(signer.verifying_key().as_bytes(), None, None)
+            .get_mutable(&key, None, None)
             .unwrap()
             .next()
             .expect("No mutable values");
@@ -896,7 +905,7 @@ mod test {
             let client = client.clone();
             let item = item.clone();
 
-            let handle = std::thread::spawn(move || client.put_mutable(item).unwrap());
+            let handle = std::thread::spawn(move || client.put_mutable(item, None).unwrap());
 
             handles.push(handle);
         }
@@ -933,7 +942,7 @@ mod test {
             let item = MutableItem::new(signer.clone(), &value, seq, None);
 
             let handle = std::thread::spawn(move || {
-                let result = client.put_mutable(item);
+                let result = client.put_mutable(item, None);
                 if i == 0 {
                     assert!(matches!(result, Ok(_)))
                 } else {
@@ -972,7 +981,8 @@ mod test {
 
             let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
             let target = *item.target();
-            let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item));
+            let request =
+                PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
             client
                 .0
                 .send(ActorMessage::Put(target, request, sender))
@@ -984,15 +994,15 @@ mod test {
 
         // Second
         {
-            let mut item = MutableItem::new(signer, &[], 1001, None);
+            let item = MutableItem::new(signer, &[], 1001, None);
 
             let most_recent = client.get_mutable_most_recent(item.key(), None).unwrap();
 
             if let Some(cas) = most_recent.map(|item| item.seq()) {
-                item = item.with_cas(cas);
+                client.put_mutable(item, Some(cas)).unwrap();
+            } else {
+                client.put_mutable(item, None).unwrap();
             }
-
-            client.put_mutable(item).unwrap();
         }
     }
 
@@ -1011,11 +1021,11 @@ mod test {
         ]);
 
         client
-            .put_mutable(MutableItem::new(signer.clone(), &[], 1001, None))
+            .put_mutable(MutableItem::new(signer.clone(), &[], 1001, None), None)
             .unwrap();
 
         assert!(matches!(
-            client.put_mutable(MutableItem::new(signer, &[], 1000, None)),
+            client.put_mutable(MutableItem::new(signer, &[], 1000, None), None),
             Err(PutMutableError::Concurrency(
                 ConcurrencyError::NotMostRecent
             ))
@@ -1037,11 +1047,11 @@ mod test {
         ]);
 
         client
-            .put_mutable(MutableItem::new(signer.clone(), &[], 1001, None))
+            .put_mutable(MutableItem::new(signer.clone(), &[], 1001, None), None)
             .unwrap();
 
         assert!(matches!(
-            client.put_mutable(MutableItem::new(signer, &[], 1002, None).with_cas(1000)),
+            client.put_mutable(MutableItem::new(signer, &[], 1002, None), Some(1000)),
             Err(PutMutableError::Concurrency(ConcurrencyError::CasFailed))
         ));
     }

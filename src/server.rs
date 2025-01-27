@@ -388,7 +388,7 @@ impl Server for DefaultServer {
                         }
                     }
 
-                    match MutableItem::from_dht_message(target, &k, v, seq, &sig, salt, cas) {
+                    match MutableItem::from_dht_message(target, &k, v, seq, &sig, salt) {
                         Ok(item) => {
                             self.mutable_values.put(target, item);
 

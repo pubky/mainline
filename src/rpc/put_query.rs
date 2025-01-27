@@ -247,7 +247,7 @@ pub enum ConcurrencyError {
     #[error("MutableItem::seq is not the most recent, try reading most recent item before writing again.")]
     NotMostRecent,
 
-    /// The [crate::MutableItem::cas] field does not match the most recent knonw signed item.
-    #[error("MutableItem::cas check failed, try reading most recent item before writing again.")]
+    /// The `CAS` condition does not match the `seq` of the most recent knonw signed item.
+    #[error("CAS check failed, try reading most recent item before writing again.")]
     CasFailed,
 }

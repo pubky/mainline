@@ -19,14 +19,12 @@ pub struct MutableItem {
     /// sequence number
     pub(crate) seq: i64,
     /// mutable value
-    value: Box<[u8]>,
+    pub(crate) value: Box<[u8]>,
     /// ed25519 signature
     #[serde(with = "serde_bytes")]
     signature: [u8; 64],
     /// Optional salt
     salt: Option<Box<[u8]>>,
-    /// Optional compare and swap seq
-    cas: Option<i64>,
 }
 
 impl MutableItem {
@@ -61,12 +59,6 @@ impl MutableItem {
         bytes.into()
     }
 
-    /// Set the cas number if needed.
-    pub fn with_cas(mut self, cas: i64) -> Self {
-        self.cas = Some(cas);
-        self
-    }
-
     /// Create a new mutable item from an already signed value.
     pub fn new_signed_unchecked(
         key: [u8; 32],
@@ -82,7 +74,6 @@ impl MutableItem {
             seq,
             signature,
             salt: salt.map(|s| s.into()),
-            cas: None,
         }
     }
 
@@ -93,7 +84,6 @@ impl MutableItem {
         seq: i64,
         signature: &[u8],
         salt: Option<Box<[u8]>>,
-        cas: Option<i64>,
     ) -> Result<Self, MutableError> {
         let key = VerifyingKey::try_from(key).map_err(|_| MutableError::InvalidMutablePublicKey)?;
 
@@ -110,7 +100,6 @@ impl MutableItem {
             seq,
             signature: signature.to_bytes(),
             salt,
-            cas,
         })
     }
 
@@ -139,10 +128,6 @@ impl MutableItem {
     pub fn salt(&self) -> Option<&[u8]> {
         self.salt.as_deref()
     }
-
-    pub fn cas(&self) -> Option<i64> {
-        self.cas
-    }
 }
 
 pub fn encode_signable(seq: i64, value: &[u8], salt: Option<&[u8]>) -> Box<[u8]> {
@@ -169,8 +154,11 @@ pub enum MutableError {
     InvalidMutablePublicKey,
 }
 
-impl From<MutableItem> for PutMutableRequestArguments {
-    fn from(item: MutableItem) -> Self {
+impl PutMutableRequestArguments {
+    /// Create a [PutMutableRequestArguments] from a [MutableItem],
+    /// and an optional CAS condition, which is usually the [MutableItem::seq]
+    /// of the most recent known [MutableItem]
+    pub fn from(item: MutableItem, cas: Option<i64>) -> Self {
         Self {
             target: item.target,
             v: item.value,
@@ -178,7 +166,7 @@ impl From<MutableItem> for PutMutableRequestArguments {
             seq: item.seq,
             sig: item.signature,
             salt: item.salt,
-            cas: item.cas,
+            cas,
         }
     }
 }
@@ -192,7 +180,6 @@ impl From<PutMutableRequestArguments> for MutableItem {
             seq: request.seq,
             signature: request.sig,
             salt: request.salt,
-            cas: request.cas,
         }
     }
 }

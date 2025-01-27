@@ -729,15 +729,7 @@ impl Rpc {
                     };
                     let target = query.target();
 
-                    match MutableItem::from_dht_message(
-                        query.target(),
-                        &k,
-                        v,
-                        seq,
-                        &sig,
-                        salt,
-                        None,
-                    ) {
+                    match MutableItem::from_dht_message(query.target(), &k, v, seq, &sig, salt) {
                         Ok(item) => {
                             let response = Response::Mutable(item);
                             query.response(from, response.clone());
