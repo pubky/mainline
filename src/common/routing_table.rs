@@ -17,23 +17,11 @@ pub struct RoutingTable {
 }
 
 impl RoutingTable {
-    pub fn new() -> Self {
+    pub fn new(id: Id) -> Self {
         let buckets = BTreeMap::new();
 
-        RoutingTable {
-            id: Id::random(),
-            buckets,
-        }
+        RoutingTable { id, buckets }
     }
-
-    // === Options ===
-
-    pub fn with_id(mut self, id: Id) -> Self {
-        self.id = id;
-        self
-    }
-
-    // === Getters ===
 
     /// Returns the [Id] of this node, where the distance is measured from.
     pub fn id(&self) -> &Id {
@@ -150,12 +138,6 @@ impl RoutingTable {
             }
         }
         false
-    }
-}
-
-impl Default for RoutingTable {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -280,7 +262,7 @@ mod test {
 
     #[test]
     fn table_is_empty() {
-        let mut table = RoutingTable::new();
+        let mut table = RoutingTable::new(Id::random());
         assert!(table.is_empty());
 
         table.add(Node::random());
@@ -289,7 +271,7 @@ mod test {
 
     #[test]
     fn to_vec() {
-        let mut table = RoutingTable::new();
+        let mut table = RoutingTable::new(Id::random());
 
         let mut expected_nodes: Vec<Node> = vec![];
 
@@ -312,7 +294,7 @@ mod test {
 
     #[test]
     fn contains() {
-        let mut table = RoutingTable::new();
+        let mut table = RoutingTable::new(Id::random());
 
         let node = Node::random();
 
@@ -324,7 +306,7 @@ mod test {
 
     #[test]
     fn remove() {
-        let mut table = RoutingTable::new();
+        let mut table = RoutingTable::new(Id::random());
 
         let node = Node::random();
 
@@ -337,7 +319,7 @@ mod test {
 
     #[test]
     fn buckets_are_sets() {
-        let mut table = RoutingTable::new();
+        let mut table = RoutingTable::new(Id::random());
 
         let node1 = Node::random();
         let node2 = Node::new(*node1.id(), node1.address());
@@ -350,7 +332,7 @@ mod test {
 
     #[test]
     fn should_not_add_self() {
-        let mut table = RoutingTable::new();
+        let mut table = RoutingTable::new(Id::random());
         let node = Node::new(*table.id(), SocketAddrV4::new(0.into(), 0));
 
         table.add(node.clone());
@@ -579,7 +561,7 @@ mod test {
 
         let local_id = Id::from_str("ba3042eb2d373b19e7c411ce6826e31b37be0b2e").unwrap();
 
-        let mut table = RoutingTable::new().with_id(local_id);
+        let mut table = RoutingTable::new(local_id);
 
         for node in nodes {
             table.add(node);

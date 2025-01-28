@@ -132,7 +132,7 @@ impl Rpc {
             bootstrap,
             socket,
 
-            routing_table: RoutingTable::new().with_id(id),
+            routing_table: RoutingTable::new(id),
             iterative_queries: HashMap::new(),
             put_queries: HashMap::new(),
 
@@ -616,7 +616,7 @@ impl Rpc {
                         None,
                     );
 
-                    self.routing_table = RoutingTable::new().with_id(new_id);
+                    self.routing_table = RoutingTable::new(new_id);
                 }
             }
         }

@@ -13,7 +13,7 @@ All notable changes to mainline dht will be documented in this file.
 - Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
 - Export `RoutingTable`.
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
-- Add `Dht::bootstrapped` and `AsyncDht::bootstrapped` to wait for the routing table to be bootstrapped.
+- Add `Dht::bootstrapped()` and `AsyncDht::bootstrapped()` to wait for the routing table to be bootstrapped.
 - Add `RoutingTable::to_bootstrap()`, `Dht::to_bootstrap()`, and `AsyncDht::to_bootstrap()` to export the addresses nodes in the routing table.
 - Add `Rpc::public_address()` and `Info::public_address()` which returns the best estimate for this node's public address.
 - Add `Rpc::firewalled()` and `Info::firewalled()` which returns whether or not this node is firewalled, or publicly accessible.
@@ -23,7 +23,7 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Id::from_ipv4()`.
 - Add `Id::is_valid_for_ipv4`.
 - Add `RoutingTable::nodes()` iterator.
-- Add `Dht::get_mutable_most_recent` and `AsyncDht::get_mutable_most_recent` to get the most recent mutable item from the network.
+- Add `Dht::get_mutable_most_recent()` and `AsyncDht::get_mutable_most_recent()` to get the most recent mutable item from the network.
 - Add `PutQueryError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
 - Add `PutMutableError::Concurrrency(ConcurrrencyError)` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
 
@@ -33,7 +33,8 @@ All notable changes to mainline dht will be documented in this file.
 - Remove `ipv6` optionality and commit to `ipv4`.
 - Remove `Id::to_vec()`.
 - Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
-- Removed `Node::unique`, `Node::with_id`, `Node::with_address`, and `Node::with_token`.
+- Removed `Node::unique()`, `Node::with_id()`, `Node::with_address()`, and `Node::with_token()`.
+- Removed `RoutingTable::default()`.
 
 ### Changed
 
@@ -62,7 +63,8 @@ All notable changes to mainline dht will be documented in this file.
 - Remove `MutableItem::cas` field, and add optional `CAS` parameter to `Dht::put_mutable` and `AsyncDht::put_mutable`.
 - `Dht::find_node()` and `AsyncDht::find_node()` return `Box<[Node]>` instead of `Vec<Node>`.
 - `Node` is `Send` and `Sync`, and cheap to clone using an internal `Arc`.
-- `Node::new` take `Id` and `SocketAddrV4`.
+- `Node::new()` take `Id` and `SocketAddrV4`.
+- `RoutingTable::new()` takes an `Id`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
