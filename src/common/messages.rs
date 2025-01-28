@@ -6,7 +6,6 @@ mod internal;
 
 use std::convert::TryInto;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::rc::Rc;
 
 use crate::common::{Id, Node, ID_SIZE};
 
@@ -100,7 +99,7 @@ pub struct FindNodeRequestArguments {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FindNodeResponseArguments {
     pub responder_id: Id,
-    pub nodes: Box<[Rc<Node>]>,
+    pub nodes: Box<[Node]>,
 }
 
 // Get anything
@@ -119,7 +118,7 @@ pub struct GetValueRequestArguments {
 pub struct NoValuesResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Box<[Rc<Node>]>>,
+    pub nodes: Option<Box<[Node]>>,
 }
 
 // === Get Peers ===
@@ -134,7 +133,7 @@ pub struct GetPeersResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
     pub values: Vec<SocketAddrV4>,
-    pub nodes: Option<Box<[Rc<Node>]>>,
+    pub nodes: Option<Box<[Node]>>,
 }
 
 // === Announce Peer ===
@@ -152,7 +151,7 @@ pub struct AnnouncePeerRequestArguments {
 pub struct GetImmutableResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Box<[Rc<Node>]>>,
+    pub nodes: Option<Box<[Node]>>,
     pub v: Box<[u8]>,
 }
 
@@ -162,7 +161,7 @@ pub struct GetImmutableResponseArguments {
 pub struct GetMutableResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Box<[Rc<Node>]>>,
+    pub nodes: Option<Box<[Node]>>,
     pub v: Box<[u8]>,
     pub k: [u8; 32],
     pub seq: i64,
@@ -173,7 +172,7 @@ pub struct GetMutableResponseArguments {
 pub struct NoMoreRecentValueResponseArguments {
     pub responder_id: Id,
     pub token: Box<[u8]>,
-    pub nodes: Option<Box<[Rc<Node>]>>,
+    pub nodes: Option<Box<[Node]>>,
     pub seq: i64,
 }
 
@@ -612,7 +611,7 @@ impl Message {
     }
 
     /// If the response contains a closer nodes to the target, return that!
-    pub fn get_closer_nodes(&self) -> Option<&[Rc<Node>]> {
+    pub fn get_closer_nodes(&self) -> Option<&[Node]> {
         match &self.message_type {
             MessageType::Response(response_variant) => match response_variant {
                 ResponseSpecific::Ping(_) => None,
@@ -684,18 +683,18 @@ pub fn sockaddr_to_bytes(sockaddr: &SocketAddrV4) -> [u8; 6] {
 
 const NODE_BYTE_SIZE: usize = ID_SIZE + 6;
 
-fn nodes4_to_bytes(nodes: &[Rc<Node>]) -> Box<[u8]> {
+fn nodes4_to_bytes(nodes: &[Node]) -> Box<[u8]> {
     let mut bytes = Vec::with_capacity(NODE_BYTE_SIZE * nodes.len());
 
     for node in nodes {
-        bytes.extend_from_slice(node.id.as_bytes());
-        bytes.extend_from_slice(&sockaddr_to_bytes(&node.address));
+        bytes.extend_from_slice(node.id().as_bytes());
+        bytes.extend_from_slice(&sockaddr_to_bytes(&node.address()));
     }
 
     bytes.into_boxed_slice()
 }
 
-fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Rc<Node>]>, DecodeMessageError> {
+fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Node]>, DecodeMessageError> {
     let bytes = bytes.as_ref();
 
     if bytes.len() % NODE_BYTE_SIZE != 0 {
@@ -709,7 +708,7 @@ fn bytes_to_nodes4<T: AsRef<[u8]>>(bytes: T) -> Result<Box<[Rc<Node>]>, DecodeMe
         let id = Id::from_bytes(&bytes[i..i + ID_SIZE])?;
         let sockaddr = bytes_to_sockaddr(&bytes[i + ID_SIZE..i + NODE_BYTE_SIZE])?;
         let node = Node::new(id, sockaddr);
-        to_ret.push(node.into());
+        to_ret.push(node);
     }
 
     Ok(to_ret.into_boxed_slice())
@@ -872,12 +871,14 @@ mod tests {
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
         assert_eq!(
-            parsed_msg
-                .get_closer_nodes()
-                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
-            original_msg
-                .get_closer_nodes()
-                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>())
+            parsed_msg.get_closer_nodes().map(|nodes| nodes
+                .iter()
+                .map(|n| (n.id(), n.address()))
+                .collect::<Vec<_>>()),
+            original_msg.get_closer_nodes().map(|nodes| nodes
+                .iter()
+                .map(|n| (n.id(), n.address()))
+                .collect::<Vec<_>>())
         );
     }
 
@@ -932,12 +933,14 @@ mod tests {
         assert_eq!(parsed_msg.requester_ip, original_msg.requester_ip);
         assert_eq!(parsed_msg.get_author_id(), original_msg.get_author_id());
         assert_eq!(
-            parsed_msg
-                .get_closer_nodes()
-                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>()),
-            original_msg
-                .get_closer_nodes()
-                .map(|nodes| nodes.iter().map(|n| (n.id, n.address)).collect::<Vec<_>>())
+            parsed_msg.get_closer_nodes().map(|nodes| nodes
+                .iter()
+                .map(|n| (n.id(), n.address()))
+                .collect::<Vec<_>>()),
+            original_msg.get_closer_nodes().map(|nodes| nodes
+                .iter()
+                .map(|n| (n.id(), n.address()))
+                .collect::<Vec<_>>())
         );
     }
 

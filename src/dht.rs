@@ -191,8 +191,8 @@ impl Dht {
     /// Mostly useful to crawl the DHT. You might need to ping them to confirm they exist,
     /// and responsive, or if you want to learn more about them like the client they are using,
     /// or if they support a given BEP.
-    pub fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
+    pub fn find_node(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Box<[Node]>>(1);
 
         let request = GetRequestSpecific::FindNode(FindNodeRequestArguments { target });
 
@@ -581,7 +581,7 @@ pub(crate) enum ActorMessage {
 
 #[derive(Debug, Clone)]
 pub enum ResponseSender {
-    ClosestNodes(Sender<Vec<Node>>),
+    ClosestNodes(Sender<Box<[Node]>>),
     Peers(Sender<Vec<SocketAddrV4>>),
     Mutable(Sender<MutableItem>),
     Immutable(Sender<Box<[u8]>>),

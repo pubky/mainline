@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use tracing::{debug, trace};
 
 use crate::{
@@ -35,11 +33,7 @@ impl PutQuery {
         }
     }
 
-    pub fn start(
-        &mut self,
-        socket: &mut KrpcSocket,
-        nodes: Box<[Rc<Node>]>,
-    ) -> Result<(), PutError> {
+    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Box<[Node]>) -> Result<(), PutError> {
         if self.started() {
             panic!("should not call PutQuery::start() twice");
         };
@@ -57,9 +51,9 @@ impl PutQuery {
 
         for node in nodes {
             // Set correct values to the request placeholders
-            if let Some(token) = node.token.clone() {
+            if let Some(token) = node.token() {
                 let tid = socket.request(
-                    node.address,
+                    node.address(),
                     RequestSpecific {
                         requester_id: Id::random(),
                         request_type: RequestTypeSpecific::Put(PutRequest {

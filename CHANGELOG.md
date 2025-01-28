@@ -33,6 +33,7 @@ All notable changes to mainline dht will be documented in this file.
 - Remove `ipv6` optionality and commit to `ipv4`.
 - Remove `Id::to_vec()`.
 - Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
+- Removed `Node::unique`, `Node::with_id`, `Node::with_address`, and `Node::with_token`.
 
 ### Changed
 
@@ -59,6 +60,9 @@ All notable changes to mainline dht will be documented in this file.
   like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
 - Change `PutError` to contain transparent elements for generic `PutQueryError`, and more specialized `ConcurrrencyError`.
 - Remove `MutableItem::cas` field, and add optional `CAS` parameter to `Dht::put_mutable` and `AsyncDht::put_mutable`.
+- `Dht::find_node()` and `AsyncDht::find_node()` return `Box<[Node]>` instead of `Vec<Node>`.
+- `Node` is `Send` and `Sync`, and cheap to clone using an internal `Arc`.
+- `Node::new` take `Id` and `SocketAddrV4`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 

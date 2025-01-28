@@ -1,8 +1,8 @@
 //! Manage iterative queries and their corresponding request/response.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::SocketAddrV4;
-use std::{collections::HashSet, rc::Rc};
 
 use tracing::{debug, trace};
 
@@ -104,7 +104,7 @@ impl IterativeQuery {
     }
 
     /// Add a candidate node to query on next tick if it is among the closest nodes.
-    pub fn add_candidate(&mut self, node: Rc<Node>) {
+    pub fn add_candidate(&mut self, node: Node) {
         // ready for a ipv6 routing table?
         self.closest.add(node);
     }
@@ -141,7 +141,7 @@ impl IterativeQuery {
     }
 
     /// Add a node that responded with a token as a probable storage node.
-    pub fn add_responding_node(&mut self, node: Rc<Node>) {
+    pub fn add_responding_node(&mut self, node: Node) {
         self.responders.add(node)
     }
 
@@ -184,8 +184,8 @@ impl IterativeQuery {
             .nodes()
             .iter()
             .take(MAX_BUCKET_SIZE_K)
-            .filter(|node| !self.visited.contains(&node.address))
-            .map(|node| node.address)
+            .filter(|node| !self.visited.contains(&node.address()))
+            .map(|node| node.address())
             .collect::<Vec<_>>();
 
         for address in to_visit {

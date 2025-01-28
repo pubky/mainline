@@ -78,8 +78,8 @@ impl AsyncDht {
 
     // === Find nodes ===
 
-    pub async fn find_node(&self, target: Id) -> Result<Vec<Node>, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Vec<Node>>(1);
+    pub async fn find_node(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Box<[Node]>>(1);
 
         let request = GetRequestSpecific::FindNode(FindNodeRequestArguments { target });
 

@@ -66,11 +66,12 @@ fn main() {
         lookup_count += 1;
         let mut dht = init_dht(USE_RANDOM_BOOTSTRAP_NODES);
         let nodes = dht.find_node(target).unwrap();
-        let nodes: Vec<Node> = nodes
-            .into_iter()
+        let nodes: Box<[Node]> = nodes
+            .iter()
             .filter(|node| target.distance(node.id()) < MAX_DISTANCE)
+            .cloned()
             .collect();
-        let closest_nodes: Vec<Node> = nodes.into_iter().take(K).collect();
+        let closest_nodes = nodes.iter().take(K).cloned().collect::<Box<[_]>>();
         let sockets: HashSet<Ipv4Addr> = closest_nodes
             .iter()
             .map(|node| *node.address().ip())
@@ -140,10 +141,10 @@ fn get_random_boostrap_nodes2() -> Vec<String> {
     let mut dht = Dht::client().unwrap();
     let nodes = dht.find_node(Id::random()).unwrap();
     dht.shutdown();
-    let addrs: Vec<String> = nodes
-        .into_iter()
+    let addrs = nodes
+        .iter()
         .map(|node| node.address().to_string())
-        .collect();
+        .collect::<Box<[_]>>();
     let slice: Vec<String> = addrs[..8].into_iter().map(|va| va.clone()).collect();
     slice
 }

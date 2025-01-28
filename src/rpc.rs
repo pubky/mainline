@@ -10,7 +10,6 @@ mod socket;
 use std::collections::HashMap;
 use std::net::{SocketAddr, SocketAddrV4, ToSocketAddrs};
 use std::num::NonZeroUsize;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use lru::LruCache;
@@ -123,12 +122,11 @@ impl Rpc {
                             SocketAddr::V4(addr_v4) => Some(addr_v4),
                             _ => None,
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Box<[_]>>()
                 })
             })
             .flatten()
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+            .collect::<Box<[_]>>();
 
         Ok(Rpc {
             bootstrap,
@@ -257,8 +255,8 @@ impl Rpc {
                         .nodes()
                         .iter()
                         .take(MAX_BUCKET_SIZE_K)
-                        .map(|n| n.as_ref().clone())
-                        .collect::<Vec<_>>();
+                        .cloned()
+                        .collect::<Box<[_]>>();
 
                     done_find_node_queries.push((*id, closest_nodes));
 
@@ -668,11 +666,7 @@ impl Rpc {
             }
 
             if let Some((responder_id, token)) = message.get_token() {
-                query.add_responding_node(
-                    Node::new(responder_id, from)
-                        .with_token(token.into())
-                        .into(),
-                );
+                query.add_responding_node(Node::new_with_token(responder_id, from, token.into()));
             }
 
             if let Some(proposed_ip) = message.requester_ip {
@@ -831,14 +825,14 @@ impl Rpc {
 
             for node in self.routing_table.nodes() {
                 if node.is_stale() {
-                    to_remove.push(node.id)
+                    to_remove.push(*node.id())
                 } else if node.should_ping() {
-                    to_ping.push(node.address)
+                    to_ping.push(node.address())
                 }
             }
 
             for id in to_remove {
-                self.routing_table.remove(id);
+                self.routing_table.remove(&id);
             }
 
             for address in to_ping {
@@ -869,7 +863,7 @@ impl Rpc {
         );
     }
 
-    fn handle_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Rc<Node>]> {
+    fn handle_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Node]> {
         self.check_address_votes_from_iterative_query(query);
         self.cache_iterative_query(query)
     }
@@ -895,7 +889,7 @@ impl Rpc {
         }
     }
 
-    fn cache_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Rc<Node>]> {
+    fn cache_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Node]> {
         if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
             // Remove least recent closest_nodes
             if let Some((
@@ -973,7 +967,7 @@ impl Drop for Rpc {
 }
 
 struct CachedIterativeQuery {
-    closest_responding_nodes: Box<[Rc<Node>]>,
+    closest_responding_nodes: Box<[Node]>,
     dht_size_estimate: f64,
     responders_dht_size_estimate: f64,
     subnets: u8,
@@ -993,7 +987,7 @@ pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::put] queries,
     /// and optional [PutError] if the query failed.
     pub done_put_queries: Vec<(Id, Option<PutError>)>,
-    pub done_find_node_queries: Vec<(Id, Vec<Node>)>,
+    pub done_find_node_queries: Vec<(Id, Box<[Node]>)>,
     /// Received GET query response.
     pub query_response: Option<(Id, Response)>,
 }

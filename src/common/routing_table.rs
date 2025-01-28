@@ -1,7 +1,7 @@
 //! Simplified Kademlia routing table
 
+use std::collections::BTreeMap;
 use std::slice::Iter;
-use std::{collections::BTreeMap, rc::Rc};
 
 use crate::common::{Id, Node};
 use crate::rpc::ClosestNodes;
@@ -48,7 +48,7 @@ impl RoutingTable {
     // === Public Methods ===
 
     pub fn add(&mut self, node: Node) -> bool {
-        let distance = self.id.distance(&node.id);
+        let distance = self.id.distance(node.id());
 
         if distance == 0 {
             // Do not add self to the routing_table
@@ -68,8 +68,8 @@ impl RoutingTable {
         bucket.add(node)
     }
 
-    pub fn remove(&mut self, node_id: Id) {
-        let distance = self.id.distance(&node_id);
+    pub fn remove(&mut self, node_id: &Id) {
+        let distance = self.id.distance(node_id);
 
         if let Some(bucket) = self.buckets.get_mut(&distance) {
             bucket.remove(node_id)
@@ -78,7 +78,7 @@ impl RoutingTable {
 
     /// Return the closest nodes to the target while prioritizing secure nodes,
     /// as defined in [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
-    pub fn closest(&self, target: Id) -> Box<[Rc<Node>]> {
+    pub fn closest(&self, target: Id) -> Box<[Node]> {
         let mut closest = ClosestNodes::new(target);
 
         for bucket in self.buckets.values() {
@@ -96,7 +96,7 @@ impl RoutingTable {
         target: Id,
         dht_size_estimate: usize,
         subnets: usize,
-    ) -> Vec<Rc<Node>> {
+    ) -> Vec<Node> {
         let mut closest = ClosestNodes::new(target);
 
         for node in self.nodes() {
@@ -127,14 +127,14 @@ impl RoutingTable {
     }
 
     pub fn to_owned_nodes(&self) -> Vec<Node> {
-        self.nodes().map(|rc| rc.as_ref().clone()).collect()
+        self.nodes().collect()
     }
 
     /// Turn this routing table to a list of bootstraping nodes.   
     pub fn to_bootstrap(&self) -> Vec<String> {
         self.nodes()
             .filter(|n| !n.is_stale())
-            .map(|n| n.address.to_string())
+            .map(|n| n.address().to_string())
             .collect()
     }
 
@@ -166,7 +166,7 @@ pub struct RoutingTableIterator<'a> {
 }
 
 impl Iterator for RoutingTableIterator<'_> {
-    type Item = Rc<Node>;
+    type Item = Node;
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.bucket_index <= 160 {
@@ -195,7 +195,7 @@ impl Iterator for RoutingTableIterator<'_> {
 #[derive(Debug, Clone)]
 pub struct KBucket {
     /// Nodes in the k-bucket, sorted by the least recently seen.
-    nodes: Vec<Rc<Node>>,
+    nodes: Vec<Node>,
 }
 
 impl KBucket {
@@ -210,7 +210,7 @@ impl KBucket {
     // === Public Methods ===
 
     pub fn add(&mut self, incoming: Node) -> bool {
-        if let Some(index) = self.iter().position(|n| n.id == incoming.id) {
+        if let Some(index) = self.iter().position(|n| n.id() == incoming.id()) {
             let existing = self.nodes[index].clone();
 
             // If the incoming node is secure, then we trust its IP address for this Id,
@@ -225,19 +225,19 @@ impl KBucket {
             // Using same ip instead of same address, allow
             if incoming.is_secure() || (!existing.is_secure() && existing.same_ip(&incoming)) {
                 self.nodes.remove(index);
-                self.nodes.push(incoming.into());
+                self.nodes.push(incoming);
 
                 true
             } else {
                 false
             }
         } else if self.nodes.len() < MAX_BUCKET_SIZE_K {
-            self.nodes.push(incoming.into());
+            self.nodes.push(incoming);
             true
         } else if self.nodes[0].is_stale() {
             // Remove the least recently seen node and add the new one
             self.nodes.remove(0);
-            self.nodes.push(incoming.into());
+            self.nodes.push(incoming);
 
             true
         } else {
@@ -245,21 +245,21 @@ impl KBucket {
         }
     }
 
-    pub fn remove(&mut self, node_id: Id) {
-        self.nodes.retain(|node| node.id != node_id);
+    pub fn remove(&mut self, node_id: &Id) {
+        self.nodes.retain(|node| node.id() != node_id);
     }
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    pub fn iter(&self) -> Iter<'_, Rc<Node>> {
+    pub fn iter(&self) -> Iter<'_, Node> {
         self.nodes.iter()
     }
 
     #[cfg(test)]
     fn contains(&self, id: &Id) -> bool {
-        self.iter().any(|node| node.id == *id)
+        self.iter().any(|node| node.id() == id)
     }
 }
 
@@ -272,11 +272,11 @@ impl Default for KBucket {
 #[cfg(test)]
 mod test {
     use std::net::SocketAddrV4;
-    use std::rc::Rc;
     use std::str::FromStr;
+    use std::sync::Arc;
     use std::time::Instant;
 
-    use crate::common::{Id, KBucket, Node, RoutingTable, MAX_BUCKET_SIZE_K};
+    use crate::common::{Id, KBucket, Node, NodeInner, RoutingTable, MAX_BUCKET_SIZE_K};
 
     #[test]
     fn table_is_empty() {
@@ -291,21 +291,21 @@ mod test {
     fn to_vec() {
         let mut table = RoutingTable::new();
 
-        let mut expected_nodes: Vec<Rc<Node>> = vec![];
+        let mut expected_nodes: Vec<Node> = vec![];
 
         for i in 0..MAX_BUCKET_SIZE_K {
-            expected_nodes.push(Node::unique(i).into());
+            expected_nodes.push(Node::unique(i));
         }
 
         for node in &expected_nodes {
-            table.add(node.as_ref().clone());
+            table.add(node.clone());
         }
 
         let mut sorted_table = table.nodes().collect::<Vec<_>>();
-        sorted_table.sort_by(|a, b| a.id.cmp(&b.id));
+        sorted_table.sort_by(|a, b| a.id().cmp(b.id()));
 
         let mut sorted_expected = expected_nodes.to_vec();
-        sorted_expected.sort_by(|a, b| a.id.cmp(&b.id));
+        sorted_expected.sort_by(|a, b| a.id().cmp(b.id()));
 
         assert_eq!(sorted_table, sorted_expected);
     }
@@ -316,10 +316,10 @@ mod test {
 
         let node = Node::random();
 
-        assert!(!table.contains(&node.id));
+        assert!(!table.contains(&node.id()));
 
         table.add(node.clone());
-        assert!(table.contains(&node.id));
+        assert!(table.contains(&node.id()));
     }
 
     #[test]
@@ -329,10 +329,10 @@ mod test {
         let node = Node::random();
 
         table.add(node.clone());
-        assert!(table.contains(&node.id));
+        assert!(table.contains(&node.id()));
 
-        table.remove(node.id);
-        assert!(!table.contains(&node.id));
+        table.remove(node.id());
+        assert!(!table.contains(&node.id()));
     }
 
     #[test]
@@ -340,7 +340,7 @@ mod test {
         let mut table = RoutingTable::new();
 
         let node1 = Node::random();
-        let node2 = Node::new(node1.id, node1.address);
+        let node2 = Node::new(*node1.id(), node1.address());
 
         table.add(node1);
         table.add(node2);
@@ -351,7 +351,7 @@ mod test {
     #[test]
     fn should_not_add_self() {
         let mut table = RoutingTable::new();
-        let node = Node::random().with_id(table.id);
+        let node = Node::new(*table.id(), SocketAddrV4::new(0.into(), 0));
 
         table.add(node.clone());
 
@@ -380,17 +380,17 @@ mod test {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, node1.address);
+            let node2 = Node::new(*node1.id(), node1.address());
 
             bucket.add(node1.clone());
             bucket.add(Node::random());
 
-            assert_ne!(bucket.nodes[1].id, node1.id);
+            assert_ne!(bucket.nodes[1].id(), node1.id());
 
             bucket.add(node2);
 
             assert_eq!(bucket.nodes.len(), 2);
-            assert_eq!(bucket.nodes[1].id, node1.id);
+            assert_eq!(bucket.nodes[1].id(), node1.id());
         }
 
         // Different port
@@ -398,43 +398,43 @@ mod test {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, SocketAddrV4::new(*node1.address.ip(), 1));
+            let node2 = Node::new(*node1.id(), SocketAddrV4::new(*node1.address().ip(), 1));
 
             bucket.add(node1.clone());
             bucket.add(Node::random());
 
-            assert_ne!(bucket.nodes[1].id, node1.id);
+            assert_ne!(bucket.nodes[1].id(), node1.id());
 
             bucket.add(node2.clone());
 
             assert_eq!(bucket.nodes.len(), 2);
-            assert_eq!(bucket.nodes[1].id, node1.id);
+            assert_eq!(bucket.nodes[1].id(), node1.id());
         }
 
         {
             let mut bucket = KBucket::new();
 
-            let secure = Node {
+            let secure = Node(Arc::new(NodeInner {
                 id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
                 address: SocketAddrV4::new([21, 75, 31, 124].into(), 0),
                 token: None,
                 last_seen: Instant::now(),
-            };
+            }));
 
-            let unsecure = Node::new(secure.id, SocketAddrV4::new([0, 0, 0, 0].into(), 1));
+            let unsecure = Node::new(*secure.id(), SocketAddrV4::new([0, 0, 0, 0].into(), 1));
 
             {
                 bucket.add(unsecure.clone());
                 bucket.add(secure.clone());
 
-                assert_eq!(bucket.nodes[0].address, secure.address)
+                assert_eq!(bucket.nodes[0].address(), secure.address())
             }
 
             {
                 bucket.add(secure.clone());
                 bucket.add(unsecure.clone());
 
-                assert_eq!(bucket.nodes[0].address, secure.address)
+                assert_eq!(bucket.nodes[0].address(), secure.address())
             }
         }
 
@@ -443,18 +443,18 @@ mod test {
             let mut bucket = KBucket::new();
 
             let node1 = Node::random();
-            let node2 = Node::new(node1.id, SocketAddrV4::new([0, 0, 0, 1].into(), 1));
+            let node2 = Node::new(*node1.id(), SocketAddrV4::new([0, 0, 0, 1].into(), 1));
 
             bucket.add(node1.clone());
             bucket.add(Node::random());
 
-            assert_ne!(bucket.nodes[1].id, node1.id);
+            assert_ne!(bucket.nodes[1].id(), node1.id());
 
             bucket.add(node2.clone());
 
             assert_eq!(bucket.nodes.len(), 2);
-            assert_ne!(bucket.nodes[1].id, node1.id);
-            assert_ne!(bucket.nodes[1].address, node2.address);
+            assert_ne!(bucket.nodes[1].id(), node1.id());
+            assert_ne!(bucket.nodes[1].address(), node2.address());
         }
     }
 
@@ -568,7 +568,12 @@ mod test {
             .enumerate()
             .map(|(i, str)| {
                 let id = Id::from_str(str).unwrap();
-                Node::unique(i).with_id(id)
+                Node(Arc::new(NodeInner {
+                    id,
+                    address: SocketAddrV4::new((i as u32).into(), i as u16),
+                    token: None,
+                    last_seen: Instant::now(),
+                }))
             })
             .collect();
 
@@ -610,7 +615,7 @@ mod test {
             let target = local_id;
             let closest = table.closest(target);
 
-            let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
+            let mut closest_ids: Vec<Id> = closest.iter().map(|n| *n.id()).collect();
             closest_ids.sort();
 
             assert_eq!(closest_ids, expected_closest_ids);
@@ -646,7 +651,7 @@ mod test {
             let target = Id::from_str("d1406a3d3a8354d566f21dba8bd06c537cde2a20").unwrap();
             let closest = table.closest(target);
 
-            let mut closest_ids: Vec<Id> = closest.iter().map(|n| n.id).collect();
+            let mut closest_ids: Vec<Id> = closest.iter().map(|n| *n.id()).collect();
             closest_ids.sort();
 
             assert_eq!(closest_ids, expected_closest_ids);
