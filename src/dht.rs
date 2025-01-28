@@ -94,6 +94,28 @@ impl DhtBuilder {
 }
 
 impl Dht {
+    /// Create a new Dht node.
+    ///
+    /// Could return an error if it failed to bind to the specified
+    /// port or other io errors while binding the udp socket.
+    pub fn new(config: Config) -> Result<Self, std::io::Error> {
+        let (sender, receiver) = flume::unbounded();
+
+        thread::Builder::new()
+            .name("Mainline Dht actor thread".to_string())
+            .spawn(move || run(config, receiver))?;
+
+        let (tx, rx) = flume::bounded(1);
+
+        sender
+            .send(ActorMessage::Check(tx))
+            .expect("actor thread unexpectedly shutdown");
+
+        rx.recv().expect("infallible")?;
+
+        Ok(Dht(sender))
+    }
+
     /// Returns a builder to edit settings before creating a Dht node.
     pub fn builder() -> DhtBuilder {
         DhtBuilder::default()
@@ -115,28 +137,6 @@ impl Dht {
     /// to server mode when/if these two conditions are met.
     pub fn server() -> Result<Self, std::io::Error> {
         Dht::builder().server_mode().build()
-    }
-
-    /// Create a new Dht node.
-    ///
-    /// Could return an error if it failed to bind to the specified
-    /// port or other io errors while binding the udp socket.
-    pub(crate) fn new(config: Config) -> Result<Self, std::io::Error> {
-        let (sender, receiver) = flume::unbounded();
-
-        thread::Builder::new()
-            .name("Mainline Dht actor thread".to_string())
-            .spawn(move || run(config, receiver))?;
-
-        let (tx, rx) = flume::bounded(1);
-
-        sender
-            .send(ActorMessage::Check(tx))
-            .expect("actor thread unexpectedly shutdown");
-
-        rx.recv().expect("infallible")?;
-
-        Ok(Dht(sender))
     }
 
     // === Getters ===
