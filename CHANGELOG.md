@@ -6,7 +6,7 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Added
 
-- `DhtBuilder` wrapper around `Config`, instead of `Settings` doubling as a builder.
+- `DhtBuilder` wrapper around `Config`.
 - Support `BEP0042 DHT Security extension` when running in server mode. 
 - Add `Config::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
 - Add `Config::server_mode` to force server mode.
@@ -32,19 +32,22 @@ All notable changes to mainline dht will be documented in this file.
 - Remove `bytes` dependency.
 - Remove `ipv6` optionality and commit to `ipv4`.
 - Remove `Id::to_vec()`.
+- Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
 
 ### Changed
 
+- Rename `Settings` to `Config`.
 - `Dht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
 - Rename `Settings` to `Config`.
 - `Rpc::new()` takes `Config` as input.
-- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
-- Make `DefaultServer` properties public.
 - `Rpc::id()` returns `Id` instead of `&Id`.
 - `Rpc::get`, and `Rpc::put` don't take a `target` argument, as it is included in the request arguments.
 - `Rpc::get()`, and `Rpc::put()` don't take a sender any more.
 - `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
+- Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
   and `RpcTickReport::qurey_response` are added.
+- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
+- Make `DefaultServer` properties public.
 - `Info::local_addr()` is infallible.
 - `MutableItem::seq()` returns `i64` instead of a refernece.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.
@@ -52,15 +55,10 @@ All notable changes to mainline dht will be documented in this file.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` return `PutImmutableError`.
 - `Dht::announce_peer()` and `AsyncDh::announce_peer()` return `AnnouncePeerError`.
 - `Dht::put_mutable()` and `AsyncDh::put_mutable()` return `PutMutableError`.
-- Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
 - All tracing logs are either `TRACE` (for krpcsocket), `DEBUG`, or `INFO` only for rare and singular events, 
   like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
 - Change `PutError` to contain transparent elements for generic `PutQueryError`, and more specialized `ConcurrrencyError`.
 - Remove `MutableItem::cas` field, and add optional `CAS` parameter to `Dht::put_mutable` and `AsyncDht::put_mutable`.
-
-### Removed
-
-- Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
