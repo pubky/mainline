@@ -390,7 +390,7 @@ impl Dht {
     /// ## Read first
     ///
     /// To mitigate the risk of lost updates, you should call the [Self::get_mutable_most_recent] method
-    /// before authoring the new [MutableItem], then modify the new item based on the most recent as in the following example:
+    /// then start authoring the new [MutableItem] based on the most recent as in the following example:
     ///
     ///```rust
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
