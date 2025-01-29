@@ -29,7 +29,7 @@ pub use crate::rpc::Config;
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DhtBuilder(Config);
 
 impl DhtBuilder {
