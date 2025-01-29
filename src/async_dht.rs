@@ -1,8 +1,12 @@
 //! AsyncDht node.
 
-use std::net::SocketAddrV4;
+use std::{
+    net::SocketAddrV4,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-use futures_lite::StreamExt;
+use futures_lite::{Stream, StreamExt};
 
 use crate::{
     common::{
@@ -109,10 +113,7 @@ impl AsyncDht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(
-        &self,
-        info_hash: Id,
-    ) -> Result<flume::r#async::RecvStream<Vec<SocketAddrV4>>, DhtWasShutdown> {
+    pub fn get_peers(&self, info_hash: Id) -> Result<GetStream<Vec<SocketAddrV4>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
@@ -131,7 +132,7 @@ impl AsyncDht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.into_stream())
+        Ok(GetStream(receiver.into_stream()))
     }
 
     /// Announce a peer for a given infohash.
@@ -232,12 +233,20 @@ impl AsyncDht {
     ///
     /// You can specify the exact `seq` you are looking for, otherwise,
     /// nodes will respond with any item with the same `public_key` and `salt`.
+    ///
+    /// # Order
+    ///
+    /// The order of [MutableItem]s returned by this iterator is not guaranteed to
+    /// reflect their `seq` value. You should not assume that the later items are
+    /// more recent than earlier ones.
+    ///
+    /// Consider using [Self::get_mutable_most_recent] if that is what you need.
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
         seq: Option<i64>,
-    ) -> Result<flume::r#async::RecvStream<MutableItem>, DhtWasShutdown> {
+    ) -> Result<GetStream<MutableItem>, DhtWasShutdown> {
         let target = MutableItem::target_from_key(public_key, salt);
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
@@ -257,7 +266,7 @@ impl AsyncDht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.into_stream())
+        Ok(GetStream(receiver.into_stream()))
     }
 
     /// Get the most recent [MutableItem] from the network.
@@ -363,6 +372,17 @@ impl AsyncDht {
                 PutError::Query(err) => PutMutableError::Query(err),
                 PutError::Concurrency(err) => PutMutableError::Concurrency(err),
             })
+    }
+}
+
+pub struct GetStream<'a, T>(flume::r#async::RecvStream<'a, T>);
+
+impl<'a, T> Stream for GetStream<'a, T> {
+    type Item = T;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        this.0.poll_next(cx)
     }
 }
 

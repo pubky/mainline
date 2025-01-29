@@ -223,7 +223,7 @@ impl Dht {
     pub fn get_peers(
         &self,
         info_hash: Id,
-    ) -> Result<flume::IntoIter<Vec<SocketAddrV4>>, DhtWasShutdown> {
+    ) -> Result<GetIterator<Vec<SocketAddrV4>>, DhtWasShutdown> {
         // Get requests use unbounded channels to avoid blocking in the run loop.
         // Other requests like put_* and getters don't need that and is ok with
         // bounded channel with 1 capacity since it only ever sends one message back.
@@ -241,7 +241,7 @@ impl Dht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.into_iter())
+        Ok(GetIterator(receiver.into_iter()))
     }
 
     /// Announce a peer for a given infohash.
@@ -333,12 +333,20 @@ impl Dht {
     ///
     /// You can specify the exact `seq` you are looking for, otherwise,
     /// nodes will respond with any item with the same `public_key` and `salt`.
+    ///
+    /// # Order
+    ///
+    /// The order of [MutableItem]s returned by this iterator is not guaranteed to
+    /// reflect their `seq` value. You should not assume that the later items are
+    /// more recent than earlier ones.
+    ///
+    /// Consider using [Self::get_mutable_most_recent] if that is what you need.
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
         seq: Option<i64>,
-    ) -> Result<flume::IntoIter<MutableItem>, DhtWasShutdown> {
+    ) -> Result<GetIterator<MutableItem>, DhtWasShutdown> {
         let salt = salt.map(|s| s.into());
 
         let target = MutableItem::target_from_key(public_key, salt.as_deref());
@@ -355,7 +363,7 @@ impl Dht {
             ))
             .map_err(|_| DhtWasShutdown)?;
 
-        Ok(receiver.into_iter())
+        Ok(GetIterator(receiver.into_iter()))
     }
 
     /// Get the most recent [MutableItem] from the network.
@@ -452,6 +460,16 @@ impl Dht {
                 PutError::Query(err) => PutMutableError::Query(err),
                 PutError::Concurrency(err) => PutMutableError::Concurrency(err),
             })
+    }
+}
+
+pub struct GetIterator<T>(flume::IntoIter<T>);
+
+impl<T> Iterator for GetIterator<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
     }
 }
 

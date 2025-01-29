@@ -65,6 +65,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Node` is `Send` and `Sync`, and cheap to clone using an internal `Arc`.
 - `Node::new()` take `Id` and `SocketAddrV4`.
 - `RoutingTable::new()` takes an `Id`.
+- Return `GetIterator<T>` and `GetStream<T>` from `get_` methods from `Dht` and `AsyncDht` instead of exposing `flume`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
