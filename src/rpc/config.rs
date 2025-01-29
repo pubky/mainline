@@ -4,7 +4,7 @@ use crate::server::Server;
 
 use super::{DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Dht Configurations
 pub struct Config {
     /// Bootstrap nodes

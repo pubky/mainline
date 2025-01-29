@@ -34,21 +34,21 @@ pub struct DhtBuilder(Config);
 
 impl DhtBuilder {
     /// Set [Config::server_mode].
-    pub fn server_mode(mut self) -> Self {
+    pub fn server_mode(&mut self) -> &mut Self {
         self.0.server_mode = true;
 
         self
     }
 
     /// Set [Config::server]
-    pub fn custom_server(mut self, custom_server: Box<dyn Server>) -> Self {
+    pub fn custom_server(&mut self, custom_server: Box<dyn Server>) -> &mut Self {
         self.0.server = Some(custom_server);
 
         self
     }
 
     /// Set [Config::bootstrap]
-    pub fn bootstrap(mut self, bootstrap: &[String]) -> Self {
+    pub fn bootstrap(&mut self, bootstrap: &[String]) -> &mut Self {
         self.0.bootstrap = bootstrap.to_vec();
 
         self
@@ -58,7 +58,7 @@ impl DhtBuilder {
     ///
     /// Useful when you want to augment the default bootstrapping nodes with
     /// dynamic list of nodes you have seen in previous sessions.
-    pub fn extra_bootstrap(mut self, extra_bootstrap: &[String]) -> Self {
+    pub fn extra_bootstrap(&mut self, extra_bootstrap: &[String]) -> &mut Self {
         for node in extra_bootstrap {
             self.0.bootstrap.push(node.clone());
         }
@@ -67,29 +67,29 @@ impl DhtBuilder {
     }
 
     /// Set [Config::port]
-    pub fn port(mut self, port: u16) -> Self {
+    pub fn port(&mut self, port: u16) -> &mut Self {
         self.0.port = Some(port);
 
         self
     }
 
     /// Set [Config::public_ip]
-    pub fn public_ip(mut self, public_ip: Ipv4Addr) -> Self {
+    pub fn public_ip(&mut self, public_ip: Ipv4Addr) -> &mut Self {
         self.0.public_ip = Some(public_ip);
 
         self
     }
 
     /// Set [Config::request_timeout]
-    pub fn request_timeout(mut self, request_timeout: Duration) -> Self {
+    pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
         self.0.request_timeout = request_timeout;
 
         self
     }
 
     /// Create a Dht node.
-    pub fn build(self) -> Result<Dht, std::io::Error> {
-        Dht::new(self.0)
+    pub fn build(&self) -> Result<Dht, std::io::Error> {
+        Dht::new(self.0.clone())
     }
 }
 

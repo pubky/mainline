@@ -37,7 +37,7 @@ fn main() {
         // To confirm that these old nodes are still viable,
         // try `builder.bootstrap(&cached_nodes)` instead,
         // this way you don't rely on default bootstrap nodes.
-        builder = builder.extra_bootstrap(&cached_nodes);
+        builder.extra_bootstrap(&cached_nodes);
     };
 
     let client = builder.build().unwrap();
