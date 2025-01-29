@@ -1,5 +1,7 @@
 //! Modules needed only for nodes running in server mode (not read-only).
 
+use dyn_clone::DynClone;
+
 pub mod peers;
 pub mod tokens;
 
@@ -25,8 +27,10 @@ pub const MAX_INFO_HASHES: usize = 2000;
 pub const MAX_PEERS: usize = 500;
 pub const MAX_VALUES: usize = 1000;
 
-/// Dht server that can handle incoming rpc requests
-pub trait Server: std::fmt::Debug + Send + Sync {
+/// Dht server that can handle incoming rpc requests.
+///
+/// Server needs to be `Send`
+pub trait Server: std::fmt::Debug + Send + DynClone {
     /// Handle incoming requests.
     ///
     /// Returns a tuple of `(MessageType, Some(extra_nodes))`:
@@ -47,7 +51,9 @@ pub trait Server: std::fmt::Debug + Send + Sync {
     ) -> (MessageType, Option<Box<[SocketAddrV4]>>);
 }
 
-#[derive(Debug)]
+dyn_clone::clone_trait_object!(Server);
+
+#[derive(Debug, Clone)]
 /// Default implementation of [Server] trait.
 ///
 /// Supports [BEP0005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).

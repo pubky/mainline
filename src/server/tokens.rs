@@ -17,6 +17,7 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 /// Tokens generator.
 ///
 /// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.
+#[derive(Clone)]
 pub struct Tokens {
     prev_secret: [u8; SECRET_SIZE],
     curr_secret: [u8; SECRET_SIZE],

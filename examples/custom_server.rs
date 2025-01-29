@@ -7,7 +7,7 @@ use mainline::{
 };
 use tracing::{info, Level};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct MyCustomServer {
     inner: DefaultServer,
 }

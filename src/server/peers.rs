@@ -8,7 +8,7 @@ use crate::common::Id;
 
 use lru::LruCache;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// An LRU cache of "Peers" per info hashes.
 ///
 /// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.

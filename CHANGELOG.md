@@ -49,8 +49,6 @@ All notable changes to mainline dht will be documented in this file.
 - `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
 - Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
   and `RpcTickReport::qurey_response` are added.
-- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
-- Make `DefaultServer` properties public.
 - `Info::local_addr()` is infallible.
 - `MutableItem::seq()` returns `i64` instead of a refernece.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.
@@ -67,6 +65,9 @@ All notable changes to mainline dht will be documented in this file.
 - `Node::new()` take `Id` and `SocketAddrV4`.
 - `RoutingTable::new()` takes an `Id`.
 - Return `GetIterator<T>` and `GetStream<T>` from `get_` methods from `Dht` and `AsyncDht` instead of exposing `flume`.
+- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
+- Make `DefaultServer` properties public.
+- Trait `Server` needs to implement `Clone`, but no longer needs to implement `Sync`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
