@@ -11,7 +11,6 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Config::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
 - Add `Config::server_mode` to force server mode.
 - Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
-- Export `RoutingTable`.
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
 - Add `Dht::bootstrapped()` and `AsyncDht::bootstrapped()` to wait for the routing table to be bootstrapped.
 - Add `RoutingTable::to_bootstrap()`, `Dht::to_bootstrap()`, and `AsyncDht::to_bootstrap()` to export the addresses nodes in the routing table.
@@ -26,6 +25,8 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Dht::get_mutable_most_recent()` and `AsyncDht::get_mutable_most_recent()` to get the most recent mutable item from the network.
 - Add `PutQueryError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
 - Add `PutMutableError::Concurrrency(ConcurrrencyError)` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
+- Export `Dhtbuilder`.
+- Export `RoutingTable`.
 
 ### Removed
 
