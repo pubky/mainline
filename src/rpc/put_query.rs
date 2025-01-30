@@ -20,20 +20,26 @@ pub struct PutQuery {
     inflight_requests: Vec<u16>,
     pub request: PutRequestSpecific,
     errors: Vec<(u8, ErrorSpecific)>,
+    extra_nodes: Box<[Node]>,
 }
 
 impl PutQuery {
-    pub fn new(target: Id, request: PutRequestSpecific) -> Self {
+    pub fn new(target: Id, request: PutRequestSpecific, extra_nodes: Option<Box<[Node]>>) -> Self {
         Self {
             target,
             stored_at: 0,
             inflight_requests: Vec::new(),
             request,
             errors: Vec::new(),
+            extra_nodes: extra_nodes.unwrap_or(Box::new([])),
         }
     }
 
-    pub fn start(&mut self, socket: &mut KrpcSocket, nodes: Box<[Node]>) -> Result<(), PutError> {
+    pub fn start(
+        &mut self,
+        socket: &mut KrpcSocket,
+        closest_nodes: &[Node],
+    ) -> Result<(), PutError> {
         if self.started() {
             panic!("should not call PutQuery::start() twice");
         };
@@ -41,15 +47,15 @@ impl PutQuery {
         let target = self.target;
         trace!(?target, "PutQuery start");
 
-        if nodes.is_empty() {
+        if closest_nodes.is_empty() {
             Err(PutQueryError::NoClosestNodes)?;
         }
 
-        if nodes.len() > u8::MAX as usize {
+        if closest_nodes.len() > u8::MAX as usize {
             panic!("should not send PUT query to more than 256 nodes")
         }
 
-        for node in nodes {
+        for node in closest_nodes.iter().chain(self.extra_nodes.iter()) {
             // Set correct values to the request placeholders
             if let Some(token) = node.token() {
                 let tid = socket.request(

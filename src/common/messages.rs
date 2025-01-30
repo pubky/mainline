@@ -73,6 +73,18 @@ pub enum PutRequestSpecific {
     PutMutable(PutMutableRequestArguments),
 }
 
+impl PutRequestSpecific {
+    pub fn target(&self) -> &Id {
+        match self {
+            PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+                info_hash, ..
+            }) => info_hash,
+            PutRequestSpecific::PutMutable(PutMutableRequestArguments { target, .. }) => target,
+            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, .. }) => target,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum ResponseSpecific {
     Ping(PingResponseArguments),

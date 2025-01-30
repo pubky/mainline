@@ -34,6 +34,16 @@ pub enum GetRequestSpecific {
     GetValue(GetValueRequestArguments),
 }
 
+impl GetRequestSpecific {
+    pub fn target(&self) -> &Id {
+        match self {
+            GetRequestSpecific::FindNode(args) => &args.target,
+            GetRequestSpecific::GetPeers(args) => &args.info_hash,
+            GetRequestSpecific::GetValue(args) => &args.target,
+        }
+    }
+}
+
 impl IterativeQuery {
     pub fn new(requester_id: Id, target: Id, request: GetRequestSpecific) -> Self {
         let request_type = match request {

@@ -118,7 +118,7 @@ impl Node {
 
     /// Node [Id] is valid for its IP address.
     ///
-    /// Check [BEP0042](https://www.bittorrent.org/beps/bep_0042.html).
+    /// Check [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html).
     pub fn is_secure(&self) -> bool {
         self.0.id.is_valid_for_ip(*self.0.address.ip())
     }

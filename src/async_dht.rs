@@ -81,7 +81,20 @@ impl AsyncDht {
     }
 
     // === Find nodes ===
-
+    //
+    /// Returns the closest 20 [secure](Node::is_secure) nodes to a target [Id].
+    ///
+    /// Mostly useful to crawl the DHT.
+    ///
+    /// The returned nodes are claims by other nodes, they may be lies, or may have churned
+    /// since they were last seen, but haven't been pinged yet.
+    ///
+    /// You might need to ping them to confirm they exist, and responsive, or if you want to
+    /// learn more about them like the client they are using, or if they support a given BEP.
+    ///
+    /// If you are trying to find the closest nodes to a target with intent to [Self::put],
+    /// a request directly to these nodes (using `extra_nodes` parameter), then you should
+    /// use [Self::get_closest_nodes] instead.
     pub async fn find_node(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Box<[Node]>>(1);
 
@@ -90,7 +103,6 @@ impl AsyncDht {
         self.0
              .0
             .send(ActorMessage::Get(
-                target,
                 request,
                 ResponseSender::ClosestNodes(sender),
             ))
@@ -125,11 +137,7 @@ impl AsyncDht {
 
         self.0
              .0
-            .send(ActorMessage::Get(
-                info_hash,
-                request,
-                ResponseSender::Peers(sender),
-            ))
+            .send(ActorMessage::Get(request, ResponseSender::Peers(sender)))
             .map_err(|_| DhtWasShutdown)?;
 
         Ok(GetStream(receiver.into_stream()))
@@ -145,8 +153,6 @@ impl AsyncDht {
         info_hash: Id,
         port: Option<u16>,
     ) -> Result<Id, AnnouncePeerError> {
-        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
-
         let (port, implied_port) = match port {
             Some(port) => (port, None),
             None => (0, Some(true)),
@@ -158,15 +164,9 @@ impl AsyncDht {
             implied_port,
         });
 
-        self.0
-             .0
-            .send(ActorMessage::Put(info_hash, request, sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver
-            .recv_async()
-            .await
-            .expect("Query was dropped before sending a response, please open an issue.")
+        Ok(self
+            .put(request, None)
+            .await?
             .map_err(|error| match error {
                 PutError::Query(err) => err,
                 PutError::Concurrency(_) => {
@@ -190,7 +190,6 @@ impl AsyncDht {
         self.0
              .0
             .send(ActorMessage::Get(
-                target,
                 request,
                 ResponseSender::Immutable(sender),
             ))
@@ -201,24 +200,14 @@ impl AsyncDht {
 
     /// Put an immutable data to the DHT.
     pub async fn put_immutable(&self, value: &[u8]) -> Result<Id, PutImmutableError> {
-        let target: Id = hash_immutable(value).into();
-
-        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
-
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
-            target,
+            target: hash_immutable(value).into(),
             v: value.into(),
         });
 
-        self.0
-             .0
-            .send(ActorMessage::Put(target, request, sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver
-            .recv_async()
-            .await
-            .expect("Query was dropped before sending a response, please open an issue.")
+        Ok(self
+            .put(request, None)
+            .await?
             .map_err(|error| match error {
                 PutError::Query(err) => err,
                 PutError::Concurrency(_) => {
@@ -259,11 +248,7 @@ impl AsyncDht {
 
         self.0
              .0
-            .send(ActorMessage::Get(
-                target,
-                request,
-                ResponseSender::Mutable(sender),
-            ))
+            .send(ActorMessage::Get(request, ResponseSender::Mutable(sender)))
             .map_err(|_| DhtWasShutdown)?;
 
         Ok(GetStream(receiver.into_stream()))
@@ -353,25 +338,61 @@ impl AsyncDht {
         item: MutableItem,
         cas: Option<i64>,
     ) -> Result<Id, PutMutableError> {
-        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
-
-        let target = *item.target();
-
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
+
+        self.put(request, None).await?.map_err(|error| match error {
+            PutError::Query(err) => PutMutableError::Query(err),
+            PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+        })
+    }
+
+    // === Raw ===
+
+    /// Get closet nodes to a specific target, that support [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
+    ///
+    /// Useful to [Self::put] a request to nodes further from the 20 closest nodes to the
+    /// [PutRequestSpecific::target]. Which itself is useful to circumvent [extreme vertical sybil attacks](https://github.com/pubky/mainline/blob/main/docs/censorship-resistance.md#extreme-vertical-sybil-attacks).
+    pub async fn get_closest_nodes(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
+        let (sender, receiver) = flume::unbounded::<Box<[Node]>>();
 
         self.0
              .0
-            .send(ActorMessage::Put(target, request, sender))
+            .send(ActorMessage::Get(
+                GetRequestSpecific::GetValue(GetValueRequestArguments {
+                    target,
+                    salt: None,
+                    seq: None,
+                }),
+                ResponseSender::ClosestNodes(sender),
+            ))
             .map_err(|_| DhtWasShutdown)?;
 
-        receiver
+        Ok(receiver
             .recv_async()
             .await
-            .expect("Query was dropped before sending a response, please open an issue.")
-            .map_err(|error| match error {
-                PutError::Query(err) => PutMutableError::Query(err),
-                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
-            })
+            .expect("Query was dropped before sending a response, please open an issue."))
+    }
+
+    /// Send a PUT request to the closest nodes, and optionally some extra nodes.
+    ///
+    /// This is useful to put data to regions of the DHT other than the closest nodes
+    /// to this request's [target ][PutRequestSpecific::target].
+    ///
+    /// You can find nodes close to other regions of the network by calling
+    /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.
+    ///
+    /// Note: extra nodes need to have [Node::valid_token].
+    pub async fn put(
+        &self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> Result<Result<Id, PutError>, DhtWasShutdown> {
+        Ok(self
+            .0
+            .put_inner(request, extra_nodes)?
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue."))
     }
 }
 
@@ -735,12 +756,11 @@ mod test {
                 let item = MutableItem::new(signer.clone(), &value, 1000, None);
 
                 let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
-                let target = *item.target();
                 let request =
                     PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
                 dht.0
                      .0
-                    .send(ActorMessage::Put(target, request, sender))
+                    .send(ActorMessage::Put(request, sender, None))
                     .map_err(|_| DhtWasShutdown)
                     .unwrap();
             }

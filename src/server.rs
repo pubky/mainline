@@ -56,7 +56,7 @@ dyn_clone::clone_trait_object!(Server);
 #[derive(Debug, Clone)]
 /// Default implementation of [Server] trait.
 ///
-/// Supports [BEP0005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
+/// Supports [BEP_005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
 ///
 /// But it doesn't implement any rate-limiting or blocking.
 pub struct DefaultServer {

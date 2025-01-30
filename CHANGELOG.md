@@ -7,7 +7,7 @@ All notable changes to mainline dht will be documented in this file.
 ### Added
 
 - `DhtBuilder` wrapper around `Config`.
-- Support `BEP0042 DHT Security extension` when running in server mode. 
+- Support `BEP_0042 DHT Security extension` when running in server mode. 
 - Add `Config::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
 - Add `Config::server_mode` to force server mode.
 - Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
@@ -25,6 +25,8 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Dht::get_mutable_most_recent()` and `AsyncDht::get_mutable_most_recent()` to get the most recent mutable item from the network.
 - Add `PutQueryError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
 - Add `PutMutableError::Concurrrency(ConcurrrencyError)` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
+- Add `Dht::get_closest_nodes()` and `AsyncDht::get_closest_nodes()` to return the closest nodes (that support BEP_0044) with valid tokens.
+- Add `Dht::put()` and `AsyncDht::put()` to put a request to the closest nodes, and optionally to extra arbitrary nodes with valid tokens.
 - Export `Dhtbuilder`.
 - Export `RoutingTable`.
 
@@ -48,7 +50,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Rpc::get()`, and `Rpc::put()` don't take a sender any more.
 - `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
 - Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
-  and `RpcTickReport::qurey_response` are added.
+  and `RpcTickReport::new_qurey_response` are added.
 - `Info::local_addr()` is infallible.
 - `MutableItem::seq()` returns `i64` instead of a refernece.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.

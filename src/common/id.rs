@@ -80,14 +80,14 @@ impl Id {
         &self.0
     }
 
-    /// Create a new Id according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
+    /// Create a new Id according to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_addr(addr: &SocketAddr) -> Id {
         let ip = addr.ip();
 
         Id::from_ip(ip)
     }
 
-    /// Create a new Id from an Ipv4 address according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
+    /// Create a new Id from an Ipv4 address according to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_ip(ip: IpAddr) -> Id {
         let mut rng = rand::thread_rng();
         let r: u8 = rng.gen();
@@ -100,7 +100,7 @@ impl Id {
         }
     }
 
-    /// Create a new Id from an Ipv4 address according to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
+    /// Create a new Id from an Ipv4 address according to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_ipv4(ipv4: Ipv4Addr) -> Id {
         let mut rng = rand::thread_rng();
         let r: u8 = rng.gen();
@@ -110,7 +110,7 @@ impl Id {
         from_ipv4_and_r(bytes, ipv4, r)
     }
 
-    /// Validate that this Id is valid with respect to [BEP0042](http://bittorrent.org/beps/bep_0042.html).
+    /// Validate that this Id is valid with respect to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn is_valid_for_ip(&self, ipv4: Ipv4Addr) -> bool {
         if ipv4.is_private() || ipv4.is_link_local() || ipv4.is_loopback() {
             return true;

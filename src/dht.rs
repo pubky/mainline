@@ -34,8 +34,6 @@ pub struct DhtBuilder(Config);
 
 // TODO: make Config private.
 // TODO: make Rpc private.
-// TODO: rename find_node to closest_nodes?
-// TODO: add put with extra nodes
 
 impl DhtBuilder {
     /// Set [Config::server_mode].
@@ -193,9 +191,17 @@ impl Dht {
 
     /// Returns the closest 20 [secure](Node::is_secure) nodes to a target [Id].
     ///
-    /// Mostly useful to crawl the DHT. You might need to ping them to confirm they exist,
-    /// and responsive, or if you want to learn more about them like the client they are using,
-    /// or if they support a given BEP.
+    /// Mostly useful to crawl the DHT.
+    ///
+    /// The returned nodes are claims by other nodes, they may be lies, or may have churned
+    /// since they were last seen, but haven't been pinged yet.
+    ///
+    /// You might need to ping them to confirm they exist, and responsive, or if you want to
+    /// learn more about them like the client they are using, or if they support a given BEP.
+    ///
+    /// If you are trying to find the closest nodes to a target with intent to [Self::put],
+    /// a request directly to these nodes (using `extra_nodes` parameter), then you should
+    /// use [Self::get_closest_nodes] instead.
     pub fn find_node(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
         let (sender, receiver) = flume::bounded::<Box<[Node]>>(1);
 
@@ -203,7 +209,6 @@ impl Dht {
 
         self.0
             .send(ActorMessage::Get(
-                target,
                 request,
                 ResponseSender::ClosestNodes(sender),
             ))
@@ -229,21 +234,12 @@ impl Dht {
         &self,
         info_hash: Id,
     ) -> Result<GetIterator<Vec<SocketAddrV4>>, DhtWasShutdown> {
-        // Get requests use unbounded channels to avoid blocking in the run loop.
-        // Other requests like put_* and getters don't need that and is ok with
-        // bounded channel with 1 capacity since it only ever sends one message back.
-        //
-        // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
         let (sender, receiver) = flume::unbounded::<Vec<SocketAddrV4>>();
 
         let request = GetRequestSpecific::GetPeers(GetPeersRequestArguments { info_hash });
 
         self.0
-            .send(ActorMessage::Get(
-                info_hash,
-                request,
-                ResponseSender::Peers(sender),
-            ))
+            .send(ActorMessage::Get(request, ResponseSender::Peers(sender)))
             .map_err(|_| DhtWasShutdown)?;
 
         Ok(GetIterator(receiver.into_iter()))
@@ -255,8 +251,6 @@ impl Dht {
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they recieved the request from.
     pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, AnnouncePeerError> {
-        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
-
         let (port, implied_port) = match port {
             Some(port) => (port, None),
             None => (0, Some(true)),
@@ -268,19 +262,12 @@ impl Dht {
             implied_port,
         });
 
-        self.0
-            .send(ActorMessage::Put(info_hash, request, sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver
-            .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")
-            .map_err(|error| match error {
-                PutError::Query(error) => error,
-                PutError::Concurrency(_) => {
-                    unreachable!("should not receieve a concurrency error from announce peer query")
-                }
-            })?)
+        Ok(self.put(request, None)?.map_err(|error| match error {
+            PutError::Query(error) => error,
+            PutError::Concurrency(_) => {
+                unreachable!("should not receieve a concurrency error from announce peer query")
+            }
+        })?)
     }
 
     // === Immutable data ===
@@ -297,7 +284,6 @@ impl Dht {
 
         self.0
             .send(ActorMessage::Get(
-                target,
                 request,
                 ResponseSender::Immutable(sender),
             ))
@@ -310,26 +296,17 @@ impl Dht {
     pub fn put_immutable(&self, value: &[u8]) -> Result<Id, PutImmutableError> {
         let target: Id = hash_immutable(value).into();
 
-        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
-
         let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
             target,
             v: value.into(),
         });
 
-        self.0
-            .send(ActorMessage::Put(target, request, sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver
-            .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")
-            .map_err(|error| match error {
-                PutError::Query(error) => error,
-                PutError::Concurrency(_) => {
-                    unreachable!("should not receieve a concurrency error from put immutable query")
-                }
-            })?)
+        Ok(self.put(request, None)?.map_err(|error| match error {
+            PutError::Query(error) => error,
+            PutError::Concurrency(_) => {
+                unreachable!("should not receieve a concurrency error from put immutable query")
+            }
+        })?)
     }
 
     // === Mutable data ===
@@ -365,11 +342,7 @@ impl Dht {
         });
 
         self.0
-            .send(ActorMessage::Get(
-                target,
-                request,
-                ResponseSender::Mutable(sender),
-            ))
+            .send(ActorMessage::Get(request, ResponseSender::Mutable(sender)))
             .map_err(|_| DhtWasShutdown)?;
 
         Ok(GetIterator(receiver.into_iter()))
@@ -452,23 +425,73 @@ impl Dht {
     /// If you are lucky to get one of these errors (which is not guaranteed), then you should
     /// read the most recent item again, and repeat the steps in the previous example.
     pub fn put_mutable(&self, item: MutableItem, cas: Option<i64>) -> Result<Id, PutMutableError> {
-        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
-
-        let target = *item.target();
-
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
 
+        self.put(request, None)?.map_err(|error| match error {
+            PutError::Query(err) => PutMutableError::Query(err),
+            PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+        })
+    }
+
+    // === Raw ===
+
+    /// Get closet nodes to a specific target, that support [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
+    ///
+    /// Useful to [Self::put] a request to nodes further from the 20 closest nodes to the
+    /// [PutRequestSpecific::target]. Which itself is useful to circumvent [extreme vertical sybil attacks](https://github.com/pubky/mainline/blob/main/docs/censorship-resistance.md#extreme-vertical-sybil-attacks).
+    pub fn get_closest_nodes(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
+        let (sender, receiver) = flume::unbounded::<Box<[Node]>>();
+
         self.0
-            .send(ActorMessage::Put(target, request, sender))
+            .send(ActorMessage::Get(
+                GetRequestSpecific::GetValue(GetValueRequestArguments {
+                    target,
+                    salt: None,
+                    seq: None,
+                }),
+                ResponseSender::ClosestNodes(sender),
+            ))
             .map_err(|_| DhtWasShutdown)?;
 
-        receiver
+        Ok(receiver
             .recv()
-            .expect("Query was dropped before sending a response, please open an issue.")
-            .map_err(|error| match error {
-                PutError::Query(err) => PutMutableError::Query(err),
-                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
-            })
+            .expect("Query was dropped before sending a response, please open an issue."))
+    }
+
+    /// Send a PUT request to the closest nodes, and optionally some extra nodes.
+    ///
+    /// This is useful to put data to regions of the DHT other than the closest nodes
+    /// to this request's [target ][PutRequestSpecific::target].
+    ///
+    /// You can find nodes close to other regions of the network by calling
+    /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.
+    ///
+    /// Note: extra nodes need to have [Node::valid_token].
+    pub fn put(
+        &self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> Result<Result<Id, PutError>, DhtWasShutdown> {
+        Ok(self
+            .put_inner(request, extra_nodes)?
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue."))
+    }
+
+    // === Private Methods ===
+
+    pub fn put_inner(
+        &self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> Result<flume::Receiver<Result<Id, PutError>>, DhtWasShutdown> {
+        let (sender, receiver) = flume::bounded::<Result<Id, PutError>>(1);
+
+        self.0
+            .send(ActorMessage::Put(request, sender, extra_nodes))
+            .map_err(|_| DhtWasShutdown)?;
+
+        Ok(receiver)
     }
 }
 
@@ -505,16 +528,23 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                         ActorMessage::Info(sender) => {
                             let _ = sender.send(rpc.info());
                         }
-                        ActorMessage::Put(target, request, sender) => {
-                            if let Err(error) = rpc.put(request) {
-                                let _ = sender.send(Err(error));
-                            } else {
-                                let senders = put_senders.entry(target).or_insert(vec![]);
+                        ActorMessage::Put(request, sender, extra_nodes) => {
+                            let target = *request.target();
 
-                                senders.push(sender);
+                            match rpc.put(request, extra_nodes) {
+                                Ok(()) => {
+                                    let senders = put_senders.entry(target).or_insert(vec![]);
+
+                                    senders.push(sender);
+                                }
+                                Err(error) => {
+                                    let _ = sender.send(Err(error));
+                                }
                             };
                         }
-                        ActorMessage::Get(target, request, sender) => {
+                        ActorMessage::Get(request, sender) => {
+                            let target = *request.target();
+
                             if let Some(responses) = rpc.get(request, None) {
                                 for response in responses {
                                     send(&sender, response);
@@ -534,7 +564,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 let report = rpc.tick();
 
                 // Response for an ongoing GET query
-                if let Some((target, response)) = report.query_response {
+                if let Some((target, response)) = report.new_query_response {
                     if let Some(senders) = get_senders.get(&target) {
                         for sender in senders {
                             send(sender, response.clone());
@@ -542,10 +572,11 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                // Response for finished FIND_NODE query
-                for (id, closest_nodes) in report.done_find_node_queries {
+                // Cleanup done GET queries
+                for (id, closest_nodes) in report.done_get_queries {
                     if let Some(senders) = get_senders.remove(&id) {
                         for sender in senders {
+                            // return closest_nodes to whoever was asking
                             if let ResponseSender::ClosestNodes(sender) = sender {
                                 let _ = sender.send(closest_nodes.clone());
                             }
@@ -566,11 +597,6 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             let _ = sender.send(result.clone());
                         }
                     }
-                }
-
-                // Cleanup done GET queries
-                for id in report.done_get_queries {
-                    get_senders.remove(&id);
                 }
             }
         }
@@ -600,8 +626,12 @@ fn send(sender: &ResponseSender, response: Response) {
 #[derive(Debug)]
 pub(crate) enum ActorMessage {
     Info(Sender<Info>),
-    Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),
-    Get(Id, GetRequestSpecific, ResponseSender),
+    Put(
+        PutRequestSpecific,
+        Sender<Result<Id, PutError>>,
+        Option<Box<[Node]>>,
+    ),
+    Get(GetRequestSpecific, ResponseSender),
     Shutdown(Sender<()>),
     Check(Sender<Result<(), std::io::Error>>),
     ToBootstrap(Sender<Vec<String>>),
@@ -1008,12 +1038,11 @@ mod test {
             let item = MutableItem::new(signer.clone(), &[], 1000, None);
 
             let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
-            let target = *item.target();
             let request =
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
             client
                 .0
-                .send(ActorMessage::Put(target, request, sender))
+                .send(ActorMessage::Put(request, sender, None))
                 .map_err(|_| DhtWasShutdown)
                 .unwrap();
         }

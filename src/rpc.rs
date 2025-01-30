@@ -38,10 +38,7 @@ pub use put_query::{ConcurrencyError, PutError, PutQueryError};
 pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
-use self::messages::{
-    AnnouncePeerRequestArguments, GetPeersRequestArguments, PutImmutableRequestArguments,
-    PutMutableRequestArguments, PutRequest,
-};
+use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments, PutRequest};
 
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -227,7 +224,6 @@ impl Rpc {
     pub fn tick(&mut self) -> RpcTickReport {
         let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
-        let mut done_find_node_queries = Vec::with_capacity(self.put_queries.len());
 
         // === Tick Queries ===
 
@@ -245,49 +241,57 @@ impl Rpc {
         let self_id = *self.id();
         let table_size = self.routing_table.size();
 
+        let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
+        let average_subnets = self.average_subnets();
+
         for (id, query) in self.iterative_queries.iter_mut() {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
-                if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
-                    let closest_nodes = query
-                        .closest()
-                        .nodes()
-                        .iter()
-                        .take(MAX_BUCKET_SIZE_K)
-                        .cloned()
-                        .collect::<Box<[_]>>();
+                let closest_nodes =
+                    if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
+                        if *id == self_id {
+                            if table_size == 0 {
+                                error!("Could not bootstrap the routing table");
+                            } else {
+                                debug!(?self_id, table_size, "Populated the routing table");
+                            }
+                        };
 
-                    done_find_node_queries.push((*id, closest_nodes));
-
-                    if *id == self_id {
-                        if table_size == 0 {
-                            error!("Could not bootstrap the routing table");
-                        } else {
-                            debug!(?self_id, table_size, "Populated the routing table");
-                        }
+                        query
+                            .closest()
+                            .nodes()
+                            .iter()
+                            .take(MAX_BUCKET_SIZE_K)
+                            .cloned()
+                            .collect::<Box<[_]>>()
+                    } else {
+                        query
+                            .responders()
+                            .take_until_secure(responders_based_dht_size_estimate, average_subnets)
+                            .to_vec()
+                            .into_boxed_slice()
                     };
-                } else {
-                    done_get_queries.push(*id);
-                }
+
+                done_get_queries.push((*id, closest_nodes));
             };
         }
 
         // === Cleanup done queries ===
 
         // Has to happen _before_ `self.socket.recv_from()`.
-        for id in &done_get_queries {
+        for (id, closest_nodes) in &done_get_queries {
             if let Some(query) = self.iterative_queries.remove(id) {
-                let closest_responding_nodes = self.handle_iterative_query(&query);
+                self.update_address_votes_from_iterative_query(&query);
+                self.cached_iterative_query(&query, closest_nodes);
 
-                self.responders_based_dht_size_estimates_count += 1;
-
-                if let Some(put_query) = self.put_queries.get_mut(id) {
-                    if !put_query.started() {
-                        if let Err(error) =
-                            put_query.start(&mut self.socket, closest_responding_nodes)
-                        {
-                            done_put_queries.push((*id, Some(error)))
+                // Only for get queries, not find node.
+                if !matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
+                    if let Some(put_query) = self.put_queries.get_mut(id) {
+                        if !put_query.started() {
+                            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
+                                done_put_queries.push((*id, Some(error)))
+                            }
                         }
                     }
                 }
@@ -298,34 +302,26 @@ impl Rpc {
             self.put_queries.remove(id);
         }
 
-        for (id, _) in &done_find_node_queries {
-            if let Some(query) = self.iterative_queries.remove(id) {
-                self.check_address_votes_from_iterative_query(&query);
-                self.handle_iterative_query(&query);
-            }
-        }
-
         // === Periodic node maintainance ===
         self.periodic_node_maintainance();
 
         // Handle new incoming message
-        let query_response =
-            self.socket
-                .recv_from()
-                .and_then(|(message, from)| match message.message_type {
-                    MessageType::Request(request_specific) => {
-                        self.handle_request(from, message.transaction_id, request_specific);
+        let new_query_response = self
+            .socket
+            .recv_from()
+            .and_then(|(message, from)| match message.message_type {
+                MessageType::Request(request_specific) => {
+                    self.handle_request(from, message.transaction_id, request_specific);
 
-                        None
-                    }
-                    _ => self.handle_response(from, message),
-                });
+                    None
+                }
+                _ => self.handle_response(from, message),
+            });
 
         RpcTickReport {
             done_get_queries,
             done_put_queries,
-            done_find_node_queries,
-            query_response,
+            new_query_response,
         }
     }
 
@@ -353,14 +349,12 @@ impl Rpc {
     /// the cached closest_nodes aren't fresh enough.
     ///
     /// - `request`: the put request.
-    pub fn put(&mut self, request: PutRequestSpecific) -> Result<(), PutError> {
-        let target = match request {
-            PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
-                info_hash, ..
-            }) => info_hash,
-            PutRequestSpecific::PutMutable(PutMutableRequestArguments { target, .. }) => target,
-            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, .. }) => target,
-        };
+    pub fn put(
+        &mut self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> Result<(), PutError> {
+        let target = *request.target();
 
         if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
             sig, cas, seq, ..
@@ -393,7 +387,7 @@ impl Rpc {
             };
         }
 
-        let mut query = PutQuery::new(target, request.clone());
+        let mut query = PutQuery::new(target, request.clone(), extra_nodes);
 
         if let Some(closest_nodes) = self
             .cached_iterative_queries
@@ -403,7 +397,7 @@ impl Rpc {
                 !closest_nodes.is_empty() && closest_nodes.iter().any(|n| n.valid_token())
             })
         {
-            query.start(&mut self.socket, closest_nodes)?
+            query.start(&mut self.socket, &closest_nodes)?
         } else {
             let salt = match request {
                 PutRequestSpecific::PutMutable(args) => args.salt,
@@ -431,7 +425,7 @@ impl Rpc {
     /// self.iterative_queries. But until then, calling [Rpc::get] multiple times, will just return the list
     /// of responses seen so far.
     ///
-    /// Subsequent responses can be obtained from the [RpcTickReport::query_response] you get after calling [Rpc::tick].
+    /// Subsequent responses can be obtained from the [RpcTickReport::new_query_response] you get after calling [Rpc::tick].
     ///
     /// Effectively, we are caching responses and backing off the network for the duration it takes
     /// to traverse it.
@@ -570,7 +564,7 @@ impl Rpc {
                             ..
                         } => {
                             tracing::trace!("custom server returned a PUT request, sending it.");
-                            let _ = self.put(put_request_type);
+                            let _ = self.put(put_request_type, None);
                         }
                         RequestSpecific { request_type, .. } => {
                             tracing::trace!("custom server returned a GET request, sending it.");
@@ -858,12 +852,7 @@ impl Rpc {
         );
     }
 
-    fn handle_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Node]> {
-        self.check_address_votes_from_iterative_query(query);
-        self.cache_iterative_query(query)
-    }
-
-    fn check_address_votes_from_iterative_query(&mut self, query: &IterativeQuery) {
+    fn update_address_votes_from_iterative_query(&mut self, query: &IterativeQuery) {
         if let Some(new_address) = query.best_address() {
             if self.public_address.is_none()
                 || new_address
@@ -884,7 +873,11 @@ impl Rpc {
         }
     }
 
-    fn cache_iterative_query(&mut self, query: &IterativeQuery) -> Box<[Node]> {
+    fn cached_iterative_query(
+        &mut self,
+        query: &IterativeQuery,
+        closest_responding_nodes: &[Node],
+    ) {
         if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
             // Remove least recent closest_nodes
             if let Some((
@@ -915,22 +908,10 @@ impl Rpc {
         let responders_dht_size_estimate = responders.dht_size_estimate();
         let subnets_count = closest.subnets_count();
 
-        self.dht_size_estimates_sum += dht_size_estimate;
-        self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
-        self.subnets_sum += subnets_count as usize;
-
-        let closest_responding_nodes = responders
-            .take_until_secure(
-                self.responders_based_dht_size_estimate(),
-                self.average_subnets(),
-            )
-            .to_vec()
-            .into_boxed_slice();
-
         self.cached_iterative_queries.put(
             query.target(),
             CachedIterativeQuery {
-                closest_responding_nodes: closest_responding_nodes.clone(),
+                closest_responding_nodes: closest_responding_nodes.into(),
                 dht_size_estimate,
                 responders_dht_size_estimate,
                 subnets: subnets_count,
@@ -942,7 +923,10 @@ impl Rpc {
             },
         );
 
-        closest_responding_nodes
+        self.dht_size_estimates_sum += dht_size_estimate;
+        self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
+        self.subnets_sum += subnets_count as usize;
+        self.responders_based_dht_size_estimates_count += 1;
     }
 
     fn responders_based_dht_size_estimate(&self) -> usize {
@@ -978,13 +962,12 @@ struct CachedIterativeQuery {
 #[derive(Debug, Clone)]
 pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
-    pub done_get_queries: Vec<Id>,
+    pub done_get_queries: Vec<(Id, Box<[Node]>)>,
     /// All the [Id]s of the done [Rpc::put] queries,
     /// and optional [PutError] if the query failed.
     pub done_put_queries: Vec<(Id, Option<PutError>)>,
-    pub done_find_node_queries: Vec<(Id, Box<[Node]>)>,
     /// Received GET query response.
-    pub query_response: Option<(Id, Response)>,
+    pub new_query_response: Option<(Id, Response)>,
 }
 
 #[derive(Debug, Clone)]

@@ -269,7 +269,7 @@ impl KrpcSocket {
             message_type: message,
             version: Some(VERSION),
             read_only: !self.server_mode,
-            // BEP0042 Only relevant in responses.
+            // BEP_0042 Only relevant in responses.
             requester_ip: Some(requester_ip),
         }
     }
