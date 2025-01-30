@@ -362,15 +362,13 @@ impl Rpc {
             PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, .. }) => target,
         };
 
-        if let Some(PutRequestSpecific::PutMutable(PutMutableRequestArguments {
-            sig: inflight_sig,
-            seq: inflight_seq,
-            ..
-        })) = self
+        if let Some(PutRequestSpecific::PutMutable(inflight_request)) = self
             .put_queries
             .get(&target)
             .map(|existing| &existing.request)
         {
+            debug!(?inflight_request, ?request, "Possible conflict risk");
+
             if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
                 sig,
                 cas,
@@ -378,13 +376,13 @@ impl Rpc {
                 ..
             }) = &request
             {
-                if sig == inflight_sig {
+                if *sig == inflight_request.sig {
                     // Noop, the inflight query is sufficient.
                     return Ok(());
-                } else if seq < inflight_seq {
+                } else if *seq < inflight_request.seq {
                     return Err(ConcurrencyError::NotMostRecent)?;
                 } else if let Some(cas) = cas {
-                    if cas == inflight_seq {
+                    if *cas == inflight_request.seq {
                         // The user is aware of the inflight query and whiches to overrides it.
                         //
                         // Remove the inflight request, and create a new one.

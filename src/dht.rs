@@ -32,6 +32,11 @@ pub struct Dht(pub(crate) Sender<ActorMessage>);
 #[derive(Debug, Default, Clone)]
 pub struct DhtBuilder(Config);
 
+// TODO: make Config private.
+// TODO: make Rpc private.
+// TODO: rename find_node to closest_nodes?
+// TODO: add put with extra nodes
+
 impl DhtBuilder {
     /// Set [Config::server_mode].
     pub fn server_mode(&mut self) -> &mut Self {
@@ -331,8 +336,8 @@ impl Dht {
 
     /// Get a mutable data by its `public_key` and optional `salt`.
     ///
-    /// You can specify the exact `seq` you are looking for, otherwise,
-    /// nodes will respond with any item with the same `public_key` and `salt`.
+    /// You can ask for items `more_recent_than` than a certain `seq`,
+    /// usually one that you already have seen before, similar to `If-Modified-Since` header in HTTP.
     ///
     /// # Order
     ///
@@ -345,7 +350,7 @@ impl Dht {
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
-        seq: Option<i64>,
+        more_recent_than: Option<i64>,
     ) -> Result<GetIterator<MutableItem>, DhtWasShutdown> {
         let salt = salt.map(|s| s.into());
 
@@ -353,7 +358,11 @@ impl Dht {
 
         let (sender, receiver) = flume::unbounded::<MutableItem>();
 
-        let request = GetRequestSpecific::GetValue(GetValueRequestArguments { target, seq, salt });
+        let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
+            target,
+            seq: more_recent_than,
+            salt,
+        });
 
         self.0
             .send(ActorMessage::Get(
