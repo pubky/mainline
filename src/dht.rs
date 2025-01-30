@@ -493,6 +493,8 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
             loop {
                 if let Ok(actor_message) = receiver.try_recv() {
+                    tracing::debug!(?actor_message, "Actor message received..");
+
                     match actor_message {
                         ActorMessage::Shutdown(sender) => {
                             drop(receiver);
@@ -597,6 +599,7 @@ fn send(sender: &ResponseSender, response: Response) {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum ActorMessage {
     Info(Sender<Info>),
     Put(Id, PutRequestSpecific, Sender<Result<Id, PutError>>),

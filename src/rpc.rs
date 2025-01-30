@@ -362,20 +362,24 @@ impl Rpc {
             PutRequestSpecific::PutImmutable(PutImmutableRequestArguments { target, .. }) => target,
         };
 
-        if let Some(PutRequestSpecific::PutMutable(inflight_request)) = self
-            .put_queries
-            .get(&target)
-            .map(|existing| &existing.request)
+        if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
+            sig, cas, seq, ..
+        }) = &request
         {
+            let inflight_request = self
+                .put_queries
+                .get(&target)
+                .map(|existing| &existing.request);
+
             debug!(?inflight_request, ?request, "Possible conflict risk");
 
-            if let PutRequestSpecific::PutMutable(PutMutableRequestArguments {
-                sig,
-                cas,
-                seq,
-                ..
-            }) = &request
+            if let Some(PutRequestSpecific::PutMutable(inflight_request)) = self
+                .put_queries
+                .get(&target)
+                .map(|existing| &existing.request)
             {
+                debug!(?inflight_request, ?request, "Possible conflict risk");
+
                 if *sig == inflight_request.sig {
                     // Noop, the inflight query is sufficient.
                     return Ok(());
