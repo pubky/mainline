@@ -493,8 +493,6 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
             loop {
                 if let Ok(actor_message) = receiver.try_recv() {
-                    tracing::debug!(?actor_message, "Actor message received..");
-
                     match actor_message {
                         ActorMessage::Shutdown(sender) => {
                             drop(receiver);

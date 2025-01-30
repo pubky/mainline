@@ -366,13 +366,6 @@ impl Rpc {
             sig, cas, seq, ..
         }) = &request
         {
-            let inflight_request = self
-                .put_queries
-                .get(&target)
-                .map(|existing| &existing.request);
-
-            debug!(?inflight_request, ?request, "Possible conflict risk");
-
             if let Some(PutRequestSpecific::PutMutable(inflight_request)) = self
                 .put_queries
                 .get(&target)
