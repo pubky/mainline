@@ -396,9 +396,9 @@ impl AsyncDht {
     }
 }
 
-pub struct GetStream<'a, T>(flume::r#async::RecvStream<'a, T>);
+pub struct GetStream<T: 'static>(flume::r#async::RecvStream<'static, T>);
 
-impl<'a, T> Stream for GetStream<'a, T> {
+impl<T> Stream for GetStream<T> {
     type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
