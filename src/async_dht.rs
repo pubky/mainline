@@ -220,8 +220,8 @@ impl AsyncDht {
 
     /// Get a mutable data by its `public_key` and optional `salt`.
     ///
-    /// You can specify the exact `seq` you are looking for, otherwise,
-    /// nodes will respond with any item with the same `public_key` and `salt`.
+    /// You can ask for items `more_recent_than` than a certain `seq`,
+    /// usually one that you already have seen before, similar to `If-Modified-Since` header in HTTP.
     ///
     /// # Order
     ///
@@ -234,7 +234,7 @@ impl AsyncDht {
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
-        seq: Option<i64>,
+        more_recent_than: Option<i64>,
     ) -> Result<GetStream<MutableItem>, DhtWasShutdown> {
         let target = MutableItem::target_from_key(public_key, salt);
 
@@ -242,7 +242,7 @@ impl AsyncDht {
 
         let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
             target,
-            seq,
+            seq: more_recent_than,
             salt: salt.map(|s| s.into()),
         });
 
