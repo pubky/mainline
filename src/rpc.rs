@@ -379,7 +379,7 @@ impl Rpc {
                         // Remove the inflight request, and create a new one.
                         self.put_queries.remove(&target);
                     } else {
-                        return Err(ConcurrencyError::ConflictRisk)?;
+                        return Err(ConcurrencyError::CasFailed)?;
                     }
                 } else {
                     return Err(ConcurrencyError::ConflictRisk)?;
