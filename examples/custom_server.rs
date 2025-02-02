@@ -1,43 +1,48 @@
-use std::{thread::sleep, time::Duration};
+use std::net::SocketAddrV4;
 
 use mainline::{
+    rpc::messages::MessageType,
     server::{DefaultServer, Server},
-    Dht,
+    Dht, RoutingTable,
 };
-use tracing::{info, instrument, Level};
+use tracing::{info, Level};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct MyCustomServer {
     inner: DefaultServer,
 }
 
 impl Server for MyCustomServer {
-    #[instrument]
     fn handle_request(
         &mut self,
-        rpc: &mut mainline::rpc::Rpc,
-        from: std::net::SocketAddr,
-        transaction_id: u16,
-        request: &mainline::rpc::messages::RequestSpecific,
-    ) {
-        info!(?request, ?from, "Request from");
+        routing_table: &RoutingTable,
+        from: SocketAddrV4,
+        request: mainline::rpc::messages::RequestSpecific,
+    ) -> (MessageType, Option<Box<[SocketAddrV4]>>) {
+        info!(?request, ?from, "Got Request");
 
         // Do something ...
         // For example, rate limiting:
         // if self.rate_limiter.check() { return };
 
-        self.inner
-            .handle_request(rpc, from, transaction_id, request)
+        self.inner.handle_request(routing_table, from, request)
     }
 }
 
 fn main() {
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    Dht::builder()
+    let client = Dht::builder()
+        .server_mode()
         .custom_server(Box::<MyCustomServer>::default())
         .build()
         .unwrap();
 
-    sleep(Duration::from_secs(5))
+    client.bootstrapped().unwrap();
+
+    let info = client.info().unwrap();
+
+    println!("{:?}", info);
+
+    loop {}
 }

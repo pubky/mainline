@@ -3,8 +3,8 @@
 #![doc = document_features::document_features!()]
 //!
 
-// Public modules
 mod common;
+#[cfg(feature = "node")]
 mod dht;
 
 // Public modules
@@ -13,17 +13,17 @@ pub mod async_dht;
 pub mod rpc;
 pub mod server;
 
-pub use crate::common::{Id, MutableItem, Node};
-pub use dht::{Dht, Settings, Testnet};
-pub use rpc::ClosestNodes;
+pub use crate::common::{Id, MutableItem, Node, RoutingTable};
 
-pub use bytes::Bytes;
+#[cfg(feature = "node")]
+pub use dht::{Config, Dht, DhtBuilder, Testnet};
+
 pub use ed25519_dalek::SigningKey;
 
 pub mod errors {
     //! Exported errors
-    pub use super::rpc::PutError;
+    #[cfg(feature = "node")]
+    pub use super::dht::{AnnouncePeerError, DhtWasShutdown, PutImmutableError, PutMutableError};
 
-    pub use super::dht::DhtPutError;
-    pub use super::dht::DhtWasShutdown;
+    pub use super::rpc::{ConcurrencyError, PutError, PutQueryError};
 }

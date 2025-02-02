@@ -2,3 +2,4 @@
 Cargo.lock
 reference 
 /docs/simulation/target
+examples/bootstrapping_nodes

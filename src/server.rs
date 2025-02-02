@@ -1,24 +1,22 @@
 //! Modules needed only for nodes running in server mode (not read-only).
 
+use dyn_clone::DynClone;
+
 pub mod peers;
 pub mod tokens;
 
-use std::{net::SocketAddr, num::NonZeroUsize};
+use std::{net::SocketAddrV4, num::NonZeroUsize};
 
-use bytes::Bytes;
 use lru::LruCache;
 use tracing::debug;
 
-use crate::{
-    common::{
-        validate_immutable, AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
-        FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-        GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Id,
-        MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments,
-        PingResponseArguments, PutImmutableRequestArguments, PutMutableRequestArguments,
-        PutRequest, PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific,
-    },
-    rpc::Rpc,
+use crate::common::{
+    validate_immutable, AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
+    FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
+    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, MessageType,
+    MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments,
+    PingResponseArguments, PutImmutableRequestArguments, PutMutableRequestArguments, PutRequest,
+    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
 use peers::PeersStore;
@@ -29,34 +27,47 @@ pub const MAX_INFO_HASHES: usize = 2000;
 pub const MAX_PEERS: usize = 500;
 pub const MAX_VALUES: usize = 1000;
 
-/// Dht server that can handle incoming rpc requests
-pub trait Server: std::fmt::Debug + Send + Sync {
+/// Dht server that can handle incoming rpc requests.
+///
+/// Server needs to be `Send`
+pub trait Server: std::fmt::Debug + Send + DynClone {
     /// Handle incoming requests.
     ///
-    /// This function will block the main loop where the [Rpc]
+    /// Returns a tuple of `(MessageType, Some(extra_nodes))`:
+    /// Where [MessageType] is:
+    /// - A [MessageType::Response] to send to the requester.
+    /// - A [MessageType::Error] to send to the requester.
+    /// - Or a [MessageType::Request] for the RPC to query the DHT (PING excluded).
+    ///
+    /// And the `extra_nodes` is passed to [crate::rpc::Rpc::put], and ignored otherwise.
+    ///
+    /// This function will block the main loop where the [crate::rpc::Rpc]
     /// is running, thus it needs to be very fast and lightweight.
     fn handle_request(
         &mut self,
-        rpc: &mut Rpc,
-        from: SocketAddr,
-        transaction_id: u16,
-        request: &RequestSpecific,
-    );
+        routing_table: &RoutingTable,
+        from: SocketAddrV4,
+        request: RequestSpecific,
+    ) -> (MessageType, Option<Box<[SocketAddrV4]>>);
 }
 
-#[derive(Debug)]
+dyn_clone::clone_trait_object!(Server);
+
+#[derive(Debug, Clone)]
 /// Default implementation of [Server] trait.
 ///
-/// Supports [BEP0005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
+/// Supports [BEP_005](https://www.bittorrent.org/beps/bep_0005.html) and [BEP_0044](https://www.bittorrent.org/beps/bep_0044.html).
 ///
 /// But it doesn't implement any rate-limiting or blocking.
 pub struct DefaultServer {
-    tokens: Tokens,
-    // server storage
-    peers: PeersStore,
-
-    immutable_values: LruCache<Id, Bytes>,
-    mutable_values: LruCache<Id, MutableItem>,
+    /// Tokens generator
+    pub tokens: Tokens,
+    /// Peers store
+    pub peers: PeersStore,
+    /// Immutable values store
+    pub immutable_values: LruCache<Id, Box<[u8]>>,
+    /// Mutable values store
+    pub mutable_values: LruCache<Id, MutableItem>,
 }
 
 impl Default for DefaultServer {
@@ -110,63 +121,54 @@ impl DefaultServer {
         }
     }
 
-    // === Private Methods ===
-
     /// Handle get mutable request
     fn handle_get_mutable(
         &mut self,
-        rpc: &mut Rpc,
-        from: SocketAddr,
-        transaction_id: u16,
-        target: &Id,
-        seq: &Option<i64>,
-    ) {
-        rpc.response(
-            from,
-            transaction_id,
-            match self.mutable_values.get(target) {
-                Some(item) => {
-                    let no_more_recent_values = seq.map(|request_seq| item.seq() <= &request_seq);
+        routing_table: &RoutingTable,
+        from: SocketAddrV4,
+        target: Id,
+        seq: Option<i64>,
+    ) -> ResponseSpecific {
+        match self.mutable_values.get(&target) {
+            Some(item) => {
+                let no_more_recent_values = seq.map(|request_seq| item.seq() <= request_seq);
 
-                    match no_more_recent_values {
-                        Some(true) => ResponseSpecific::NoMoreRecentValue(
-                            NoMoreRecentValueResponseArguments {
-                                responder_id: *rpc.id(),
-                                token: self.tokens.generate_token(from).into(),
-                                nodes: Some(rpc.routing_table().closest(target)),
-                                seq: *item.seq(),
-                            },
-                        ),
-                        _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
-                            responder_id: *rpc.id(),
+                match no_more_recent_values {
+                    Some(true) => {
+                        ResponseSpecific::NoMoreRecentValue(NoMoreRecentValueResponseArguments {
+                            responder_id: *routing_table.id(),
                             token: self.tokens.generate_token(from).into(),
-                            nodes: Some(rpc.routing_table().closest(target)),
-                            v: item.value().to_vec(),
-                            k: item.key().to_vec(),
-                            seq: *item.seq(),
-                            sig: item.signature().to_vec(),
-                        }),
+                            nodes: Some(routing_table.closest(target)),
+                            seq: item.seq(),
+                        })
                     }
+                    _ => ResponseSpecific::GetMutable(GetMutableResponseArguments {
+                        responder_id: *routing_table.id(),
+                        token: self.tokens.generate_token(from).into(),
+                        nodes: Some(routing_table.closest(target)),
+                        v: item.value().into(),
+                        k: *item.key(),
+                        seq: item.seq(),
+                        sig: *item.signature(),
+                    }),
                 }
-                None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                    responder_id: *rpc.id(),
-                    token: self.tokens.generate_token(from).into(),
-                    nodes: Some(rpc.routing_table().closest(target)),
-                }),
-            },
-        )
+            }
+            None => ResponseSpecific::NoValues(NoValuesResponseArguments {
+                responder_id: *routing_table.id(),
+                token: self.tokens.generate_token(from).into(),
+                nodes: Some(routing_table.closest(target)),
+            }),
+        }
     }
 }
 
 impl Server for DefaultServer {
-    /// Handle incoming request.
     fn handle_request(
         &mut self,
-        rpc: &mut Rpc,
-        from: SocketAddr,
-        transaction_id: u16,
-        request: &RequestSpecific,
-    ) {
+        routing_table: &RoutingTable,
+        from: SocketAddrV4,
+        request: RequestSpecific,
+    ) -> (MessageType, Option<Box<[SocketAddrV4]>>) {
         // Lazily rotate secrets before handling a request
         if self.tokens.should_update() {
             self.tokens.rotate()
@@ -174,64 +176,48 @@ impl Server for DefaultServer {
 
         let requester_id = request.requester_id;
 
-        match &request.request_type {
+        let message = match request.request_type {
             RequestTypeSpecific::Ping => {
-                rpc.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::Ping(PingResponseArguments {
-                        responder_id: *rpc.id(),
-                    }),
-                );
+                MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                    responder_id: *routing_table.id(),
+                }))
             }
             RequestTypeSpecific::FindNode(FindNodeRequestArguments { target, .. }) => {
-                rpc.response(
-                    from,
-                    transaction_id,
-                    ResponseSpecific::FindNode(FindNodeResponseArguments {
-                        responder_id: *rpc.id(),
-                        nodes: rpc.routing_table().closest(target),
-                    }),
-                );
+                MessageType::Response(ResponseSpecific::FindNode(FindNodeResponseArguments {
+                    responder_id: *routing_table.id(),
+                    nodes: routing_table.closest(target),
+                }))
             }
             RequestTypeSpecific::GetPeers(GetPeersRequestArguments { info_hash, .. }) => {
-                rpc.response(
-                    from,
-                    transaction_id,
-                    match self.peers.get_random_peers(info_hash) {
-                        Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
-                            responder_id: *rpc.id(),
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(rpc.routing_table().closest(info_hash)),
-                            values: peers,
-                        }),
-                        None => ResponseSpecific::NoValues(NoValuesResponseArguments {
-                            responder_id: *rpc.id(),
-                            token: self.tokens.generate_token(from).into(),
-                            nodes: Some(rpc.routing_table().closest(info_hash)),
-                        }),
-                    },
-                );
+                MessageType::Response(match self.peers.get_random_peers(&info_hash) {
+                    Some(peers) => ResponseSpecific::GetPeers(GetPeersResponseArguments {
+                        responder_id: *routing_table.id(),
+                        token: self.tokens.generate_token(from).into(),
+                        nodes: Some(routing_table.closest(info_hash)),
+                        values: peers,
+                    }),
+                    None => ResponseSpecific::NoValues(NoValuesResponseArguments {
+                        responder_id: *routing_table.id(),
+                        token: self.tokens.generate_token(from).into(),
+                        nodes: Some(routing_table.closest(info_hash)),
+                    }),
+                })
             }
             RequestTypeSpecific::GetValue(GetValueRequestArguments { target, seq, .. }) => {
                 if seq.is_some() {
-                    return self.handle_get_mutable(rpc, from, transaction_id, target, seq);
-                }
-
-                if let Some(v) = self.immutable_values.get(target) {
-                    rpc.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::GetImmutable(GetImmutableResponseArguments {
-                            responder_id: *rpc.id(),
+                    MessageType::Response(self.handle_get_mutable(routing_table, from, target, seq))
+                } else if let Some(v) = self.immutable_values.get(&target) {
+                    MessageType::Response(ResponseSpecific::GetImmutable(
+                        GetImmutableResponseArguments {
+                            responder_id: *routing_table.id(),
                             token: self.tokens.generate_token(from).into(),
-                            nodes: Some(rpc.routing_table().closest(target)),
-                            v: v.to_vec(),
-                        }),
-                    )
+                            nodes: Some(routing_table.closest(target)),
+                            v: v.clone(),
+                        },
+                    ))
                 } else {
-                    self.handle_get_mutable(rpc, from, transaction_id, target, seq);
-                };
+                    MessageType::Response(self.handle_get_mutable(routing_table, from, target, seq))
+                }
             }
             RequestTypeSpecific::Put(PutRequest {
                 token,
@@ -243,102 +229,85 @@ impl Server for DefaultServer {
                     implied_port,
                     ..
                 }) => {
-                    if !self.tokens.validate(from, token) {
-                        rpc.error(
-                            from,
-                            transaction_id,
-                            ErrorSpecific {
-                                code: 203,
-                                description: "Bad token".to_string(),
-                            },
-                        );
+                    if !self.tokens.validate(from, &token) {
                         debug!(
                             ?info_hash,
                             ?requester_id,
                             ?from,
-                            ?token,
                             request_type = "announce_peer",
                             "Invalid token"
                         );
-                        return;
+
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Bad token".to_string(),
+                            }),
+                            None,
+                        );
                     }
 
                     let peer = match implied_port {
                         Some(true) => from,
-                        _ => SocketAddr::new(from.ip(), *port),
+                        _ => SocketAddrV4::new(*from.ip(), port),
                     };
 
                     self.peers
-                        .add_peer(*info_hash, (&request.requester_id, peer));
+                        .add_peer(info_hash, (&request.requester_id, peer));
 
-                    rpc.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::Ping(PingResponseArguments {
-                            responder_id: *rpc.id(),
-                        }),
-                    );
+                    MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                        responder_id: *routing_table.id(),
+                    }))
                 }
                 PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
                     v,
                     target,
                     ..
                 }) => {
-                    if !self.tokens.validate(from, token) {
-                        rpc.error(
-                            from,
-                            transaction_id,
-                            ErrorSpecific {
-                                code: 203,
-                                description: "Bad token".to_string(),
-                            },
-                        );
+                    if !self.tokens.validate(from, &token) {
                         debug!(
                             ?target,
                             ?requester_id,
                             ?from,
-                            ?token,
                             request_type = "put_immutable",
                             "Invalid token"
                         );
-                        return;
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Bad token".to_string(),
+                            }),
+                            None,
+                        );
                     }
 
                     if v.len() > 1000 {
-                        rpc.error(
-                            from,
-                            transaction_id,
-                            ErrorSpecific {
+                        debug!(?target, ?requester_id, ?from, size = ?v.len(), "Message (v field) too big.");
+                        return (
+                            MessageType::Error(ErrorSpecific {
                                 code: 205,
                                 description: "Message (v field) too big.".to_string(),
-                            },
+                            }),
+                            None,
                         );
-                        debug!(?target, ?requester_id, ?from, size = ?v.len(), "Message (v field) too big.");
-                        return;
                     }
-                    if !validate_immutable(v, target) {
-                        rpc.error(
-                            from,
-                            transaction_id,
-                            ErrorSpecific {
+                    if !validate_immutable(&v, target) {
+                        debug!(?target, ?requester_id, ?from, v = ?v, "Target doesn't match the sha1 hash of v field.");
+                        return (
+                            MessageType::Error(ErrorSpecific {
                                 code: 203,
                                 description: "Target doesn't match the sha1 hash of v field"
                                     .to_string(),
-                            },
+                            }),
+                            None,
                         );
-                        debug!(?target, ?requester_id, ?from, v = ?v, "Target doesn't match the sha1 hash of v field.");
-                        return;
                     }
 
-                    self.immutable_values.put(*target, v.to_owned().into());
+                    self.immutable_values.put(target, v);
 
-                    rpc.response(
-                        from,
-                        transaction_id,
-                        ResponseSpecific::Ping(PingResponseArguments {
-                            responder_id: *rpc.id(),
-                        }),
-                    );
+                    MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                        responder_id: *routing_table.id(),
+                    }))
                 }
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments {
                     target,
@@ -350,61 +319,45 @@ impl Server for DefaultServer {
                     cas,
                     ..
                 }) => {
-                    if !self.tokens.validate(from, token) {
-                        rpc.error(
-                            from,
-                            transaction_id,
-                            ErrorSpecific {
-                                code: 203,
-                                description: "Bad token".to_string(),
-                            },
-                        );
+                    if !self.tokens.validate(from, &token) {
                         debug!(
                             ?target,
                             ?requester_id,
                             ?from,
-                            ?token,
                             request_type = "put_mutable",
                             "Invalid token"
                         );
-                        return;
+                        return (
+                            MessageType::Error(ErrorSpecific {
+                                code: 203,
+                                description: "Bad token".to_string(),
+                            }),
+                            None,
+                        );
                     }
                     if v.len() > 1000 {
-                        rpc.error(
-                            from,
-                            transaction_id,
-                            ErrorSpecific {
+                        return (
+                            MessageType::Error(ErrorSpecific {
                                 code: 205,
                                 description: "Message (v field) too big.".to_string(),
-                            },
+                            }),
+                            None,
                         );
-                        return;
                     }
-                    if let Some(salt) = salt {
+                    if let Some(ref salt) = salt {
                         if salt.len() > 64 {
-                            rpc.error(
-                                from,
-                                transaction_id,
-                                ErrorSpecific {
+                            return (
+                                MessageType::Error(ErrorSpecific {
                                     code: 207,
                                     description: "salt (salt field) too big.".to_string(),
-                                },
+                                }),
+                                None,
                             );
-                            return;
                         }
                     }
-                    if let Some(previous) = self.mutable_values.get(target) {
+                    if let Some(previous) = self.mutable_values.get(&target) {
                         if let Some(cas) = cas {
                             if previous.seq() != cas {
-                                rpc.error(
-                                    from,
-                                    transaction_id,
-                                    ErrorSpecific {
-                                        code: 301,
-                                        description: "CAS mismatched, re-read value and try again."
-                                            .to_string(),
-                                    },
-                                );
                                 debug!(
                                     ?target,
                                     ?requester_id,
@@ -412,19 +365,18 @@ impl Server for DefaultServer {
                                     "CAS mismatched, re-read value and try again."
                                 );
 
-                                return;
+                                return (
+                                    MessageType::Error(ErrorSpecific {
+                                        code: 301,
+                                        description: "CAS mismatched, re-read value and try again."
+                                            .to_string(),
+                                    }),
+                                    None,
+                                );
                             }
                         };
 
-                        if seq <= previous.seq() {
-                            rpc.error(
-                                from,
-                                transaction_id,
-                                ErrorSpecific {
-                                    code: 302,
-                                    description: "Sequence number less than current.".to_string(),
-                                },
-                            );
+                        if seq < previous.seq() {
                             debug!(
                                 ?target,
                                 ?requester_id,
@@ -432,45 +384,36 @@ impl Server for DefaultServer {
                                 "Sequence number less than current."
                             );
 
-                            return;
+                            return (
+                                MessageType::Error(ErrorSpecific {
+                                    code: 302,
+                                    description: "Sequence number less than current.".to_string(),
+                                }),
+                                None,
+                            );
                         }
                     }
 
-                    match MutableItem::from_dht_message(
-                        target,
-                        k,
-                        v.to_owned().into(),
-                        seq,
-                        sig,
-                        salt.to_owned().map(|v| v.into()),
-                        cas,
-                    ) {
+                    match MutableItem::from_dht_message(target, &k, v, seq, &sig, salt) {
                         Ok(item) => {
-                            self.mutable_values.put(*target, item);
+                            self.mutable_values.put(target, item);
 
-                            rpc.response(
-                                from,
-                                transaction_id,
-                                ResponseSpecific::Ping(PingResponseArguments {
-                                    responder_id: *rpc.id(),
-                                }),
-                            );
+                            MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                                responder_id: *routing_table.id(),
+                            }))
                         }
                         Err(error) => {
-                            rpc.error(
-                                from,
-                                transaction_id,
-                                ErrorSpecific {
-                                    code: 206,
-                                    description: "Invalid signature".to_string(),
-                                },
-                            );
-
                             debug!(?target, ?requester_id, ?from, ?error, "Invalid signature");
+                            MessageType::Error(ErrorSpecific {
+                                code: 206,
+                                description: "Invalid signature".to_string(),
+                            })
                         }
                     }
                 }
             },
-        }
+        };
+
+        (message, None)
     }
 }

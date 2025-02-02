@@ -2,6 +2,76 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `DhtBuilder` wrapper around `Config`.
+- Support `BEP_0042 DHT Security extension` when running in server mode. 
+- Add `Config::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
+- Add `Config::server_mode` to force server mode.
+- Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
+- Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
+- Add `Dht::bootstrapped()` and `AsyncDht::bootstrapped()` to wait for the routing table to be bootstrapped.
+- Add `RoutingTable::to_bootstrap()`, `Dht::to_bootstrap()`, and `AsyncDht::to_bootstrap()` to export the addresses nodes in the routing table.
+- Add `Rpc::public_address()` and `Info::public_address()` which returns the best estimate for this node's public address.
+- Add `Rpc::firewalled()` and `Info::firewalled()` which returns whether or not this node is firewalled, or publicly accessible.
+- Add `Rpc::server_mode()` and `Info::server_mode()` which returns whether or not this node is running in server mode.
+- Add `Rpc::info()` to export a thread safe and lightweight summary of the node's information and statistics.
+- Add `cache_bootstrap.rs` example to show how you can store your routing table to disk and use it for subsequent bootstrapping.
+- Add `Id::from_ipv4()`.
+- Add `Id::is_valid_for_ipv4`.
+- Add `RoutingTable::nodes()` iterator.
+- Add `Dht::get_mutable_most_recent()` and `AsyncDht::get_mutable_most_recent()` to get the most recent mutable item from the network.
+- Add `PutQueryError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
+- Add `PutMutableError::Concurrrency(ConcurrrencyError)` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
+- Add `Dht::get_closest_nodes()` and `AsyncDht::get_closest_nodes()` to return the closest nodes (that support BEP_0044) with valid tokens.
+- Add `Dht::put()` and `AsyncDht::put()` to put a request to the closest nodes, and optionally to extra arbitrary nodes with valid tokens.
+- Export `Dhtbuilder`.
+- Export `RoutingTable`.
+
+### Removed
+
+- Remove `bytes` dependency.
+- Remove `ipv6` optionality and commit to `ipv4`.
+- Remove `Id::to_vec()`.
+- Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
+- Removed `Node::unique()`, `Node::with_id()`, `Node::with_address()`, and `Node::with_token()`.
+- Removed `RoutingTable::default()`.
+
+### Changed
+
+- Rename `Settings` to `Config`.
+- `Dht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
+- Rename `Settings` to `Config`.
+- `Rpc::new()` takes `Config` as input.
+- `Rpc::id()` returns `Id` instead of `&Id`.
+- `Rpc::get`, and `Rpc::put` don't take a `target` argument, as it is included in the request arguments.
+- `Rpc::get()`, and `Rpc::put()` don't take a sender any more.
+- `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
+- Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
+  and `RpcTickReport::new_qurey_response` are added.
+- `Info::local_addr()` is infallible.
+- `MutableItem::seq()` returns `i64` instead of a refernece.
+- `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.
+- `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes`.
+- `Dht::put_immutable()` and `AsyncDh::put_immutable()` return `PutImmutableError`.
+- `Dht::announce_peer()` and `AsyncDh::announce_peer()` return `AnnouncePeerError`.
+- `Dht::put_mutable()` and `AsyncDh::put_mutable()` return `PutMutableError`.
+- All tracing logs are either `TRACE` (for krpcsocket), `DEBUG`, or `INFO` only for rare and singular events, 
+  like starting the node, updating the node Id, or switching to server mode (from adaptive mode).
+- Change `PutError` to contain transparent elements for generic `PutQueryError`, and more specialized `ConcurrrencyError`.
+- Remove `MutableItem::cas` field, and add optional `CAS` parameter to `Dht::put_mutable` and `AsyncDht::put_mutable`.
+- `Dht::find_node()` and `AsyncDht::find_node()` return `Box<[Node]>` instead of `Vec<Node>`.
+- `Node` is `Send` and `Sync`, and cheap to clone using an internal `Arc`.
+- `Node::new()` take `Id` and `SocketAddrV4`.
+- `RoutingTable::new()` takes an `Id`.
+- Return `GetIterator<T>` and `GetStream<T>` from `get_` methods from `Dht` and `AsyncDht` instead of exposing `flume`.
+- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
+- Make `DefaultServer` properties public.
+- Trait `Server` needs to implement `Clone`, but no longer needs to implement `Sync`.
+- `DhtBuilder` is not consuming, thanks to `Config` being `Clone`.
+
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
 ### Added
