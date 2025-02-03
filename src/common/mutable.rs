@@ -155,9 +155,11 @@ pub fn encode_signable(seq: i64, value: &[u8], salt: Option<&[u8]>) -> Box<[u8]>
 /// Mainline crate error enum.
 pub enum MutableError {
     #[error("Invalid mutable item signature")]
+    /// Invalid mutable item signature
     InvalidMutableSignature,
 
     #[error("Invalid mutable item public key")]
+    /// Invalid mutable item public key
     InvalidMutablePublicKey,
 }
 

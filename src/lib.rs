@@ -28,7 +28,12 @@ pub use ed25519_dalek::SigningKey;
 pub mod errors {
     //! Exported errors
     #[cfg(feature = "node")]
+    pub use super::common::ErrorSpecific;
+    #[cfg(feature = "node")]
     pub use super::dht::{AnnouncePeerError, DhtWasShutdown, PutImmutableError, PutMutableError};
-
+    #[cfg(feature = "node")]
     pub use super::rpc::{ConcurrencyError, PutError, PutQueryError};
+
+    pub use super::common::DecodeIdError;
+    pub use super::common::MutableError;
 }

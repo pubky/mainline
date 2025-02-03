@@ -28,6 +28,8 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Dht::put()` and `AsyncDht::put()` to put a request to the closest nodes, and optionally to extra arbitrary nodes with valid tokens.
 - Export `Dhtbuilder`.
 - Export `RoutingTable`.
+- Add `MutableError `.
+- Add `DecodeIdError`
 
 ### Removed
 

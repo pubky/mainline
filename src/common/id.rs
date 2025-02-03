@@ -237,6 +237,7 @@ pub enum DecodeIdError {
     InvalidIdSize(#[from] InvalidIdSize),
 
     #[error("Hex encoding should contain an even number of hex characters")]
+    /// Hex encoding should contain an even number of hex characters
     OddNumberOfCharacters,
 
     /// Invalid hex character

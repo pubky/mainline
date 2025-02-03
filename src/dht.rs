@@ -23,7 +23,7 @@ use crate::{
     Node,
 };
 
-pub use crate::rpc::Config;
+use crate::rpc::Config;
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
