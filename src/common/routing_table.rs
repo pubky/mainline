@@ -17,6 +17,7 @@ pub struct RoutingTable {
 }
 
 impl RoutingTable {
+    /// Create a new [RoutingTable] with a given id.
     pub fn new(id: Id) -> Self {
         let buckets = BTreeMap::new();
 
@@ -35,6 +36,7 @@ impl RoutingTable {
 
     // === Public Methods ===
 
+    /// Attempts to add a node to this routing table, and return `true` if it did.
     pub fn add(&mut self, node: Node) -> bool {
         let distance = self.id.distance(node.id());
 
@@ -56,6 +58,7 @@ impl RoutingTable {
         bucket.add(node)
     }
 
+    /// Remove a node from this routing table.
     pub fn remove(&mut self, node_id: &Id) {
         let distance = self.id.distance(node_id);
 
@@ -96,16 +99,19 @@ impl RoutingTable {
             .to_vec()
     }
 
+    /// Returns `true` if this routing table is empty.
     pub fn is_empty(&self) -> bool {
         self.buckets.values().all(|bucket| bucket.is_empty())
     }
 
+    /// Return the number of nodes in this routing table.
     pub fn size(&self) -> usize {
         self.buckets
             .values()
             .fold(0, |acc, bucket| acc + bucket.nodes.len())
     }
 
+    /// Returns an iterator over the nodes in this routing table.
     pub fn nodes(&self) -> RoutingTableIterator {
         RoutingTableIterator {
             bucket_index: 1,
@@ -114,6 +120,7 @@ impl RoutingTable {
         }
     }
 
+    /// Export an owned vector of nodes from this routing table.
     pub fn to_owned_nodes(&self) -> Vec<Node> {
         self.nodes().collect()
     }

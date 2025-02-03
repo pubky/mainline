@@ -2,6 +2,8 @@
 
 // Copied from <https://github.com/raptorswing/rustydht-lib/blob/main/src/packets/public.rs>
 
+#![allow(missing_docs)]
+
 mod internal;
 
 use std::convert::TryInto;
@@ -12,7 +14,7 @@ use crate::common::{Id, Node, ID_SIZE};
 use super::InvalidIdSize;
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Message {
+pub(crate) struct Message {
     pub transaction_id: u16,
 
     /// The version of the requester or responder.
@@ -752,9 +754,6 @@ pub enum DecodeMessageError {
     #[error("Wrong number of bytes for nodes")]
     InvalidNodes4,
 
-    #[error("Wrong number of bytes for peers (values)")]
-    InvalidPeers,
-
     #[error("wrong number of bytes for port")]
     InvalidPortEncoding,
 
@@ -769,9 +768,6 @@ pub enum DecodeMessageError {
 
     #[error(transparent)]
     InvalidIdSize(#[from] InvalidIdSize),
-
-    #[error("Error packet should have at least 2 elements")]
-    InvalidErrorPacket,
 }
 
 #[cfg(test)]

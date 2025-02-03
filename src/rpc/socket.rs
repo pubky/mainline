@@ -13,6 +13,7 @@ const VERSION: [u8; 4] = [82, 83, 0, 4]; // "RS" version 04
 const MTU: usize = 2048;
 
 pub const DEFAULT_PORT: u16 = 6881;
+/// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 pub const READ_TIMEOUT: Duration = Duration::from_millis(10);
 

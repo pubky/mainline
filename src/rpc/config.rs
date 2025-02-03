@@ -11,7 +11,6 @@ pub struct Config {
     ///
     /// Defaults to [DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Vec<String>,
-    /// Extra bootstrapping nodes to be used alongside
     /// Explicit port to listen on.
     ///
     /// Defaults to None

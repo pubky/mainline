@@ -57,10 +57,6 @@ impl ClosestNodes {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
-
     /// Take enough nodes closest to the target, until the following are satisfied:
     /// 1. At least the closest `k` nodes (20).
     /// 2. The last node should be at a distance `edk` which is the expected distance of the 20th

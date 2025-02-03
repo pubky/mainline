@@ -35,7 +35,6 @@ pub use config::Config;
 pub use info::Info;
 pub use iterative_query::GetRequestSpecific;
 pub use put_query::{ConcurrencyError, PutError, PutQueryError};
-pub use socket::DEFAULT_PORT;
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
 use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments, PutRequest};

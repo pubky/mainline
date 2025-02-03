@@ -76,6 +76,7 @@ impl Id {
         result.into()
     }
 
+    /// Returns a byte slice of this Id.
     pub fn as_bytes(&self) -> &[u8; 20] {
         &self.0
     }

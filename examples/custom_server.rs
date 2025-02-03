@@ -1,8 +1,7 @@
 use std::net::SocketAddrV4;
 
 use mainline::{
-    rpc::messages::MessageType,
-    server::{DefaultServer, Server},
+    server::{DefaultServer, MessageType, RequestSpecific, Server},
     Dht, RoutingTable,
 };
 use tracing::{info, Level};
@@ -17,7 +16,7 @@ impl Server for MyCustomServer {
         &mut self,
         routing_table: &RoutingTable,
         from: SocketAddrV4,
-        request: mainline::rpc::messages::RequestSpecific,
+        request: RequestSpecific,
     ) -> (MessageType, Option<Box<[SocketAddrV4]>>) {
         info!(?request, ?from, "Got Request");
 

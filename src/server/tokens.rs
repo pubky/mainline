@@ -31,6 +31,7 @@ impl Debug for Tokens {
 }
 
 impl Tokens {
+    /// Create a Tokens generator.
     pub fn new() -> Self {
         let mut rng = thread_rng();
 
@@ -43,6 +44,7 @@ impl Tokens {
 
     // === Public Methods ===
 
+    /// Returns `true` if the current secret needs to be updated after an interval.
     pub fn should_update(&self) -> bool {
         self.last_updated.elapsed() > crate::common::TOKEN_ROTATE_INTERVAL
     }
@@ -55,6 +57,7 @@ impl Tokens {
         token == curr || token == prev
     }
 
+    /// Rotate the tokens secret.
     pub fn rotate(&mut self) {
         trace!("Rotating secrets");
         let mut rng = thread_rng();
@@ -65,6 +68,7 @@ impl Tokens {
         self.last_updated = Instant::now();
     }
 
+    /// Generates a new token for a remote peer.
     pub fn generate_token(&mut self, address: SocketAddrV4) -> [u8; 4] {
         self.internal_generate_token(address, self.curr_secret)
     }

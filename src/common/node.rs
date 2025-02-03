@@ -80,14 +80,17 @@ impl Node {
 
     // === Getters ===
 
+    /// Returns the id of this node
     pub fn id(&self) -> &Id {
         &self.0.id
     }
 
+    /// Returns the address of this node
     pub fn address(&self) -> SocketAddrV4 {
         self.0.address
     }
 
+    /// Returns the token we received from this node if any.
     pub fn token(&self) -> Option<Box<[u8]>> {
         self.0.token.clone()
     }

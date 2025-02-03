@@ -18,6 +18,7 @@ pub struct PeersStore {
 }
 
 impl PeersStore {
+    /// Create a new store of peers announced on info hashes.
     pub fn new(max_info_hashes: NonZeroUsize, max_peers: NonZeroUsize) -> Self {
         Self {
             info_hashes: LruCache::new(max_info_hashes),
@@ -25,6 +26,7 @@ impl PeersStore {
         }
     }
 
+    /// Add a peer for an info hash.
     pub fn add_peer(&mut self, info_hash: Id, peer: (&Id, SocketAddrV4)) {
         if let Some(info_hash_lru) = self.info_hashes.get_mut(&info_hash) {
             info_hash_lru.put(*peer.0, peer.1);
@@ -35,6 +37,7 @@ impl PeersStore {
         };
     }
 
+    /// Returns a random set of peers per an info hash.
     pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddrV4>> {
         if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
             let size = info_hash_lru.len();

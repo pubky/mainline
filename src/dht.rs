@@ -30,34 +30,32 @@ pub use crate::rpc::Config;
 pub struct Dht(pub(crate) Sender<ActorMessage>);
 
 #[derive(Debug, Default, Clone)]
+/// A builder for the [Dht] node.
 pub struct DhtBuilder(Config);
 
-// TODO: make Config private.
-// TODO: make Rpc private.
-
 impl DhtBuilder {
-    /// Set [Config::server_mode].
+    /// Set this node's server_mode.
     pub fn server_mode(&mut self) -> &mut Self {
         self.0.server_mode = true;
 
         self
     }
 
-    /// Set [Config::server]
+    /// Set a custom [Server].
     pub fn custom_server(&mut self, custom_server: Box<dyn Server>) -> &mut Self {
         self.0.server = Some(custom_server);
 
         self
     }
 
-    /// Set [Config::bootstrap]
+    /// Set bootstraping nodes.
     pub fn bootstrap(&mut self, bootstrap: &[String]) -> &mut Self {
         self.0.bootstrap = bootstrap.to_vec();
 
         self
     }
 
-    /// Add more bootstrap nodes to [Config::bootstrap].
+    /// Add more bootstrap nodes to default bootstraping nodes.
     ///
     /// Useful when you want to augment the default bootstrapping nodes with
     /// dynamic list of nodes you have seen in previous sessions.
@@ -69,21 +67,30 @@ impl DhtBuilder {
         self
     }
 
-    /// Set [Config::port]
+    /// Set an explicit port to listen on.
     pub fn port(&mut self, port: u16) -> &mut Self {
         self.0.port = Some(port);
 
         self
     }
 
-    /// Set [Config::public_ip]
+    /// A known public IPv4 address for this node to generate
+    /// a secure node Id from according to [BEP_0042](https://www.bittorrent.org/beps/bep_0042.html)
+    ///
+    /// Defaults to depending on suggestions from responding nodes.
     pub fn public_ip(&mut self, public_ip: Ipv4Addr) -> &mut Self {
         self.0.public_ip = Some(public_ip);
 
         self
     }
 
-    /// Set [Config::request_timeout]
+    /// UDP socket request timeout duration.
+    ///
+    /// The longer this duration is, the longer queries take until they are deemeed "done".
+    /// The shortet this duration is, the more responses from busy nodes we miss out on,
+    /// which affects the accuracy of queries trying to find closest nodes to a target.
+    ///
+    /// Defaults to [crate::DEFAULT_REQUEST_TIMEOUT]
     pub fn request_timeout(&mut self, request_timeout: Duration) -> &mut Self {
         self.0.request_timeout = request_timeout;
 
@@ -129,7 +136,7 @@ impl Dht {
         Dht::builder().build()
     }
 
-    /// Create a new DHT node that is running in [Server mode][Config::server_mode] as
+    /// Create a new DHT node that is running in [Server mode][DhtBuilder::server_mode] as
     /// soon as possible.
     ///
     /// You shouldn't use this option unless you are sure your
@@ -480,7 +487,7 @@ impl Dht {
 
     // === Private Methods ===
 
-    pub fn put_inner(
+    pub(crate) fn put_inner(
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
@@ -648,11 +655,14 @@ pub enum ResponseSender {
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
 #[derive(Debug)]
 pub struct Testnet {
+    /// bootstraping nodes for this testnet.
     pub bootstrap: Vec<String>,
+    /// all nodes in this testnet
     pub nodes: Vec<Dht>,
 }
 
 impl Testnet {
+    /// Create a new testnet with a certain size.
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
@@ -681,9 +691,11 @@ impl Testnet {
 /// Announce Peer errors.
 pub enum AnnouncePeerError {
     #[error(transparent)]
+    /// Common PutQuery errors
     Query(#[from] PutQueryError),
 
     #[error(transparent)]
+    /// The Dht was shutdown
     Shutdown(#[from] DhtWasShutdown),
 }
 
@@ -691,9 +703,11 @@ pub enum AnnouncePeerError {
 /// Put Immutable errors.
 pub enum PutImmutableError {
     #[error(transparent)]
+    /// Common PutQuery errors
     Query(#[from] PutQueryError),
 
     #[error(transparent)]
+    /// The Dht was shutdown
     Shutdown(#[from] DhtWasShutdown),
 }
 
@@ -701,16 +715,20 @@ pub enum PutImmutableError {
 /// Put MutableItem errors.
 pub enum PutMutableError {
     #[error(transparent)]
+    /// Common PutQuery errors
     Query(#[from] PutQueryError),
 
     #[error(transparent)]
+    /// PutQuery for [crate::MutableItem] errors
     Concurrency(#[from] ConcurrencyError),
 
     #[error(transparent)]
+    /// The Dht was shutdown
     Shutdown(#[from] DhtWasShutdown),
 }
 
 #[derive(Debug)]
+/// The Dht was shutdown
 pub struct DhtWasShutdown;
 
 impl std::error::Error for DhtWasShutdown {}

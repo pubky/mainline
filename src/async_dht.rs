@@ -376,7 +376,7 @@ impl AsyncDht {
     /// Send a PUT request to the closest nodes, and optionally some extra nodes.
     ///
     /// This is useful to put data to regions of the DHT other than the closest nodes
-    /// to this request's [target ][PutRequestSpecific::target].
+    /// to this request's [target][PutRequestSpecific::target].
     ///
     /// You can find nodes close to other regions of the network by calling
     /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.
@@ -396,6 +396,7 @@ impl AsyncDht {
     }
 }
 
+/// A [Stream] of incoming peers, immutable or mutable values.
 pub struct GetStream<T: 'static>(flume::r#async::RecvStream<'static, T>);
 
 impl<T> Stream for GetStream<T> {

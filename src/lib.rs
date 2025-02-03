@@ -3,6 +3,9 @@
 #![doc = document_features::document_features!()]
 //!
 
+#![deny(missing_docs)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod common;
 #[cfg(feature = "node")]
 mod dht;
@@ -10,13 +13,15 @@ mod dht;
 // Public modules
 #[cfg(feature = "async")]
 pub mod async_dht;
-pub mod rpc;
+pub(crate) mod rpc;
 pub mod server;
 
-pub use crate::common::{Id, MutableItem, Node, RoutingTable};
+pub use rpc::DEFAULT_REQUEST_TIMEOUT;
+
+pub use crate::common::{Id, MutableItem, Node, PutRequestSpecific, RoutingTable};
 
 #[cfg(feature = "node")]
-pub use dht::{Config, Dht, DhtBuilder, Testnet};
+pub use dht::{Dht, DhtBuilder, Testnet};
 
 pub use ed25519_dalek::SigningKey;
 

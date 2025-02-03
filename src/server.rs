@@ -13,18 +13,22 @@ use tracing::debug;
 use crate::common::{
     validate_immutable, AnnouncePeerRequestArguments, ErrorSpecific, FindNodeRequestArguments,
     FindNodeResponseArguments, GetImmutableResponseArguments, GetMutableResponseArguments,
-    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, MessageType,
-    MutableItem, NoMoreRecentValueResponseArguments, NoValuesResponseArguments,
-    PingResponseArguments, PutImmutableRequestArguments, PutMutableRequestArguments, PutRequest,
-    PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
+    GetPeersRequestArguments, GetPeersResponseArguments, GetValueRequestArguments, Id, MutableItem,
+    NoMoreRecentValueResponseArguments, NoValuesResponseArguments, PingResponseArguments,
+    PutImmutableRequestArguments, PutMutableRequestArguments, PutRequest, PutRequestSpecific,
+    RequestTypeSpecific, ResponseSpecific, RoutingTable,
 };
 
 use peers::PeersStore;
 use tokens::Tokens;
 
-// Stored data in server mode.
+pub use crate::common::{MessageType, RequestSpecific};
+
+/// Default maximum number of info_hashes for which to store peers.
 pub const MAX_INFO_HASHES: usize = 2000;
+/// Default maximum number of peers to store per info_hash.
 pub const MAX_PEERS: usize = 500;
+/// Default maximum number of Immutable and Mutable items to store.
 pub const MAX_VALUES: usize = 1000;
 
 /// Dht server that can handle incoming rpc requests.
@@ -39,9 +43,9 @@ pub trait Server: std::fmt::Debug + Send + DynClone {
     /// - A [MessageType::Error] to send to the requester.
     /// - Or a [MessageType::Request] for the RPC to query the DHT (PING excluded).
     ///
-    /// And the `extra_nodes` is passed to [crate::rpc::Rpc::put], and ignored otherwise.
+    /// And the `extra_nodes` is passed to the node to send the request to, and ignored otherwise.
     ///
-    /// This function will block the main loop where the [crate::rpc::Rpc]
+    /// This function will block the main actor thread where the dht node
     /// is running, thus it needs to be very fast and lightweight.
     fn handle_request(
         &mut self,
@@ -77,6 +81,7 @@ impl Default for DefaultServer {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Settings for the default dht server.
 pub struct DefaultServerSettings {
     /// The maximum info_hashes for which to store peers.
     ///
@@ -97,6 +102,7 @@ pub struct DefaultServerSettings {
 }
 
 impl DefaultServer {
+    /// Creates a new [DefaultServer]
     pub fn new(settings: &DefaultServerSettings) -> Self {
         let tokens = Tokens::new();
 

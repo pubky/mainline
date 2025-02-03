@@ -6,18 +6,17 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Added
 
-- `DhtBuilder` wrapper around `Config`.
 - Support `BEP_0042 DHT Security extension` when running in server mode. 
-- Add `Config::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
-- Add `Config::server_mode` to force server mode.
+- Add `DhtBuilder::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
+- Add `DhtBuilder::server_mode` to force server mode.
 - Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
 - Add `Dht::bootstrapped()` and `AsyncDht::bootstrapped()` to wait for the routing table to be bootstrapped.
 - Add `RoutingTable::to_bootstrap()`, `Dht::to_bootstrap()`, and `AsyncDht::to_bootstrap()` to export the addresses nodes in the routing table.
-- Add `Rpc::public_address()` and `Info::public_address()` which returns the best estimate for this node's public address.
-- Add `Rpc::firewalled()` and `Info::firewalled()` which returns whether or not this node is firewalled, or publicly accessible.
-- Add `Rpc::server_mode()` and `Info::server_mode()` which returns whether or not this node is running in server mode.
-- Add `Rpc::info()` to export a thread safe and lightweight summary of the node's information and statistics.
+- Add `Info::public_address()` which returns the best estimate for this node's public address.
+- Add `Info::firewalled()` which returns whether or not this node is firewalled, or publicly accessible.
+- Add `Info::server_mode()` which returns whether or not this node is running in server mode.
+- Add `DhtBuilder::info()` to export a thread safe and lightweight summary of the node's information and statistics.
 - Add `cache_bootstrap.rs` example to show how you can store your routing table to disk and use it for subsequent bootstrapping.
 - Add `Id::from_ipv4()`.
 - Add `Id::is_valid_for_ipv4`.
@@ -38,19 +37,14 @@ All notable changes to mainline dht will be documented in this file.
 - Exported `ClosestNodes`, you have to use it from `mainline::rpc`.
 - Removed `Node::unique()`, `Node::with_id()`, `Node::with_address()`, and `Node::with_token()`.
 - Removed `RoutingTable::default()`.
+- Removed exporting `rpc` module, and `Rpc` struct.
 
 ### Changed
 
-- Rename `Settings` to `Config`.
-- `Dht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
-- Rename `Settings` to `Config`.
-- `Rpc::new()` takes `Config` as input.
-- `Rpc::id()` returns `Id` instead of `&Id`.
-- `Rpc::get`, and `Rpc::put` don't take a `target` argument, as it is included in the request arguments.
-- `Rpc::get()`, and `Rpc::put()` don't take a sender any more.
-- `RpcTickReport` returned from `Rpc::tick()` is changed, `RpcTickReport::received_from` is removed, and `RpcTickReport::done_find_node_queries`, 
-- Enable calling `Rpc::put()` multiple times concurrently except for put mutable that may return `PutMutableError::Concurrrency(ConcurrrencyError)`.
-  and `RpcTickReport::new_qurey_response` are added.
+- Rename `Settings` to `ClientBuilder`.
+- `Dht`, and `AsyncDh` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
+- Enable calling `Dht::announce_peer()` and `Dht::put_immutable()` multiple times concurrently. 
+- Return `PutMutableError::Concurrrency(ConcurrrencyError)` from `Dht::put_mutable()`.
 - `Info::local_addr()` is infallible.
 - `MutableItem::seq()` returns `i64` instead of a refernece.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.

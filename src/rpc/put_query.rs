@@ -198,10 +198,12 @@ impl PutQuery {
 #[derive(thiserror::Error, Debug, Clone)]
 /// PutQuery errors
 pub enum PutError {
+    /// Common PutQuery errors
     #[error(transparent)]
     Query(#[from] PutQueryError),
 
     #[error(transparent)]
+    /// PutQuery for [crate::MutableItem] errors
     Concurrency(#[from] ConcurrencyError),
 }
 

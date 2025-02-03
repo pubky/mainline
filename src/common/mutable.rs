@@ -105,26 +105,33 @@ impl MutableItem {
 
     // === Getters ===
 
+    /// Returns the target (info hash) of this item.
     pub fn target(&self) -> &Id {
         &self.target
     }
 
+    /// Returns a reference to the 32 bytes Ed25519 public key of this item.
     pub fn key(&self) -> &[u8; 32] {
         &self.key
     }
 
+    /// Returns a byte slice of the value of this item.
     pub fn value(&self) -> &[u8] {
         &self.value
     }
 
+    /// Returns the `seq` (sequnece) number of this item.
     pub fn seq(&self) -> i64 {
         self.seq
     }
 
+    /// Returns the signature over this item.
     pub fn signature(&self) -> &[u8; 64] {
         &self.signature
     }
 
+    /// Returns the `Salt` value used for generating the
+    /// [Self::target] if any.
     pub fn salt(&self) -> Option<&[u8]> {
         self.salt.as_deref()
     }
