@@ -18,10 +18,12 @@ pub mod server;
 
 pub use rpc::DEFAULT_REQUEST_TIMEOUT;
 
-pub use crate::common::{Id, MutableItem, Node, PutRequestSpecific, RoutingTable};
+pub use common::{Id, MutableItem, Node, PutRequestSpecific, RoutingTable};
 
 #[cfg(feature = "node")]
 pub use dht::{Dht, DhtBuilder, Testnet};
+#[cfg(feature = "node")]
+pub use rpc::messages;
 
 pub use ed25519_dalek::SigningKey;
 
