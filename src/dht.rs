@@ -531,7 +531,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     },
                     Err(TryRecvError::Disconnected) => {
                         // Node was dropped, kill this thread.
-                        tracing::debug!("mainline::Dht's actor thread wash shutdown after Drop.");
+                        tracing::debug!("mainline::Dht's actor thread was shutdown after Drop.");
                         break;
                     }
                     Err(TryRecvError::Empty) => {

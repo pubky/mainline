@@ -6,9 +6,11 @@ All notable changes to mainline dht will be documented in this file.
 
 ### Added
 
-- Support `BEP_0042 DHT Security extension` when running in server mode. 
-- Add `DhtBuilder::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
+- Add `Id::from_ipv4()`.
+- Add `Id::is_valid_for_ipv4`.
+- Add `RoutingTable::nodes()` iterator.
 - Add `DhtBuilder::server_mode` to force server mode.
+- Add `DhtBuilder::public_ip` for manually setting the node's public ip to generate secure node `Id` from.
 - Add [adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
 - Add `DhtBuilder::extra_bootstrap()` to add more bootstrapping nodes from previous sessions.
 - Add `Dht::bootstrapped()` and `AsyncDht::bootstrapped()` to wait for the routing table to be bootstrapped.
@@ -18,18 +20,17 @@ All notable changes to mainline dht will be documented in this file.
 - Add `Info::server_mode()` which returns whether or not this node is running in server mode.
 - Add `DhtBuilder::info()` to export a thread safe and lightweight summary of the node's information and statistics.
 - Add `cache_bootstrap.rs` example to show how you can store your routing table to disk and use it for subsequent bootstrapping.
-- Add `Id::from_ipv4()`.
-- Add `Id::is_valid_for_ipv4`.
-- Add `RoutingTable::nodes()` iterator.
 - Add `Dht::get_mutable_most_recent()` and `AsyncDht::get_mutable_most_recent()` to get the most recent mutable item from the network.
 - Add `PutQueryError::Timeout` in case put query is terminated unsuccessfully, but no error responses.
 - Add `PutMutableError::Concurrrency(ConcurrrencyError)` for all cases where a `Lost Update Problem` may occur (read `Dht::put_mutable` documentation for more details).
 - Add `Dht::get_closest_nodes()` and `AsyncDht::get_closest_nodes()` to return the closest nodes (that support BEP_0044) with valid tokens.
 - Add `Dht::put()` and `AsyncDht::put()` to put a request to the closest nodes, and optionally to extra arbitrary nodes with valid tokens.
-- Export `Dhtbuilder`.
-- Export `RoutingTable`.
+- Add `Testnet::leak()` to keep the dht network running as a `'static`
 - Add `MutableError `.
 - Add `DecodeIdError`
+- Export `Dhtbuilder`.
+- Export `RoutingTable`.
+- Support `BEP_0042 DHT Security extension` when running in server mode. 
 
 ### Removed
 
