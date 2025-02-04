@@ -669,7 +669,7 @@ impl Testnet {
     /// useful if you need to keep running the testnet in the process
     /// even if this struct gets dropped.
     pub fn leak(&self) {
-        for node in &self.nodes {
+        for node in self.nodes.clone() {
             Box::leak(Box::new(node));
         }
     }
