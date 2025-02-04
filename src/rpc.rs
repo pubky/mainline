@@ -921,12 +921,6 @@ impl Rpc {
     }
 }
 
-impl Drop for Rpc {
-    fn drop(&mut self) {
-        debug!("Dropped Mainline::Rpc");
-    }
-}
-
 struct CachedIterativeQuery {
     closest_responding_nodes: Box<[Node]>,
     dht_size_estimate: f64,
