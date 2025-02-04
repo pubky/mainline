@@ -365,10 +365,7 @@ impl Dht {
     /// let key = signing_key.verifying_key().to_bytes();
     /// let salt = Some(b"salt".as_ref());
     ///
-    /// let (item, cas) = if let Some(most_recent) = dht
-    ///     .get_mutable_most_recent(&key, salt)
-    ///     .unwrap()
-    /// {
+    /// let (item, cas) = if let Some(most_recent) = dht .get_mutable_most_recent(&key, salt) {
     ///     // 1. Optionally Create a new value to take the most recent's value in consideration.
     ///     let mut new_value = most_recent.value().to_vec();
     ///     new_value.extend_from_slice(b" more data");

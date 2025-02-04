@@ -251,34 +251,33 @@ impl AsyncDht {
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
     ///
     /// let testnet = Testnet::new(3).unwrap();
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
+    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap().as_async();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
     /// let key = signing_key.verifying_key().to_bytes();
     /// let salt = Some(b"salt".as_ref());
     ///
-    /// let (item, cas) = if let Some(most_recent) = dht
-    ///     .get_mutable_most_recent(&key, salt)
-    ///     .unwrap()
-    /// {
-    ///     // 1. Optionally Create a new value to take the most recent's value in consideration.
-    ///     let mut new_value = most_recent.value().to_vec();
-    ///     new_value.extend_from_slice(b" more data");
+    /// futures::executor::block_on(async move {
+    ///     let (item, cas) = if let Some(most_recent) = dht.get_mutable_most_recent(&key, salt).await {
+    ///         // 1. Optionally Create a new value to take the most recent's value in consideration.
+    ///         let mut new_value = most_recent.value().to_vec();
+    ///         new_value.extend_from_slice(b" more data");
     ///
-    ///     // 2. Increment the sequence number to be higher than the most recent's.
-    ///     let most_recent_seq = most_recent.seq();
-    ///     let new_seq = most_recent_seq + 1;
+    ///         // 2. Increment the sequence number to be higher than the most recent's.
+    ///         let most_recent_seq = most_recent.seq();
+    ///         let new_seq = most_recent_seq + 1;
     ///
-    ///     (
-    ///         MutableItem::new(signing_key, &new_value, new_seq, salt),
-    ///         // 3. Use the most recent [MutableItem::seq] as a `CAS`.
-    ///         Some(most_recent_seq)
-    ///     )
-    /// } else {
-    ///     (MutableItem::new(signing_key, b"first value", 1, salt), None)
-    /// };
+    ///         (
+    ///             MutableItem::new(signing_key, &new_value, new_seq, salt),
+    ///             // 3. Use the most recent [MutableItem::seq] as a `CAS`.
+    ///             Some(most_recent_seq)
+    ///         )
+    ///     } else {
+    ///         (MutableItem::new(signing_key, b"first value", 1, salt), None)
+    ///     };
     ///
-    /// dht.put_mutable(item, cas).unwrap();
+    ///     dht.put_mutable(item, cas).await.unwrap();
+    /// });
     /// ```
     ///
     /// ## Errors
