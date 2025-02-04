@@ -283,7 +283,7 @@ impl AsyncDht {
     /// ## Errors
     ///
     /// In addition to the [PutQueryError] common with all PUT queries, PUT mutable item
-    /// query has other [Concurrency errors][ConcurrencyError], that try to detect write conflict
+    /// query has other [Concurrency errors][crate::rpc::ConcurrencyError], that try to detect write conflict
     /// risks or obvious conflicts.
     ///
     /// If you are lucky to get one of these errors (which is not guaranteed), then you should
