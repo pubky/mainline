@@ -7,7 +7,7 @@ use tracing::{debug, error, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
-use super::Config;
+use super::config::Config;
 
 const VERSION: [u8; 4] = [82, 83, 0, 4]; // "RS" version 04
 const MTU: usize = 2048;

@@ -1,14 +1,14 @@
 //! K-RPC implementatioStoreQueryMetdatan
 
 mod closest_nodes;
-mod config;
+pub(crate) mod config;
 mod info;
 mod iterative_query;
 mod put_query;
 mod socket;
 
 use std::collections::HashMap;
-use std::net::{SocketAddr, SocketAddrV4, ToSocketAddrs};
+use std::net::SocketAddrV4;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
@@ -31,7 +31,6 @@ use socket::KrpcSocket;
 
 pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
-pub use config::Config;
 pub use info::Info;
 pub use iterative_query::GetRequestSpecific;
 pub use put_query::{ConcurrencyError, PutError, PutQueryError};
@@ -98,7 +97,7 @@ pub struct Rpc {
 
 impl Rpc {
     /// Create a new Rpc
-    pub fn new(config: Config) -> Result<Self, std::io::Error> {
+    pub fn new(config: config::Config) -> Result<Self, std::io::Error> {
         let id = if let Some(ip) = config.public_ip {
             Id::from_ip(ip.into())
         } else {
@@ -107,25 +106,8 @@ impl Rpc {
 
         let socket = KrpcSocket::new(&config)?;
 
-        let bootstrap = config
-            .bootstrap
-            .to_owned()
-            .iter()
-            .flat_map(|s| {
-                s.to_socket_addrs().map(|addrs| {
-                    addrs
-                        .filter_map(|addr| match addr {
-                            SocketAddr::V4(addr_v4) => Some(addr_v4),
-                            _ => None,
-                        })
-                        .collect::<Box<[_]>>()
-                })
-            })
-            .flatten()
-            .collect::<Box<[_]>>();
-
         Ok(Rpc {
-            bootstrap,
+            bootstrap: config.bootstrap.into(),
             socket,
 
             routing_table: RoutingTable::new(id),

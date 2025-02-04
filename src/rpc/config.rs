@@ -1,4 +1,7 @@
-use std::{net::Ipv4Addr, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs},
+    time::Duration,
+};
 
 use crate::server::Server;
 
@@ -10,7 +13,7 @@ pub struct Config {
     /// Bootstrap nodes
     ///
     /// Defaults to [DEFAULT_BOOTSTRAP_NODES]
-    pub bootstrap: Vec<String>,
+    pub bootstrap: Vec<SocketAddrV4>,
     /// Explicit port to listen on.
     ///
     /// Defaults to None
@@ -41,10 +44,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            bootstrap: DEFAULT_BOOTSTRAP_NODES
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            bootstrap: to_socket_address(&DEFAULT_BOOTSTRAP_NODES),
             port: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
             server: None,
@@ -52,4 +52,21 @@ impl Default for Config {
             public_ip: None,
         }
     }
+}
+
+pub(crate) fn to_socket_address<T: ToSocketAddrs>(bootstrap: &[T]) -> Vec<SocketAddrV4> {
+    bootstrap
+        .iter()
+        .flat_map(|s| {
+            s.to_socket_addrs().map(|addrs| {
+                addrs
+                    .filter_map(|addr| match addr {
+                        SocketAddr::V4(addr_v4) => Some(addr_v4),
+                        _ => None,
+                    })
+                    .collect::<Box<[_]>>()
+            })
+        })
+        .flatten()
+        .collect()
 }

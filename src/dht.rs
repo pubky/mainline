@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    net::{Ipv4Addr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs},
     thread,
     time::Duration,
 };
@@ -22,7 +22,7 @@ use crate::{
     Node,
 };
 
-use crate::rpc::Config;
+use crate::rpc::config::{to_socket_address, Config};
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
@@ -48,8 +48,8 @@ impl DhtBuilder {
     }
 
     /// Set bootstraping nodes.
-    pub fn bootstrap(&mut self, bootstrap: &[String]) -> &mut Self {
-        self.0.bootstrap = bootstrap.to_vec();
+    pub fn bootstrap<T: ToSocketAddrs>(&mut self, bootstrap: &[T]) -> &mut Self {
+        self.0.bootstrap = to_socket_address(bootstrap);
 
         self
     }
@@ -58,10 +58,17 @@ impl DhtBuilder {
     ///
     /// Useful when you want to augment the default bootstrapping nodes with
     /// dynamic list of nodes you have seen in previous sessions.
-    pub fn extra_bootstrap(&mut self, extra_bootstrap: &[String]) -> &mut Self {
-        for node in extra_bootstrap {
-            self.0.bootstrap.push(node.clone());
+    pub fn extra_bootstrap<T: ToSocketAddrs>(&mut self, extra_bootstrap: &[T]) -> &mut Self {
+        for address in to_socket_address(extra_bootstrap) {
+            self.0.bootstrap.push(address);
         }
+
+        self
+    }
+
+    /// Remove the existing bootstraping nodes, usually to create the first node in a new network.
+    pub fn no_bootstrap(&mut self) -> &mut Self {
+        self.0.bootstrap = vec![];
 
         self
     }
@@ -631,7 +638,7 @@ impl Testnet {
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().server_mode().bootstrap(&[]).build()?;
+                let node = Dht::builder().server_mode().no_bootstrap().build()?;
 
                 let info = node.info();
                 let addr = info.local_addr();
@@ -731,14 +738,14 @@ mod test {
 
     #[test]
     fn find_node_no_values() {
-        let client = Dht::builder().bootstrap(&[]).build().unwrap();
+        let client = Dht::builder().no_bootstrap().build().unwrap();
 
         client.find_node(Id::random());
     }
 
     #[test]
     fn put_get_immutable_no_values() {
-        let client = Dht::builder().bootstrap(&[]).build().unwrap();
+        let client = Dht::builder().no_bootstrap().build().unwrap();
 
         assert_eq!(client.get_immutable(Id::random()), None);
     }
