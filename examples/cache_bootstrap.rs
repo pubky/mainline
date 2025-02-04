@@ -42,9 +42,9 @@ fn main() {
 
     let client = builder.build().unwrap();
 
-    client.bootstrapped().unwrap();
+    client.bootstrapped();
 
-    let bootstrap = client.to_bootstrap().unwrap();
+    let bootstrap = client.to_bootstrap();
 
     let bootstrap_content = bootstrap.join("\n");
     let mut file = fs::File::create(&nodes_file).expect("Failed to save bootstrapping nodes");

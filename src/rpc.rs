@@ -282,7 +282,7 @@ impl Rpc {
         for (id, closest_nodes) in &done_get_queries {
             if let Some(query) = self.iterative_queries.remove(id) {
                 self.update_address_votes_from_iterative_query(&query);
-                self.cached_iterative_query(&query, closest_nodes);
+                self.cache_iterative_query(&query, closest_nodes);
 
                 // Only for get queries, not find node.
                 if !matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
@@ -872,11 +872,7 @@ impl Rpc {
         }
     }
 
-    fn cached_iterative_query(
-        &mut self,
-        query: &IterativeQuery,
-        closest_responding_nodes: &[Node],
-    ) {
+    fn cache_iterative_query(&mut self, query: &IterativeQuery, closest_responding_nodes: &[Node]) {
         if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
             // Remove least recent closest_nodes
             if let Some((
@@ -902,6 +898,11 @@ impl Rpc {
 
         let closest = query.closest();
         let responders = query.responders();
+
+        if closest.nodes().is_empty() {
+            // We are clearly offline.
+            return;
+        }
 
         let dht_size_estimate = closest.dht_size_estimate();
         let responders_dht_size_estimate = responders.dht_size_estimate();

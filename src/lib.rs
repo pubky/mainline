@@ -17,7 +17,7 @@ pub mod async_dht;
 pub(crate) mod rpc;
 pub mod server;
 
-pub use rpc::DEFAULT_REQUEST_TIMEOUT;
+pub use rpc::{ClosestNodes, DEFAULT_REQUEST_TIMEOUT};
 
 pub use common::{Id, MutableItem, Node, PutRequestSpecific, RoutingTable};
 
@@ -33,7 +33,7 @@ pub mod errors {
     #[cfg(feature = "node")]
     pub use super::common::ErrorSpecific;
     #[cfg(feature = "node")]
-    pub use super::dht::{AnnouncePeerError, DhtWasShutdown, PutImmutableError, PutMutableError};
+    pub use super::dht::PutMutableError;
     #[cfg(feature = "node")]
     pub use super::rpc::{ConcurrencyError, PutError, PutQueryError};
 

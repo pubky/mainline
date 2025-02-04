@@ -39,7 +39,7 @@ fn main() {
     let start = Instant::now();
 
     println!("\nLooking up the most recent value..");
-    let item = dht.get_mutable_most_recent(&public_key, None).unwrap();
+    let item = dht.get_mutable_most_recent(&public_key, None);
 
     if let Some(item) = item {
         println!("Found the most recent value:");
@@ -56,7 +56,7 @@ fn main() {
 
 fn get_first(dht: &Dht, public_key: &[u8; 32]) {
     let start = Instant::now();
-    if let Some(item) = dht.get_mutable(public_key, None, None).unwrap().next() {
+    if let Some(item) = dht.get_mutable(public_key, None, None).next() {
         println!(
             "\nGot first result in {:?} milliseconds:",
             start.elapsed().as_millis()

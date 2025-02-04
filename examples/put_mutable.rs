@@ -43,9 +43,8 @@ fn main() {
 fn put(dht: &Dht, signer: &SigningKey, value: &[u8], salt: Option<&[u8]>) {
     let start = Instant::now();
 
-    let (item, cas) = if let Some(most_recent) = dht
-        .get_mutable_most_recent(signer.verifying_key().as_bytes(), salt)
-        .unwrap()
+    let (item, cas) = if let Some(most_recent) =
+        dht.get_mutable_most_recent(signer.verifying_key().as_bytes(), salt)
     {
         // 1. Optionally Create a new value to take the most recent's value in consideration.
         let mut new_value = most_recent.value().to_vec();

@@ -2,16 +2,18 @@ use mainline::{Dht, Id};
 use tracing::Level;
 
 fn main() {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
 
     let dht = Dht::client().unwrap();
 
     println!("Calculating Dht size by sampling random lookup queries..",);
 
     for lookups in 1.. {
-        let _ = dht.find_node(Id::random()).unwrap();
+        let _ = dht.find_node(Id::random());
 
-        let info = dht.info().unwrap();
+        let info = dht.info();
         let (estimate, std_dev) = info.dht_size_estimate();
 
         println!(
@@ -20,6 +22,8 @@ fn main() {
             format_number(estimate),
             (std_dev * 2.0) * 100.0
         );
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 }
 

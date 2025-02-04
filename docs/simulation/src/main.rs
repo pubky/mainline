@@ -9,7 +9,7 @@ use std::net::SocketAddrV4;
 
 use clap::Parser;
 use full_palette::GREY;
-use mainline::{rpc::ClosestNodes, Id, Node};
+use mainline::{ClosestNodes, Id, Node};
 use plotters::prelude::*;
 use statrs::statistics::*;
 

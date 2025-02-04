@@ -145,19 +145,15 @@ fn collect_samples(
         pool.install(|| {
             // Sample for marked_sample in parallel.
             mark_random_ids.par_iter().for_each(|random_id| {
-                if let Ok(nodes) = dht.find_node(*random_id) {
-                    for node in nodes {
-                        marked_sample.insert(*node.id());
-                    }
+                for node in dht.find_node(*random_id) {
+                    marked_sample.insert(*node.id());
                 }
             });
 
             // Sample for recapture_sample in parallel.
             recapture_random_ids.par_iter().for_each(|random_id| {
-                if let Ok(nodes) = dht.find_node(*random_id) {
-                    for node in nodes {
-                        recapture_sample.insert(*node.id());
-                    }
+                for node in dht.find_node(*random_id) {
+                    recapture_sample.insert(*node.id());
                 }
             });
         });

@@ -40,11 +40,14 @@ All notable changes to mainline dht will be documented in this file.
 - Removed `Node::unique()`, `Node::with_id()`, `Node::with_address()`, and `Node::with_token()`.
 - Removed `RoutingTable::default()`.
 - Removed exporting `rpc` module, and `Rpc` struct.
+- Removed `Dht::shutdown()` and `AsyncDht::shutdown()`.
+- Removed `DhtWasShutdown`
 
 ### Changed
 
 - Rename `Settings` to `ClientBuilder`.
-- `Dht`, and `AsyncDh` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
+- `Dht`, and `AsyncDht` is now behind a feature flag `node`, so you can include the `Rpc` only and build your own node.
+- All methods that were returning `Result<T, DhtWasShutdown>` now return `T`.
 - Enable calling `Dht::announce_peer()` and `Dht::put_immutable()` multiple times concurrently. 
 - Return `PutMutableError::Concurrrency(ConcurrrencyError)` from `Dht::put_mutable()`.
 - `Info::local_addr()` is infallible.

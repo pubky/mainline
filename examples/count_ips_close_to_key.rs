@@ -64,8 +64,8 @@ fn main() {
     let mut lookup_count = 0;
     while rx_interrupted.try_recv().is_err() {
         lookup_count += 1;
-        let mut dht = init_dht(USE_RANDOM_BOOTSTRAP_NODES);
-        let nodes = dht.find_node(target).unwrap();
+        let dht = init_dht(USE_RANDOM_BOOTSTRAP_NODES);
+        let nodes = dht.find_node(target);
         let nodes: Box<[Node]> = nodes
             .iter()
             .filter(|node| target.distance(node.id()) < MAX_DISTANCE)
@@ -109,7 +109,6 @@ fn main() {
             furthest_distance,
             (overlap*100 as f64) as usize
         );
-        dht.shutdown();
     }
 
     println!();
@@ -138,9 +137,8 @@ fn print_histogram(hits: HashMap<Ipv4Addr, u16>, lookup_count: usize) {
 }
 
 fn get_random_boostrap_nodes2() -> Vec<String> {
-    let mut dht = Dht::client().unwrap();
-    let nodes = dht.find_node(Id::random()).unwrap();
-    dht.shutdown();
+    let dht = Dht::client().unwrap();
+    let nodes = dht.find_node(Id::random());
     let addrs = nodes
         .iter()
         .map(|node| node.address().to_string())

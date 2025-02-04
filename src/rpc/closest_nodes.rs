@@ -12,6 +12,7 @@ pub struct ClosestNodes {
 }
 
 impl ClosestNodes {
+    /// Create a new instance of [ClosestNodes].
     pub fn new(target: Id) -> Self {
         Self {
             target,
@@ -21,20 +22,29 @@ impl ClosestNodes {
 
     // === Getters ===
 
+    /// Returns the target of the query for these closest nodes.
     pub fn target(&self) -> Id {
         self.target
     }
 
+    /// Returns a slice of the nodes array.
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
 
+    /// Returns the number of nodes.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
+    /// Returns true if there are no nodes.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
     // === Public Methods ===
 
+    /// Add a node.
     pub fn add(&mut self, node: Node) {
         let seek = node.id().xor(&self.target);
 

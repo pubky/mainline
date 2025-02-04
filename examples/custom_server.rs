@@ -37,9 +37,9 @@ fn main() {
         .build()
         .unwrap();
 
-    client.bootstrapped().unwrap();
+    client.bootstrapped();
 
-    let info = client.info().unwrap();
+    let info = client.info();
 
     println!("{:?}", info);
 

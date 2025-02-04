@@ -39,7 +39,6 @@ fn get_immutable(dht: &Dht, info_hash: Id) {
     // all immutable data items are guaranteed to be the same.
     let value = dht
         .get_immutable(info_hash)
-        .unwrap()
         .expect("Failed to find the immutable value for the provided info_hash");
 
     let string = String::from_utf8(value.to_vec())

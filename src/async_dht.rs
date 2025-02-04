@@ -14,11 +14,8 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    dht::{
-        ActorMessage, AnnouncePeerError, Dht, DhtWasShutdown, PutImmutableError, PutMutableError,
-        ResponseSender,
-    },
-    rpc::{GetRequestSpecific, Info, PutError},
+    dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
+    rpc::{GetRequestSpecific, Info, PutError, PutQueryError},
 };
 
 impl Dht {
@@ -33,55 +30,40 @@ impl Dht {
 pub struct AsyncDht(Dht);
 
 impl AsyncDht {
-    // === Getters ===
-
     /// Information and statistics about this [Dht] node.
-    pub async fn info(&self) -> Result<Info, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Info>(1);
+    pub async fn info(&self) -> Info {
+        let (tx, rx) = flume::bounded::<Info>(1);
+        self.send(ActorMessage::Info(tx));
 
-        self.0
-             .0
-            .send(ActorMessage::Info(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
+        rx.recv_async()
+            .await
+            .expect("actor thread unexpectedly shutdown")
     }
 
     /// Turn this node's routing table to a list of bootstraping nodes.   
-    pub async fn to_bootstrap(&self) -> Result<Vec<String>, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Vec<String>>(1);
+    pub async fn to_bootstrap(&self) -> Vec<String> {
+        let (tx, rx) = flume::bounded::<Vec<String>>(1);
+        self.send(ActorMessage::ToBootstrap(tx));
 
-        self.0
-             .0
-            .send(ActorMessage::ToBootstrap(sender))
-            .map_err(|_| DhtWasShutdown)?;
-
-        receiver.recv_async().await.map_err(|_| DhtWasShutdown)
+        rx.recv_async()
+            .await
+            .expect("actor thread unexpectedly shutdown")
     }
 
     // === Public Methods ===
 
-    /// Shutdown the actor thread loop.
-    pub async fn shutdown(&mut self) {
-        let (sender, receiver) = flume::bounded::<()>(1);
-
-        let _ = self.0 .0.send(ActorMessage::Shutdown(sender));
-        let _ = receiver.recv_async().await;
-    }
-
-    /// Wait until the bootstraping query is done.
+    /// Await until the bootstraping query is done.
     ///
     /// Returns true if the bootstraping was successful.
-    pub async fn bootstrapped(&self) -> Result<bool, DhtWasShutdown> {
-        let info = self.info().await?;
+    pub async fn bootstrapped(&self) -> bool {
+        let info = self.info().await;
+        let nodes = self.find_node(*info.id()).await;
 
-        let nodes = self.find_node(*info.id()).await?;
-
-        Ok(!nodes.is_empty())
+        !nodes.is_empty()
     }
 
     // === Find nodes ===
-    //
+
     /// Returns the closest 20 [secure](Node::is_secure) nodes to a target [Id].
     ///
     /// Mostly useful to crawl the DHT.
@@ -95,23 +77,16 @@ impl AsyncDht {
     /// If you are trying to find the closest nodes to a target with intent to [Self::put],
     /// a request directly to these nodes (using `extra_nodes` parameter), then you should
     /// use [Self::get_closest_nodes] instead.
-    pub async fn find_node(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
-        let (sender, receiver) = flume::bounded::<Box<[Node]>>(1);
+    pub async fn find_node(&self, target: Id) -> Box<[Node]> {
+        let (tx, rx) = flume::bounded::<Box<[Node]>>(1);
+        self.send(ActorMessage::Get(
+            GetRequestSpecific::FindNode(FindNodeRequestArguments { target }),
+            ResponseSender::ClosestNodes(tx),
+        ));
 
-        let request = GetRequestSpecific::FindNode(FindNodeRequestArguments { target });
-
-        self.0
-             .0
-            .send(ActorMessage::Get(
-                request,
-                ResponseSender::ClosestNodes(sender),
-            ))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver
-            .recv_async()
+        rx.recv_async()
             .await
-            .expect("Query was dropped before sending a response, please open an issue."))
+            .expect("Query was dropped before sending a response, please open an issue.")
     }
 
     // === Peers ===
@@ -125,22 +100,14 @@ impl AsyncDht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
-    pub fn get_peers(&self, info_hash: Id) -> Result<GetStream<Vec<SocketAddrV4>>, DhtWasShutdown> {
-        // Get requests use unbounded channels to avoid blocking in the run loop.
-        // Other requests like put_* and getters don't need that and is ok with
-        // bounded channel with 1 capacity since it only ever sends one message back.
-        //
-        // So, if it is a ResponseMessage<_>, it should be unbounded, otherwise bounded.
-        let (sender, receiver) = flume::unbounded::<Vec<SocketAddrV4>>();
+    pub fn get_peers(&self, info_hash: Id) -> GetStream<Vec<SocketAddrV4>> {
+        let (tx, rx) = flume::unbounded::<Vec<SocketAddrV4>>();
+        self.send(ActorMessage::Get(
+            GetRequestSpecific::GetPeers(GetPeersRequestArguments { info_hash }),
+            ResponseSender::Peers(tx),
+        ));
 
-        let request = GetRequestSpecific::GetPeers(GetPeersRequestArguments { info_hash });
-
-        self.0
-             .0
-            .send(ActorMessage::Get(request, ResponseSender::Peers(sender)))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(GetStream(receiver.into_stream()))
+        GetStream(rx.into_stream())
     }
 
     /// Announce a peer for a given infohash.
@@ -152,68 +119,64 @@ impl AsyncDht {
         &self,
         info_hash: Id,
         port: Option<u16>,
-    ) -> Result<Id, AnnouncePeerError> {
+    ) -> Result<Id, PutQueryError> {
         let (port, implied_port) = match port {
             Some(port) => (port, None),
             None => (0, Some(true)),
         };
 
-        let request = PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
-            info_hash,
-            port,
-            implied_port,
-        });
-
-        Ok(self
-            .put(request, None)
-            .await?
-            .map_err(|error| match error {
-                PutError::Query(err) => err,
-                PutError::Concurrency(_) => {
-                    unreachable!("should not receieve a concurrency error from announce peer query")
-                }
-            })?)
+        self.put(
+            PutRequestSpecific::AnnouncePeer(AnnouncePeerRequestArguments {
+                info_hash,
+                port,
+                implied_port,
+            }),
+            None,
+        )
+        .await
+        .map_err(|error| match error {
+            PutError::Query(error) => error,
+            PutError::Concurrency(_) => {
+                unreachable!("should not receieve a concurrency error from announce peer query")
+            }
+        })
     }
 
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
-    pub async fn get_immutable(&self, target: Id) -> Result<Option<Box<[u8]>>, DhtWasShutdown> {
-        let (sender, receiver) = flume::unbounded::<Box<[u8]>>();
+    pub async fn get_immutable(&self, target: Id) -> Option<Box<[u8]>> {
+        let (tx, rx) = flume::unbounded::<Box<[u8]>>();
+        self.send(ActorMessage::Get(
+            GetRequestSpecific::GetValue(GetValueRequestArguments {
+                target,
+                seq: None,
+                salt: None,
+            }),
+            ResponseSender::Immutable(tx),
+        ));
 
-        let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
-            target,
-            seq: None,
-            salt: None,
-        });
-
-        self.0
-             .0
-            .send(ActorMessage::Get(
-                request,
-                ResponseSender::Immutable(sender),
-            ))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver.recv_async().await.map(Some).unwrap_or(None))
+        rx.recv_async().await.map(Some).unwrap_or(None)
     }
 
     /// Put an immutable data to the DHT.
-    pub async fn put_immutable(&self, value: &[u8]) -> Result<Id, PutImmutableError> {
-        let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
-            target: hash_immutable(value).into(),
-            v: value.into(),
-        });
+    pub async fn put_immutable(&self, value: &[u8]) -> Result<Id, PutQueryError> {
+        let target: Id = hash_immutable(value).into();
 
-        Ok(self
-            .put(request, None)
-            .await?
-            .map_err(|error| match error {
-                PutError::Query(err) => err,
-                PutError::Concurrency(_) => {
-                    unreachable!("should not receieve a concurrency error from announce peer query")
-                }
-            })?)
+        self.put(
+            PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
+                target,
+                v: value.into(),
+            }),
+            None,
+        )
+        .await
+        .map_err(|error| match error {
+            PutError::Query(error) => error,
+            PutError::Concurrency(_) => {
+                unreachable!("should not receieve a concurrency error from put immutable query")
+            }
+        })
     }
 
     // === Mutable data ===
@@ -225,7 +188,7 @@ impl AsyncDht {
     ///
     /// # Order
     ///
-    /// The order of [MutableItem]s returned by this iterator is not guaranteed to
+    /// The order of [MutableItem]s returned by this stream is not guaranteed to
     /// reflect their `seq` value. You should not assume that the later items are
     /// more recent than earlier ones.
     ///
@@ -235,23 +198,20 @@ impl AsyncDht {
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
         more_recent_than: Option<i64>,
-    ) -> Result<GetStream<MutableItem>, DhtWasShutdown> {
-        let target = MutableItem::target_from_key(public_key, salt);
+    ) -> GetStream<MutableItem> {
+        let salt = salt.map(|s| s.into());
+        let target = MutableItem::target_from_key(public_key, salt.as_deref());
+        let (tx, rx) = flume::unbounded::<MutableItem>();
+        self.send(ActorMessage::Get(
+            GetRequestSpecific::GetValue(GetValueRequestArguments {
+                target,
+                seq: more_recent_than,
+                salt,
+            }),
+            ResponseSender::Mutable(tx),
+        ));
 
-        let (sender, receiver) = flume::unbounded::<MutableItem>();
-
-        let request = GetRequestSpecific::GetValue(GetValueRequestArguments {
-            target,
-            seq: more_recent_than,
-            salt: salt.map(|s| s.into()),
-        });
-
-        self.0
-             .0
-            .send(ActorMessage::Get(request, ResponseSender::Mutable(sender)))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(GetStream(receiver.into_stream()))
+        GetStream(rx.into_stream())
     }
 
     /// Get the most recent [MutableItem] from the network.
@@ -259,10 +219,9 @@ impl AsyncDht {
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
-    ) -> Result<Option<MutableItem>, DhtWasShutdown> {
+    ) -> Option<MutableItem> {
         let mut most_recent: Option<MutableItem> = None;
-
-        let mut stream = self.get_mutable(public_key, salt, None)?;
+        let mut stream = self.get_mutable(public_key, salt, None);
 
         while let Some(item) = stream.next().await {
             if let Some(mr) = &most_recent {
@@ -274,7 +233,7 @@ impl AsyncDht {
             }
         }
 
-        Ok(most_recent)
+        most_recent
     }
 
     /// Put a mutable data to the DHT.
@@ -292,43 +251,40 @@ impl AsyncDht {
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
     ///
     /// let testnet = Testnet::new(3).unwrap();
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap().as_async();
+    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
     /// let key = signing_key.verifying_key().to_bytes();
     /// let salt = Some(b"salt".as_ref());
     ///
-    /// futures::executor::block_on(async move {
-    ///     let (item, cas) = if let Some(most_recent) = dht
-    ///         .get_mutable_most_recent(&key, salt)
-    ///         .await
-    ///         .unwrap()
-    ///     {
-    ///         // 1. Optionally Create a new value to take the most recent's value in consideration.
-    ///         let mut new_value = most_recent.value().to_vec();
-    ///         new_value.extend_from_slice(b" more data");
+    /// let (item, cas) = if let Some(most_recent) = dht
+    ///     .get_mutable_most_recent(&key, salt)
+    ///     .unwrap()
+    /// {
+    ///     // 1. Optionally Create a new value to take the most recent's value in consideration.
+    ///     let mut new_value = most_recent.value().to_vec();
+    ///     new_value.extend_from_slice(b" more data");
     ///
-    ///         // 2. Increment the sequence number to be higher than the most recent's.
-    ///         let most_recent_seq = most_recent.seq();
-    ///         let new_seq = most_recent_seq + 1;
+    ///     // 2. Increment the sequence number to be higher than the most recent's.
+    ///     let most_recent_seq = most_recent.seq();
+    ///     let new_seq = most_recent_seq + 1;
     ///
-    ///         (
-    ///             MutableItem::new(signing_key, &new_value, new_seq, salt),
-    ///             // 3. Use the most recent [MutableItem::seq] as a `CAS`.
-    ///             Some(most_recent_seq)
-    ///         )
-    ///     } else {
-    ///         (MutableItem::new(signing_key, b"first value", 1, salt), None)
-    ///     };
+    ///     (
+    ///         MutableItem::new(signing_key, &new_value, new_seq, salt),
+    ///         // 3. Use the most recent [MutableItem::seq] as a `CAS`.
+    ///         Some(most_recent_seq)
+    ///     )
+    /// } else {
+    ///     (MutableItem::new(signing_key, b"first value", 1, salt), None)
+    /// };
     ///
-    ///     dht.put_mutable(item, cas).await.unwrap();
-    /// });
+    /// dht.put_mutable(item, cas).unwrap();
     /// ```
     ///
     /// ## Errors
     ///
-    /// In addition to the [PutQueryError][crate::errors::PutQueryError] common with all PUT queries, PUT mutable item
-    /// query has other [Concurrency errors][crate::errors::ConcurrencyError], that try to detect write conflict
+    /// In addition to the [PutQueryError] common with all PUT queries, PUT mutable item
+    /// query has other [Concurrency errors][ConcurrencyError], that try to detect write conflict
     /// risks or obvious conflicts.
     ///
     /// If you are lucky to get one of these errors (which is not guaranteed), then you should
@@ -340,7 +296,7 @@ impl AsyncDht {
     ) -> Result<Id, PutMutableError> {
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
 
-        self.put(request, None).await?.map_err(|error| match error {
+        self.put(request, None).await.map_err(|error| match error {
             PutError::Query(err) => PutMutableError::Query(err),
             PutError::Concurrency(err) => PutMutableError::Concurrency(err),
         })
@@ -352,31 +308,26 @@ impl AsyncDht {
     ///
     /// Useful to [Self::put] a request to nodes further from the 20 closest nodes to the
     /// [PutRequestSpecific::target]. Which itself is useful to circumvent [extreme vertical sybil attacks](https://github.com/pubky/mainline/blob/main/docs/censorship-resistance.md#extreme-vertical-sybil-attacks).
-    pub async fn get_closest_nodes(&self, target: Id) -> Result<Box<[Node]>, DhtWasShutdown> {
-        let (sender, receiver) = flume::unbounded::<Box<[Node]>>();
+    pub async fn get_closest_nodes(&self, target: Id) -> Box<[Node]> {
+        let (tx, rx) = flume::unbounded::<Box<[Node]>>();
+        self.send(ActorMessage::Get(
+            GetRequestSpecific::GetValue(GetValueRequestArguments {
+                target,
+                salt: None,
+                seq: None,
+            }),
+            ResponseSender::ClosestNodes(tx),
+        ));
 
-        self.0
-             .0
-            .send(ActorMessage::Get(
-                GetRequestSpecific::GetValue(GetValueRequestArguments {
-                    target,
-                    salt: None,
-                    seq: None,
-                }),
-                ResponseSender::ClosestNodes(sender),
-            ))
-            .map_err(|_| DhtWasShutdown)?;
-
-        Ok(receiver
-            .recv_async()
+        rx.recv_async()
             .await
-            .expect("Query was dropped before sending a response, please open an issue."))
+            .expect("Query was dropped before sending a response, please open an issue.")
     }
 
     /// Send a PUT request to the closest nodes, and optionally some extra nodes.
     ///
     /// This is useful to put data to regions of the DHT other than the closest nodes
-    /// to this request's [target][PutRequestSpecific::target].
+    /// to this request's [target ][PutRequestSpecific::target].
     ///
     /// You can find nodes close to other regions of the network by calling
     /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.
@@ -386,13 +337,28 @@ impl AsyncDht {
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
-    ) -> Result<Result<Id, PutError>, DhtWasShutdown> {
-        Ok(self
-            .0
-            .put_inner(request, extra_nodes)?
+    ) -> Result<Id, PutError> {
+        self.put_inner(request, extra_nodes)
             .recv_async()
             .await
-            .expect("Query was dropped before sending a response, please open an issue."))
+            .expect("Query was dropped before sending a response, please open an issue.")
+    }
+
+    // === Private Methods ===
+
+    pub(crate) fn put_inner(
+        &self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> flume::Receiver<Result<Id, PutError>> {
+        let (tx, rx) = flume::bounded::<Result<Id, PutError>>(1);
+        self.send(ActorMessage::Put(request, tx, extra_nodes));
+
+        rx
+    }
+
+    fn send(&self, message: ActorMessage) {
+        self.0.send(message)
     }
 }
 
@@ -420,22 +386,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn shutdown() {
-        async fn test() {
-            let mut dht = Dht::client().unwrap().as_async();
-
-            let a = dht.clone();
-
-            dht.shutdown().await;
-
-            let result = a.get_immutable(Id::random()).await;
-
-            assert!(matches!(result, Err(DhtWasShutdown)))
-        }
-        futures::executor::block_on(test());
-    }
-
-    #[test]
     fn announce_get_peer() {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
@@ -457,12 +407,7 @@ mod test {
                 .await
                 .expect("failed to announce");
 
-            let peers = b
-                .get_peers(info_hash)
-                .unwrap()
-                .next()
-                .await
-                .expect("No peers");
+            let peers = b.get_peers(info_hash).next().await.expect("No peers");
 
             assert_eq!(peers.first().unwrap().port(), 45555);
         }
@@ -492,7 +437,7 @@ mod test {
             let target = a.put_immutable(value).await.unwrap();
             assert_eq!(target, expected_target);
 
-            let response = b.get_immutable(target).await.unwrap();
+            let response = b.get_immutable(target).await;
             assert_eq!(response, Some(value.to_vec().into_boxed_slice()));
         }
 
@@ -529,7 +474,6 @@ mod test {
 
             let response = b
                 .get_mutable(signer.verifying_key().as_bytes(), None, None)
-                .unwrap()
                 .next()
                 .await
                 .expect("No mutable values");
@@ -570,7 +514,6 @@ mod test {
 
             let response = b
                 .get_mutable(signer.verifying_key().as_bytes(), None, Some(seq))
-                .unwrap()
                 .next()
                 .await;
 
@@ -591,10 +534,10 @@ mod test {
                 .unwrap()
                 .as_async();
 
-            let first = a.put_immutable(&[1, 2, 3]);
-            let second = a.put_immutable(&[1, 2, 3]);
+            let first = a.put_immutable(&[1, 2, 3]).await;
+            let second = a.put_immutable(&[1, 2, 3]).await;
 
-            assert_eq!(first.await.unwrap(), second.await.unwrap());
+            assert_eq!(first.unwrap(), second.unwrap());
         }
 
         futures::executor::block_on(test());
@@ -630,14 +573,12 @@ mod test {
 
             let _response_first = b
                 .get_mutable(signer.verifying_key().as_bytes(), None, None)
-                .unwrap()
                 .next()
                 .await
                 .expect("No mutable values");
 
             let response_second = b
                 .get_mutable(signer.verifying_key().as_bytes(), None, None)
-                .unwrap()
                 .next()
                 .await
                 .expect("No mutable values");
@@ -762,7 +703,6 @@ mod test {
                 dht.0
                      .0
                     .send(ActorMessage::Put(request, sender, None))
-                    .map_err(|_| DhtWasShutdown)
                     .unwrap();
             }
 
@@ -772,7 +712,7 @@ mod test {
             {
                 let item = MutableItem::new(signer, &value, 1001, None);
 
-                let most_recent = dht.get_mutable_most_recent(item.key(), None).await.unwrap();
+                let most_recent = dht.get_mutable_most_recent(item.key(), None).await;
 
                 if let Some(cas) = most_recent.map(|item| item.seq()) {
                     dht.put_mutable(item, Some(cas)).await.unwrap();
