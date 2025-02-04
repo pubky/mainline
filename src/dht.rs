@@ -633,6 +633,10 @@ pub struct Testnet {
 
 impl Testnet {
     /// Create a new testnet with a certain size.
+    ///
+    /// Note: this network will be shutdown as soon as this struct
+    /// gets dropped, if you want the network to be `'static`, then
+    /// you should call [Self::leak].
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
@@ -653,7 +657,21 @@ impl Testnet {
             }
         }
 
-        Ok(Self { bootstrap, nodes })
+        let testnet = Self { bootstrap, nodes };
+
+        Ok(testnet)
+    }
+
+    /// By default as soon as this testnet gets dropped,
+    /// all the nodes get dropped and the entire network is shutdown.
+    ///
+    /// This method uses [Box::leak] to keep nodes running, which is
+    /// useful if you need to keep running the testnet in the process
+    /// even if this struct gets dropped.
+    pub fn leak(&self) {
+        for node in &self.nodes {
+            Box::leak(Box::new(node));
+        }
     }
 }
 
