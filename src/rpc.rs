@@ -5,6 +5,7 @@ pub(crate) mod config;
 mod info;
 mod iterative_query;
 mod put_query;
+mod server;
 mod socket;
 
 use std::collections::HashMap;
@@ -25,7 +26,7 @@ use crate::common::{
     PutRequestSpecific, RequestSpecific, RequestTypeSpecific, ResponseSpecific, RoutingTable,
     MAX_BUCKET_SIZE_K,
 };
-use crate::server::{DefaultServer, Server};
+use server::Server;
 
 use socket::KrpcSocket;
 
@@ -34,9 +35,10 @@ pub use closest_nodes::ClosestNodes;
 pub use info::Info;
 pub use iterative_query::GetRequestSpecific;
 pub use put_query::{ConcurrencyError, PutError, PutQueryError};
+pub use server::{RequestFilter, ServerSettings};
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
-use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments, PutRequest};
+use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments};
 
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -89,7 +91,7 @@ pub struct Rpc {
     /// Sum of the number of subnets with 6 bits prefix in the closest nodes ipv4
     subnets_sum: usize,
 
-    server: Box<dyn Server>,
+    server: Server,
 
     public_address: Option<SocketAddrV4>,
     firewalled: bool,
@@ -129,7 +131,7 @@ impl Rpc {
             responders_based_dht_size_estimates_sum: 1_000_000.0,
             subnets_sum: 20,
 
-            server: config.server.unwrap_or(Box::new(DefaultServer::default())),
+            server: Server::new(config.server_settings.unwrap_or_default()),
 
             public_address: None,
             firewalled: true,
@@ -518,49 +520,13 @@ impl Rpc {
             let server = &mut self.server;
 
             match server.handle_request(&self.routing_table, from, request_specific) {
-                (MessageType::Error(error), _) => {
+                Some(MessageType::Error(error)) => {
                     self.error(from, transaction_id, error);
                 }
-                (MessageType::Response(response), _) => {
+                Some(MessageType::Response(response)) => {
                     self.response(from, transaction_id, response);
                 }
-                (MessageType::Request(request), extra_nodes) => {
-                    debug!(
-                        ?request,
-                        "Sending a request (from Rpc::server) after handling a request!"
-                    );
-
-                    match request {
-                        RequestSpecific {
-                            request_type: RequestTypeSpecific::Ping,
-                            ..
-                        } => {
-                            // Ignoring ping.
-                        }
-                        RequestSpecific {
-                            request_type:
-                                RequestTypeSpecific::Put(PutRequest {
-                                    put_request_type, ..
-                                }),
-                            ..
-                        } => {
-                            tracing::trace!("custom server returned a PUT request, sending it.");
-                            let _ = self.put(put_request_type, None);
-                        }
-                        RequestSpecific { request_type, .. } => {
-                            tracing::trace!("custom server returned a GET request, sending it.");
-
-                            let request = match request_type {
-                                RequestTypeSpecific::FindNode(s) => GetRequestSpecific::FindNode(s),
-                                RequestTypeSpecific::GetValue(s) => GetRequestSpecific::GetValue(s),
-                                RequestTypeSpecific::GetPeers(s) => GetRequestSpecific::GetPeers(s),
-                                _ => unreachable!(),
-                            };
-
-                            let _ = self.get(request, extra_nodes.as_deref());
-                        }
-                    }
-                }
+                _ => {}
             };
         }
 

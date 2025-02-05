@@ -3,9 +3,7 @@ use std::{
     time::Duration,
 };
 
-use crate::server::Server;
-
-use super::{DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT};
+use super::{ServerSettings, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT};
 
 #[derive(Debug, Clone)]
 /// Dht Configurations
@@ -29,7 +27,7 @@ pub struct Config {
     /// Server to respond to incoming Requests
     ///
     /// Defaults to None, where the [crate::server::DefaultServer] will be used.
-    pub server: Option<Box<dyn Server>>,
+    pub server_settings: Option<ServerSettings>,
     /// Wether or not to start in server mode from the get go.
     ///
     /// Defaults to false where it will run in [Adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
@@ -47,7 +45,7 @@ impl Default for Config {
             bootstrap: to_socket_address(&DEFAULT_BOOTSTRAP_NODES),
             port: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            server: None,
+            server_settings: None,
             server_mode: false,
             public_ip: None,
         }

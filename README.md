@@ -51,7 +51,7 @@ Supported BEPs:
 
 #### Rate limiting
 
-The default server implementation has no rate-limiting, you can run your own [custom server](./examples/custom_server.rs) and apply your custom rate-limiting. 
+The server implementation has no rate-limiting, you can run your own [request filter](./examples/request_filter.rs) and apply your custom rate-limiting. 
 However, that limit/block will only apply _after_ parsing incoming messages, and it won't affect handling incoming responses.
 
 ### Adaptive mode

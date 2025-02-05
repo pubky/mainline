@@ -43,6 +43,7 @@ All notable changes to mainline dht will be documented in this file.
 - Removed exporting `rpc` module, and `Rpc` struct.
 - Removed `Dht::shutdown()` and `AsyncDht::shutdown()`.
 - Removed `DhtWasShutdown`
+- Removed `DefaultServer` export.
 
 ### Changed
 
@@ -67,9 +68,7 @@ All notable changes to mainline dht will be documented in this file.
 - `Node::new()` take `Id` and `SocketAddrV4`.
 - `RoutingTable::new()` takes an `Id`.
 - Return `GetIterator<T>` and `GetStream<T>` from `get_` methods from `Dht` and `AsyncDht` instead of exposing `flume`.
-- `Server::handle_request()` signature change, to avoid circular dependency on `Rpc`.
-- Make `DefaultServer` properties public.
-- Trait `Server` needs to implement `Clone`, but no longer needs to implement `Sync`.
+- Remove `Server` trait and replace it with `RequestFilter` trait.
 - `DhtBuilder` is not consuming, thanks to `Config` being `Clone`.
 
 ##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13

@@ -15,15 +15,16 @@ mod rpc;
 // Public modules
 #[cfg(feature = "async")]
 pub mod async_dht;
-#[cfg(feature = "node")]
-pub mod server;
 
-pub use common::{Id, MutableItem, Node, PutRequestSpecific, RoutingTable};
+pub use common::{Id, MutableItem, Node, RoutingTable};
 
 #[cfg(feature = "node")]
 pub use dht::{Dht, DhtBuilder, Testnet};
 #[cfg(feature = "node")]
-pub use rpc::{messages, ClosestNodes, DEFAULT_REQUEST_TIMEOUT};
+pub use rpc::{
+    messages::{MessageType, RequestSpecific},
+    ClosestNodes, RequestFilter, ServerSettings, DEFAULT_REQUEST_TIMEOUT,
+};
 
 pub use ed25519_dalek::SigningKey;
 

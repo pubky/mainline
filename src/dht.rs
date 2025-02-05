@@ -17,8 +17,10 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    rpc::{ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Response, Rpc},
-    server::Server,
+    rpc::{
+        ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Response, Rpc,
+        ServerSettings,
+    },
     Node,
 };
 
@@ -40,9 +42,11 @@ impl DhtBuilder {
         self
     }
 
-    /// Set a custom [Server].
-    pub fn custom_server(&mut self, custom_server: Box<dyn Server>) -> &mut Self {
-        self.0.server = Some(custom_server);
+    /// Set a custom settings for the node to use at server mode.
+    ///
+    /// Defaults to [ServerSettings::default]
+    pub fn server_settings(&mut self, server_settings: ServerSettings) -> &mut Self {
+        self.0.server_settings = Some(server_settings);
 
         self
     }
