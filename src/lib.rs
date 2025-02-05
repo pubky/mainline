@@ -22,8 +22,9 @@ pub use common::{Id, MutableItem, Node, RoutingTable};
 pub use dht::{Dht, DhtBuilder, Testnet};
 #[cfg(feature = "node")]
 pub use rpc::{
-    messages::{MessageType, RequestSpecific},
-    ClosestNodes, RequestFilter, ServerSettings, DEFAULT_REQUEST_TIMEOUT,
+    messages::{MessageType, PutRequestSpecific, RequestSpecific},
+    server::{RequestFilter, ServerSettings, MAX_INFO_HASHES, MAX_PEERS, MAX_VALUES},
+    ClosestNodes, DEFAULT_REQUEST_TIMEOUT,
 };
 
 pub use ed25519_dalek::SigningKey;

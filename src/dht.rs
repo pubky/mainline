@@ -17,11 +17,8 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    rpc::{
-        ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Response, Rpc,
-        ServerSettings,
-    },
-    Node,
+    rpc::{ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Response, Rpc},
+    Node, ServerSettings,
 };
 
 use crate::rpc::config::{to_socket_address, Config};
@@ -46,7 +43,7 @@ impl DhtBuilder {
     ///
     /// Defaults to [ServerSettings::default]
     pub fn server_settings(&mut self, server_settings: ServerSettings) -> &mut Self {
-        self.0.server_settings = Some(server_settings);
+        self.0.server_settings = server_settings;
 
         self
     }
@@ -438,7 +435,7 @@ impl Dht {
     /// Send a PUT request to the closest nodes, and optionally some extra nodes.
     ///
     /// This is useful to put data to regions of the DHT other than the closest nodes
-    /// to this request's [target ][PutRequestSpecific::target].
+    /// to this request's [target][PutRequestSpecific::target].
     ///
     /// You can find nodes close to other regions of the network by calling
     /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.

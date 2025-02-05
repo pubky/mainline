@@ -25,9 +25,7 @@ pub struct Config {
     /// Defaults to [DEFAULT_REQUEST_TIMEOUT]
     pub request_timeout: Duration,
     /// Server to respond to incoming Requests
-    ///
-    /// Defaults to None, where the [crate::server::DefaultServer] will be used.
-    pub server_settings: Option<ServerSettings>,
+    pub server_settings: ServerSettings,
     /// Wether or not to start in server mode from the get go.
     ///
     /// Defaults to false where it will run in [Adaptive mode](https://github.com/pubky/mainline?tab=readme-ov-file#adaptive-mode).
@@ -45,7 +43,7 @@ impl Default for Config {
             bootstrap: to_socket_address(&DEFAULT_BOOTSTRAP_NODES),
             port: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-            server_settings: None,
+            server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
         }

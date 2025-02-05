@@ -5,7 +5,7 @@ pub(crate) mod config;
 mod info;
 mod iterative_query;
 mod put_query;
-mod server;
+pub(crate) mod server;
 mod socket;
 
 use std::collections::HashMap;
@@ -28,6 +28,8 @@ use crate::common::{
 };
 use server::Server;
 
+use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments};
+use server::ServerSettings;
 use socket::KrpcSocket;
 
 pub use crate::common::messages;
@@ -35,10 +37,7 @@ pub use closest_nodes::ClosestNodes;
 pub use info::Info;
 pub use iterative_query::GetRequestSpecific;
 pub use put_query::{ConcurrencyError, PutError, PutQueryError};
-pub use server::{RequestFilter, ServerSettings};
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
-
-use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments};
 
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
@@ -131,7 +130,7 @@ impl Rpc {
             responders_based_dht_size_estimates_sum: 1_000_000.0,
             subnets_sum: 20,
 
-            server: Server::new(config.server_settings.unwrap_or_default()),
+            server: Server::new(config.server_settings),
 
             public_address: None,
             firewalled: true,
