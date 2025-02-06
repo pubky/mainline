@@ -3,27 +3,41 @@
 #![doc = document_features::document_features!()]
 //!
 
-// Public modules
+#![deny(missing_docs)]
+#![deny(rustdoc::broken_intra_doc_links)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod common;
+#[cfg(feature = "node")]
 mod dht;
+mod rpc;
 
 // Public modules
 #[cfg(feature = "async")]
 pub mod async_dht;
-pub mod rpc;
-pub mod server;
 
-pub use crate::common::{Id, MutableItem, Node};
-pub use dht::{Dht, Settings, Testnet};
-pub use rpc::ClosestNodes;
+pub use common::{Id, MutableItem, Node, RoutingTable};
 
-pub use bytes::Bytes;
+#[cfg(feature = "node")]
+pub use dht::{Dht, DhtBuilder, Testnet};
+#[cfg(feature = "node")]
+pub use rpc::{
+    messages::{MessageType, PutRequestSpecific, RequestSpecific},
+    server::{RequestFilter, ServerSettings, MAX_INFO_HASHES, MAX_PEERS, MAX_VALUES},
+    ClosestNodes, DEFAULT_REQUEST_TIMEOUT,
+};
+
 pub use ed25519_dalek::SigningKey;
 
 pub mod errors {
     //! Exported errors
-    pub use super::rpc::PutError;
+    #[cfg(feature = "node")]
+    pub use super::common::ErrorSpecific;
+    #[cfg(feature = "node")]
+    pub use super::dht::PutMutableError;
+    #[cfg(feature = "node")]
+    pub use super::rpc::{ConcurrencyError, PutError, PutQueryError};
 
-    pub use super::dht::DhtPutError;
-    pub use super::dht::DhtWasShutdown;
+    pub use super::common::DecodeIdError;
+    pub use super::common::MutableError;
 }

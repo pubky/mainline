@@ -1,4 +1,4 @@
-use std::{collections::HashSet, convert::TryInto, rc::Rc};
+use std::{collections::HashSet, convert::TryInto};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
@@ -8,10 +8,11 @@ use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 /// Useful to estimate the Dht size.
 pub struct ClosestNodes {
     target: Id,
-    nodes: Vec<Rc<Node>>,
+    nodes: Vec<Node>,
 }
 
 impl ClosestNodes {
+    /// Create a new instance of [ClosestNodes].
     pub fn new(target: Id) -> Self {
         Self {
             target,
@@ -21,22 +22,31 @@ impl ClosestNodes {
 
     // === Getters ===
 
+    /// Returns the target of the query for these closest nodes.
     pub fn target(&self) -> Id {
         self.target
     }
 
-    pub fn nodes(&self) -> &[Rc<Node>] {
+    /// Returns a slice of the nodes array.
+    pub fn nodes(&self) -> &[Node] {
         &self.nodes
     }
 
+    /// Returns the number of nodes.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
+    /// Returns true if there are no nodes.
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
     // === Public Methods ===
 
-    pub fn add(&mut self, node: Rc<Node>) {
-        let seek = node.id.xor(&self.target);
+    /// Add a node.
+    pub fn add(&mut self, node: Node) {
+        let seek = node.id().xor(&self.target);
 
         if node.already_exists(&self.nodes) {
             return;
@@ -47,18 +57,14 @@ impl ClosestNodes {
                 std::cmp::Ordering::Less
             } else if !prope.is_secure() && node.is_secure() {
                 std::cmp::Ordering::Greater
-            } else if prope.id == node.id {
+            } else if prope.id() == node.id() {
                 std::cmp::Ordering::Equal
             } else {
-                prope.id.xor(&self.target).cmp(&seek)
+                prope.id().xor(&self.target).cmp(&seek)
             }
         }) {
             self.nodes.insert(pos, node)
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
     }
 
     /// Take enough nodes closest to the target, until the following are satisfied:
@@ -74,7 +80,7 @@ impl ClosestNodes {
         &self,
         previous_dht_size_estimate: usize,
         average_subnets: usize,
-    ) -> &[Rc<Node>] {
+    ) -> &[Node] {
         let mut until_secure = 0;
 
         // 20 / dht_size_estimate == expected_dk / ID space
@@ -117,7 +123,7 @@ impl ClosestNodes {
     /// An estimation of the Dht from the distribution of closest nodes
     /// responding to a query.
     ///
-    /// [Read more](../../docs/dht_size_estimate.md)
+    /// [Read more](https://github.com/pubky/mainline/blob/main/docs/dht_size_estimate.md)
     pub fn dht_size_estimate(&self) -> f64 {
         dht_size_estimate(
             self.nodes
@@ -128,15 +134,12 @@ impl ClosestNodes {
     }
 }
 
-fn subnet(node: &Rc<Node>) -> u8 {
-    match node.address().ip() {
-        std::net::IpAddr::V4(ip) => ((ip.to_bits() >> 26) & 0b0011_1111) as u8,
-        _ => unimplemented!(),
-    }
+fn subnet(node: &Node) -> u8 {
+    ((node.address().ip().to_bits() >> 26) & 0b0011_1111) as u8
 }
 
 fn distance(target: &Id, node: &Node) -> u128 {
-    let xor = node.id.xor(target);
+    let xor = node.id().xor(target);
 
     // Round up the lower 4 bytes to get a u128 from u160.
     u128::from_be_bytes(xor.as_bytes()[0..16].try_into().expect("infallible"))
@@ -167,7 +170,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, net::Ipv4Addr, str::FromStr, time::Instant};
+    use std::{collections::BTreeMap, net::SocketAddrV4, str::FromStr, sync::Arc, time::Instant};
+
+    use crate::common::NodeInner;
 
     use super::*;
 
@@ -178,7 +183,7 @@ mod tests {
         let mut closest_nodes = ClosestNodes::new(target);
 
         for i in 0..100 {
-            let node = Rc::new(Node::unique(i));
+            let node = Node::unique(i);
             closest_nodes.add(node.clone());
             closest_nodes.add(node);
         }
@@ -188,7 +193,7 @@ mod tests {
         let distances = closest_nodes
             .nodes()
             .iter()
-            .map(|n| n.id.distance(&target))
+            .map(|n| n.id().distance(&target))
             .collect::<Vec<_>>();
 
         let mut sorted = distances.clone();
@@ -199,13 +204,13 @@ mod tests {
 
     #[test]
     fn order_by_secure_id() {
-        let unsecure = Rc::new(Node::random());
-        let secure = Rc::new(Node {
+        let unsecure = Node::random();
+        let secure = Node(Arc::new(NodeInner {
             id: Id::from_str("5a3ce9c14e7a08645677bbd1cfe7d8f956d53256").unwrap(),
-            address: (Ipv4Addr::new(21, 75, 31, 124), 0).into(),
+            address: SocketAddrV4::new([21, 75, 31, 124].into(), 0),
             token: None,
             last_seen: Instant::now(),
-        });
+        }));
 
         let mut closest_nodes = ClosestNodes::new(*unsecure.id());
 
@@ -225,7 +230,7 @@ mod tests {
         let target_bytes = target.as_bytes();
 
         for i in 0..dht_size_estimate {
-            let node = Rc::new(Node::unique(i));
+            let node = Node::unique(i);
             closest_nodes.add(node);
         }
 
@@ -234,8 +239,7 @@ mod tests {
         for _ in 0..20 {
             let mut bytes = target_bytes.to_vec();
             bytes[18..].copy_from_slice(&Id::random().as_bytes()[18..]);
-            let id = Id::from_bytes(bytes).unwrap();
-            let node = Rc::new(Node::random().with_id(id));
+            let node = Node::new(Id::random(), SocketAddrV4::new(0.into(), 0));
 
             sybil.add(node.clone());
             closest_nodes.add(node);
@@ -251,10 +255,9 @@ mod tests {
         let lookups = 4;
         let acceptable_margin = 0.2;
         let sims = 10;
-        let dht_size = 2500 as f64;
+        let dht_size = 2500_f64;
 
         let mean = (0..sims)
-            .into_iter()
             .map(|_| simulate(dht_size as usize, lookups) as f64)
             .sum::<f64>()
             / (sims as f64);
@@ -268,7 +271,7 @@ mod tests {
         let mut nodes = BTreeMap::new();
         for i in 0..dht_size {
             let node = Node::unique(i);
-            nodes.insert(node.id, node);
+            nodes.insert(*node.id(), node);
         }
 
         (0..lookups)

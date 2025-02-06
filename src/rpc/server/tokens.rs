@@ -4,7 +4,7 @@ use crc::{Crc, CRC_32_ISCSI};
 use rand::{thread_rng, Rng};
 use std::{
     fmt::{self, Debug, Formatter},
-    net::SocketAddr,
+    net::SocketAddrV4,
     time::Instant,
 };
 
@@ -17,6 +17,7 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 /// Tokens generator.
 ///
 /// Read [BEP_0005](https://www.bittorrent.org/beps/bep_0005.html) for more information.
+#[derive(Clone)]
 pub struct Tokens {
     prev_secret: [u8; SECRET_SIZE],
     curr_secret: [u8; SECRET_SIZE],
@@ -30,6 +31,7 @@ impl Debug for Tokens {
 }
 
 impl Tokens {
+    /// Create a Tokens generator.
     pub fn new() -> Self {
         let mut rng = thread_rng();
 
@@ -42,18 +44,20 @@ impl Tokens {
 
     // === Public Methods ===
 
+    /// Returns `true` if the current secret needs to be updated after an interval.
     pub fn should_update(&self) -> bool {
         self.last_updated.elapsed() > crate::common::TOKEN_ROTATE_INTERVAL
     }
 
     /// Validate that the token was generated within the past 10 minutes
-    pub fn validate(&mut self, address: SocketAddr, token: &Vec<u8>) -> bool {
+    pub fn validate(&mut self, address: SocketAddrV4, token: &[u8]) -> bool {
         let prev = self.internal_generate_token(address, self.prev_secret);
         let curr = self.internal_generate_token(address, self.curr_secret);
 
-        token == &curr || token == &prev
+        token == curr || token == prev
     }
 
+    /// Rotate the tokens secret.
     pub fn rotate(&mut self) {
         trace!("Rotating secrets");
         let mut rng = thread_rng();
@@ -64,7 +68,8 @@ impl Tokens {
         self.last_updated = Instant::now();
     }
 
-    pub fn generate_token(&mut self, address: SocketAddr) -> [u8; 4] {
+    /// Generates a new token for a remote peer.
+    pub fn generate_token(&mut self, address: SocketAddrV4) -> [u8; 4] {
         self.internal_generate_token(address, self.curr_secret)
     }
 
@@ -72,15 +77,12 @@ impl Tokens {
 
     fn internal_generate_token(
         &mut self,
-        address: SocketAddr,
+        address: SocketAddrV4,
         secret: [u8; SECRET_SIZE],
     ) -> [u8; TOKEN_SIZE] {
         let mut digest = CASTAGNOLI.digest();
 
-        let octets = match address.ip() {
-            std::net::IpAddr::V4(v4) => v4.octets().to_vec(),
-            std::net::IpAddr::V6(v6) => v6.octets().to_vec(),
-        };
+        let octets: Box<[u8]> = address.ip().octets().into();
 
         digest.update(&octets);
         digest.update(&secret);
@@ -106,9 +108,9 @@ mod test {
     fn valid_tokens() {
         let mut tokens = Tokens::new();
 
-        let address = SocketAddr::from(([127, 0, 0, 1], 6881));
+        let address = SocketAddrV4::new([127, 0, 0, 1].into(), 6881);
         let token = tokens.generate_token(address);
 
-        assert!(tokens.validate(address, &token.to_vec()))
+        assert!(tokens.validate(address, &token))
     }
 }

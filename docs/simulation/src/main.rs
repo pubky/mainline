@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use std::net::SocketAddrV4;
+
 use clap::Parser;
 use full_palette::GREY;
 use mainline::{ClosestNodes, Id, Node};
@@ -88,7 +90,7 @@ fn main() {
 fn build_dht(size: usize) -> Arc<BTreeMap<Id, Node>> {
     let mut dht = BTreeMap::new();
     for i in 0..size {
-        let node = Node::unique(i);
+        let node = Node::new(Id::random(), SocketAddrV4::new((i as u32).into(), i as u16));
         dht.insert(*node.id(), node);
     }
 

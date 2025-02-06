@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use mainline::{Bytes, Dht};
+use mainline::Dht;
 
 use clap::Parser;
 
@@ -20,7 +20,7 @@ fn main() {
     let cli = Cli::parse();
 
     let dht = Dht::client().unwrap();
-    let value = Bytes::from(cli.value.to_owned());
+    let value = cli.value.as_bytes();
 
     println!("\nStoring immutable data: {} ...\n", cli.value);
     println!("\n=== COLD QUERY ===");
@@ -30,12 +30,10 @@ fn main() {
     put_immutable(&dht, &value);
 }
 
-fn put_immutable(dht: &Dht, value: &Bytes) {
+fn put_immutable(dht: &Dht, value: &[u8]) {
     let start = Instant::now();
 
-    let info_hash = dht
-        .put_immutable(value.to_owned())
-        .expect("put immutable failed");
+    let info_hash = dht.put_immutable(value).expect("put immutable failed");
 
     println!(
         "Stored immutable data as {:?} in {:?} milliseconds",

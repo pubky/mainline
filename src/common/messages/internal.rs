@@ -1,20 +1,24 @@
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTMessage {
     #[serde(rename = "t", with = "serde_bytes")]
-    pub transaction_id: Vec<u8>,
+    // Only few messages received seems to not use exactly 2 bytes,
+    // and they don't seem to have a version.
+    pub transaction_id: [u8; 2],
 
     #[serde(default)]
     #[serde(rename = "v", with = "serde_bytes")]
-    pub version: Option<Vec<u8>>,
+    pub version: Option<[u8; 4]>,
 
     #[serde(flatten)]
     pub variant: DHTMessageVariant,
 
     #[serde(default)]
     #[serde(with = "serde_bytes")]
-    pub ip: Option<Vec<u8>>,
+    // Ipv6 is not supported anyways.
+    pub ip: Option<[u8; 6]>,
 
     #[serde(default)]
     #[serde(rename = "ro")]
@@ -22,8 +26,7 @@ pub struct DHTMessage {
 }
 
 impl DHTMessage {
-    pub fn from_bytes<T: AsRef<[u8]>>(bytes: T) -> Result<DHTMessage, serde_bencode::Error> {
-        let bytes = bytes.as_ref();
+    pub fn from_bytes(bytes: &[u8]) -> Result<DHTMessage, serde_bencode::Error> {
         let obj = serde_bencode::from_bytes(bytes)?;
         Ok(obj)
     }
@@ -128,7 +131,7 @@ pub enum DHTResponseSpecific {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTErrorSpecific {
     #[serde(rename = "e")]
-    pub error_info: Vec<serde_bencode::value::Value>,
+    pub error_info: (i32, String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -143,13 +146,13 @@ pub enum DHTErrorValue {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTPingRequestArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTPingResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 }
 
 // === FIND NODE ===
@@ -157,32 +160,32 @@ pub struct DHTPingResponseArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTFindNodeRequestArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub target: Vec<u8>,
+    pub target: [u8; 20],
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTFindNodeResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub nodes: Vec<u8>,
+    pub nodes: Box<[u8]>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTNoValuesResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 }
 
 // === Get Peers ===
@@ -190,27 +193,27 @@ pub struct DHTNoValuesResponseArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTGetPeersRequestArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub info_hash: Vec<u8>,
+    pub info_hash: [u8; 20],
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTGetPeersResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     // values are not optional, because if they are missing this missing
     // we can just treat this as DHTNoValuesResponseArguments
-    pub values: Vec<serde_bytes::ByteBuf>,
+    pub values: Vec<ByteBuf>,
 }
 
 // === Announce Peer ===
@@ -218,15 +221,15 @@ pub struct DHTGetPeersResponseArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTAnnouncePeerRequestArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub info_hash: Vec<u8>,
+    pub info_hash: [u8; 20],
 
     pub port: u16,
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(default)]
     pub implied_port: Option<u8>,
@@ -237,10 +240,10 @@ pub struct DHTAnnouncePeerRequestArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTGetValueRequestArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub target: Vec<u8>,
+    pub target: [u8; 20],
 
     #[serde(default)]
     pub seq: Option<i64>,
@@ -249,30 +252,30 @@ pub struct DHTGetValueRequestArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTGetImmutableResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     #[serde(with = "serde_bytes")]
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTNoMoreRecentValueResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     pub seq: i64,
 }
@@ -280,23 +283,23 @@ pub struct DHTNoMoreRecentValueResponseArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTGetMutableResponseArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub nodes: Option<Vec<u8>>,
+    pub nodes: Option<Box<[u8]>>,
 
     #[serde(with = "serde_bytes")]
-    pub v: Vec<u8>,
+    pub v: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
-    pub k: Vec<u8>,
+    pub k: [u8; 32],
 
     #[serde(with = "serde_bytes")]
-    pub sig: Vec<u8>,
+    pub sig: [u8; 64],
 
     pub seq: i64,
 }
@@ -306,24 +309,24 @@ pub struct DHTGetMutableResponseArguments {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DHTPutValueRequestArguments {
     #[serde(with = "serde_bytes")]
-    pub id: Vec<u8>,
+    pub id: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub target: Vec<u8>,
+    pub target: [u8; 20],
 
     #[serde(with = "serde_bytes")]
-    pub token: Vec<u8>,
+    pub token: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
-    pub v: Vec<u8>,
-
-    #[serde(with = "serde_bytes")]
-    #[serde(default)]
-    pub k: Option<Vec<u8>>,
+    pub v: Box<[u8]>,
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub sig: Option<Vec<u8>>,
+    pub k: Option<[u8; 32]>,
+
+    #[serde(with = "serde_bytes")]
+    #[serde(default)]
+    pub sig: Option<[u8; 64]>,
 
     #[serde(default)]
     pub seq: Option<i64>,
@@ -333,5 +336,5 @@ pub struct DHTPutValueRequestArguments {
 
     #[serde(with = "serde_bytes")]
     #[serde(default)]
-    pub salt: Option<Vec<u8>>,
+    pub salt: Option<Box<[u8]>>,
 }
