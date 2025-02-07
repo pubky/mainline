@@ -48,14 +48,14 @@ impl DhtBuilder {
         self
     }
 
-    /// Set bootstraping nodes.
+    /// Set bootstrapping nodes.
     pub fn bootstrap<T: ToSocketAddrs>(&mut self, bootstrap: &[T]) -> &mut Self {
         self.0.bootstrap = to_socket_address(bootstrap);
 
         self
     }
 
-    /// Add more bootstrap nodes to default bootstraping nodes.
+    /// Add more bootstrap nodes to default bootstrapping nodes.
     ///
     /// Useful when you want to augment the default bootstrapping nodes with
     /// dynamic list of nodes you have seen in previous sessions.
@@ -67,7 +67,7 @@ impl DhtBuilder {
         self
     }
 
-    /// Remove the existing bootstraping nodes, usually to create the first node in a new network.
+    /// Remove the existing bootstrapping nodes, usually to create the first node in a new network.
     pub fn no_bootstrap(&mut self) -> &mut Self {
         self.0.bootstrap = vec![];
 
@@ -166,7 +166,7 @@ impl Dht {
         rx.recv().expect("actor thread unexpectedly shutdown")
     }
 
-    /// Turn this node's routing table to a list of bootstraping nodes.   
+    /// Turn this node's routing table to a list of bootstrapping nodes.   
     pub fn to_bootstrap(&self) -> Vec<String> {
         let (tx, rx) = flume::bounded::<Vec<String>>(1);
         self.send(ActorMessage::ToBootstrap(tx));
@@ -176,9 +176,9 @@ impl Dht {
 
     // === Public Methods ===
 
-    /// Block until the bootstraping query is done.
+    /// Block until the bootstrapping query is done.
     ///
-    /// Returns true if the bootstraping was successful.
+    /// Returns true if the bootstrapping was successful.
     pub fn bootstrapped(&self) -> bool {
         let info = self.info();
         let nodes = self.find_node(*info.id());
@@ -237,7 +237,7 @@ impl Dht {
     ///
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
-    /// assumed by remote nodes to be the same ase port they recieved the request from.
+    /// assumed by remote nodes to be the same ase port they received the request from.
     pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, PutQueryError> {
         let (port, implied_port) = match port {
             Some(port) => (port, None),
@@ -255,7 +255,7 @@ impl Dht {
         .map_err(|error| match error {
             PutError::Query(error) => error,
             PutError::Concurrency(_) => {
-                unreachable!("should not receieve a concurrency error from announce peer query")
+                unreachable!("should not receive a concurrency error from announce peer query")
             }
         })
     }
@@ -291,7 +291,7 @@ impl Dht {
         .map_err(|error| match error {
             PutError::Query(error) => error,
             PutError::Concurrency(_) => {
-                unreachable!("should not receieve a concurrency error from put immutable query")
+                unreachable!("should not receive a concurrency error from put immutable query")
             }
         })
     }
@@ -626,7 +626,7 @@ pub enum ResponseSender {
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
 #[derive(Debug)]
 pub struct Testnet {
-    /// bootstraping nodes for this testnet.
+    /// bootstrapping nodes for this testnet.
     pub bootstrap: Vec<String>,
     /// all nodes in this testnet
     pub nodes: Vec<Dht>,

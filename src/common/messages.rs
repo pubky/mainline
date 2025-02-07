@@ -1,4 +1,4 @@
-//! Serealize and decerealize Krpc messages.
+//! Serialize and decerealize Krpc messages.
 
 // Copied from <https://github.com/raptorswing/rustydht-lib/blob/main/src/packets/public.rs>
 

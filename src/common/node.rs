@@ -110,7 +110,7 @@ impl Node {
     }
 
     /// Returns true if both nodes have the same ip and port
-    pub fn same_adress(&self, other: &Self) -> bool {
+    pub fn same_address(&self, other: &Self) -> bool {
         self.0.address == other.0.address
     }
 

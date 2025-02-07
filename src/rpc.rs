@@ -1,4 +1,4 @@
-//! K-RPC implementatioStoreQueryMetdatan
+//! K-RPC implementation.
 
 mod closest_nodes;
 pub(crate) mod config;
@@ -76,7 +76,7 @@ pub struct Rpc {
 
     // Active IterativeQueries
     iterative_queries: HashMap<Id, IterativeQuery>,
-    /// Put queries are special, since they have to wait for a corresponing
+    /// Put queries are special, since they have to wait for a corresponding
     /// get query to finish, update the closest_nodes, then `query_all` these.
     put_queries: HashMap<Id, PutQuery>,
 
@@ -150,7 +150,7 @@ impl Rpc {
         self.socket.local_addr()
     }
 
-    /// Returns the best guess for this node's Public addresss.
+    /// Returns the best guess for this node's Public address.
     ///
     /// If [crate::DhtBuilder::public_ip] was set, this is what will be returned
     /// (plus the local port), otherwise it will rely on consensus from
@@ -284,8 +284,8 @@ impl Rpc {
             self.put_queries.remove(id);
         }
 
-        // === Periodic node maintainance ===
-        self.periodic_node_maintainance();
+        // === Periodic node maintaenance ===
+        self.periodic_node_maintaenance();
 
         // Handle new incoming message
         let new_query_response = self
@@ -450,7 +450,7 @@ impl Rpc {
         let node_id = self.routing_table.id();
 
         if target == *node_id {
-            debug!(?node_id, "Bootstraping the routing table");
+            debug!(?node_id, "Bootstrapping the routing table");
         }
 
         let mut query = IterativeQuery::new(*self.id(), target, request);
@@ -464,7 +464,7 @@ impl Rpc {
             self.average_subnets(),
         );
 
-        // If we don't have enough or any closest nodes, call the bootstraping nodes.
+        // If we don't have enough or any closest nodes, call the bootstrapping nodes.
         if routing_table_closest.is_empty() || routing_table_closest.len() < self.bootstrap.len() {
             for bootstrapping_node in self.bootstrap.clone() {
                 query.visit(&mut self.socket, bootstrapping_node);
@@ -529,11 +529,11 @@ impl Rpc {
             };
         }
 
-        if let Some(our_adress) = self.public_address {
-            if from == our_adress && is_ping {
+        if let Some(our_address) = self.public_address {
+            if from == our_address && is_ping {
                 self.firewalled = false;
 
-                let ipv4 = our_adress.ip();
+                let ipv4 = our_address.ip();
 
                 // Restarting our routing table with new secure Id if necessary.
                 if !self.id().is_valid_for_ip(*ipv4) {
@@ -542,7 +542,7 @@ impl Rpc {
                     info!(
                         "Our current id {} is not valid for adrsess {}. Using new id {}",
                         self.id(),
-                        our_adress,
+                        our_address,
                         new_id
                     );
 
@@ -585,7 +585,7 @@ impl Rpc {
         let author_id = message.get_author_id();
         let from_version = message.version.to_owned();
 
-        // Get corresponing query for message.transaction_id
+        // Get corresponding query for message.transaction_id
         if let Some(query) = self
             .iterative_queries
             .values_mut()
@@ -733,7 +733,7 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintainance(&mut self) {
+    fn periodic_node_maintaenance(&mut self) {
         // Bootstrap if necessary
         if self.routing_table.is_empty() {
             self.populate();

@@ -40,7 +40,7 @@ impl AsyncDht {
             .expect("actor thread unexpectedly shutdown")
     }
 
-    /// Turn this node's routing table to a list of bootstraping nodes.   
+    /// Turn this node's routing table to a list of bootstrapping nodes.   
     pub async fn to_bootstrap(&self) -> Vec<String> {
         let (tx, rx) = flume::bounded::<Vec<String>>(1);
         self.send(ActorMessage::ToBootstrap(tx));
@@ -52,9 +52,9 @@ impl AsyncDht {
 
     // === Public Methods ===
 
-    /// Await until the bootstraping query is done.
+    /// Await until the bootstrapping query is done.
     ///
-    /// Returns true if the bootstraping was successful.
+    /// Returns true if the bootstrapping was successful.
     pub async fn bootstrapped(&self) -> bool {
         let info = self.info().await;
         let nodes = self.find_node(*info.id()).await;
@@ -114,7 +114,7 @@ impl AsyncDht {
     ///
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
-    /// assumed by remote nodes to be the same ase port they recieved the request from.
+    /// assumed by remote nodes to be the same ase port they received the request from.
     pub async fn announce_peer(
         &self,
         info_hash: Id,
@@ -137,7 +137,7 @@ impl AsyncDht {
         .map_err(|error| match error {
             PutError::Query(error) => error,
             PutError::Concurrency(_) => {
-                unreachable!("should not receieve a concurrency error from announce peer query")
+                unreachable!("should not receive a concurrency error from announce peer query")
             }
         })
     }
@@ -174,7 +174,7 @@ impl AsyncDht {
         .map_err(|error| match error {
             PutError::Query(error) => error,
             PutError::Concurrency(_) => {
-                unreachable!("should not receieve a concurrency error from put immutable query")
+                unreachable!("should not receive a concurrency error from put immutable query")
             }
         })
     }

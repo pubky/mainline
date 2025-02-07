@@ -125,7 +125,7 @@ impl RoutingTable {
         self.nodes().collect()
     }
 
-    /// Turn this routing table to a list of bootstraping nodes.   
+    /// Turn this routing table to a list of bootstrapping nodes.   
     pub fn to_bootstrap(&self) -> Vec<String> {
         self.nodes()
             .filter(|n| !n.is_stale())

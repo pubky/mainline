@@ -53,7 +53,7 @@ All notable changes to mainline dht will be documented in this file.
 - Enable calling `Dht::announce_peer()` and `Dht::put_immutable()` multiple times concurrently. 
 - Return `PutMutableError::Concurrrency(ConcurrrencyError)` from `Dht::put_mutable()`.
 - `Info::local_addr()` is infallible.
-- `MutableItem::seq()` returns `i64` instead of a refernece.
+- `MutableItem::seq()` returns `i64` instead of a reference.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` take `&[u8]` instead of `bytes::Bytes`.
 - `Dht::get_immutable()` and `AsyncDh::get_immutable()` return boxed slice `Box<[u8]>` instead of `bytes::Bytes`.
 - `Dht::put_immutable()` and `AsyncDh::put_immutable()` return `PutImmutableError`.

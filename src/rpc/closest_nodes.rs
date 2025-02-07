@@ -71,7 +71,7 @@ impl ClosestNodes {
     /// 1. At least the closest `k` nodes (20).
     /// 2. The last node should be at a distance `edk` which is the expected distance of the 20th
     ///    node given previous estimations of the DHT size.
-    /// 3. The number of subnets with uniqu e6 bits prefix in nodes ipv4 addresses match or exceeds
+    /// 3. The number of subnets with unique 6 bits prefix in nodes ipv4 addresses match or exceeds
     ///     the average from previous queries.
     ///
     /// If one or more of these conditions are not met, then we just take all responding nodes

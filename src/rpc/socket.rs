@@ -295,7 +295,7 @@ pub enum SendMessageError {
     IO(#[from] std::io::Error),
 }
 
-// Same as SocketAddr::eq but ingores the ip if it is unspecified for testing reasons.
+// Same as SocketAddr::eq but ignores the ip if it is unspecified for testing reasons.
 fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
     if a.port() != b.port() {
         return false;

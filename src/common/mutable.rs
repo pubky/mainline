@@ -120,7 +120,7 @@ impl MutableItem {
         &self.value
     }
 
-    /// Returns the `seq` (sequnece) number of this item.
+    /// Returns the `seq` (sequence) number of this item.
     pub fn seq(&self) -> i64 {
         self.seq
     }
