@@ -41,6 +41,7 @@ histo = "1.0.0"
 rayon = "1.10"
 dashmap = "6.1"
 flume = "0.11.1"
+colored = "2.0.0"
 
 [features]
 ## Include [Dht] node.
