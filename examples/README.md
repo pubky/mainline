@@ -13,6 +13,9 @@ cargo run --example request_filter
 
 # Cache and reuse bootstrap nodes
 cargo run --example cache_bootstrap
+
+# Advanced logging configuration
+cargo run --example logging
 ```
 
 ### Peer Operations
