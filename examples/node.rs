@@ -1,7 +1,7 @@
 use colored::*;
 use mainline::Dht;
 use std::{thread, time::Duration};
-use tracing::{debug, info, trace, Level};
+use tracing::{debug, info, Level};
 use tracing_subscriber::{self, fmt::format::FmtSpan};
 
 /// Custom logger that formats DHT messages
@@ -14,10 +14,6 @@ impl DhtLogger {
 
     fn debug(msg: &str) {
         debug!("{}", format_dht_message(msg));
-    }
-
-    fn trace(msg: &str) {
-        trace!("{}", format_dht_message(msg));
     }
 }
 
@@ -184,13 +180,6 @@ fn main() {
             format!("{:.1}", std_dev * 100.0).yellow()
         ));
         DhtLogger::debug(&format!("Raw DHT Info: {:?}", info));
-        // Add explanation of message types
-        DhtLogger::trace("Message Types you might see in logs:");
-        DhtLogger::trace("- find_node: Looking for nodes close to an ID");
-        DhtLogger::trace("- get_peers: Looking for peers for an infohash");
-        DhtLogger::trace("- announce_peer: Announcing that it's a peer for an infohash");
-        DhtLogger::trace("- ping: Checking if a node is alive");
-        DhtLogger::trace("- NoValues: Response indicating no requested values were found");
         DhtLogger::info(""); // Blank line to separate updates
     }
 }
