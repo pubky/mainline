@@ -1,8 +1,25 @@
 use mainline::Dht;
 use std::{thread, time::Duration};
 use tracing::{Level, info, debug, trace};
-use tracing_subscriber;
+use tracing_subscriber::{self, fmt::format::FmtSpan};
 use colored::*;
+
+/// Custom logger that formats DHT messages
+struct DhtLogger;
+
+impl DhtLogger {
+    fn info(msg: &str) {
+        info!("{}", format_dht_message(msg));
+    }
+
+    fn debug(msg: &str) {
+        debug!("{}", format_dht_message(msg));
+    }
+
+    fn trace(msg: &str) {
+        trace!("{}", format_dht_message(msg));
+    }
+}
 
 /// Format a DHT message for better readability
 fn format_dht_message(msg: &str) -> String {
@@ -18,18 +35,16 @@ fn format_dht_message(msg: &str) -> String {
 
 /// Format outgoing messages
 fn format_outgoing_message(msg: &str) -> String {
-    let arrow = "→".bright_blue();
-    format_message(msg, &arrow)
+    format_message(msg, "OUT".bright_blue())
 }
 
 /// Format incoming messages
 fn format_incoming_message(msg: &str) -> String {
-    let arrow = "←".bright_green();
-    format_message(msg, &arrow)
+    format_message(msg, "IN".bright_green())
 }
 
 /// Common message formatting logic
-fn format_message(msg: &str, arrow: &str) -> String {
+fn format_message(msg: &str, direction: ColoredString) -> String {
     // Extract message type (find_node, get_peers, etc)
     let msg_type = if msg.contains("find_node") {
         "FIND_NODE".yellow()
@@ -45,8 +60,8 @@ fn format_message(msg: &str, arrow: &str) -> String {
 
     // Format the message in a structured way
     format!(
-        "\n{} {} | {}\n{}",
-        arrow,
+        "[{}] {} | {}\n{}",
+        direction,
         msg_type,
         "DHT Message".bright_black(),
         format_message_details(msg)
@@ -103,6 +118,16 @@ fn main() {
         .with_ansi(true)
         .with_line_number(true)
         .with_thread_names(true)
+        .with_span_events(FmtSpan::FULL)
+        .event_format(
+            tracing_subscriber::fmt::format()
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_target(true)
+                .compact() // This will make the output more compact
+        )
         .init();
 
     // Configure and start the DHT node in server mode
@@ -111,12 +136,12 @@ fn main() {
         .build()
         .expect("Failed to create DHT server");
 
-    info!("DHT server node is running! Press Ctrl+C to stop.");
+    DhtLogger::info("DHT server node is running! Press Ctrl+C to stop.");
     
     // Wait for bootstrap to complete
-    info!("Waiting for bootstrap...");
+    DhtLogger::info("Waiting for bootstrap...");
     dht.bootstrapped();
-    info!("Bootstrap complete!");
+    DhtLogger::info("Bootstrap complete!");
     
     // Keep the program running and show periodic information
     loop {
@@ -124,34 +149,40 @@ fn main() {
         let info = dht.info();
         
         // Basic node information
-        info!("=== DHT Node Status ===");
-        info!("Node ID: {}", info.id().to_string().yellow());
-        info!("Local address: {}", info.local_addr().to_string().blue());
+        DhtLogger::info("=== DHT Node Status ===");
+        DhtLogger::info(&format!("Node ID: {}", info.id().to_string().yellow()));
+        DhtLogger::info(&format!("Local address: {}", info.local_addr().to_string().blue()));
         if let Some(addr) = info.public_address() {
-            info!("Public address: {}", addr.to_string().green());
+            DhtLogger::info(&format!("Public address: {}", addr.to_string().green()));
         }
-        info!("Firewalled: {}", if info.firewalled() { "Yes".red() } else { "No".green() });
-        info!("Server mode: {}", if info.server_mode() { "Yes".green() } else { "No".yellow() });
+        DhtLogger::info(&format!(
+            "Firewalled: {}", 
+            if info.firewalled() { "Yes".red() } else { "No".green() }
+        ));
+        DhtLogger::info(&format!(
+            "Server mode: {}", 
+            if info.server_mode() { "Yes".green() } else { "No".yellow() }
+        ));
         
         // Network statistics
         let (size_estimate, std_dev) = info.dht_size_estimate();
-        info!("=== Network Statistics ===");
-        info!(
-            "Estimated nodes in network: {} (±{:.1}%)", 
+        DhtLogger::info("=== Network Statistics ===");
+        DhtLogger::info(&format!(
+            "Estimated nodes in network: {} (±{}%)", 
             size_estimate.to_string().cyan(),
-            (std_dev * 100.0).to_string().yellow()
-        );
+            format!("{:.1}", std_dev * 100.0).yellow()
+        ));        
         
-        debug!("Raw DHT Info: {:?}", info);
+        DhtLogger::debug(&format!("Raw DHT Info: {:?}", info));
         
         // Add explanation of message types
-        trace!("Message Types you might see in logs:");
-        trace!("- find_node: Looking for nodes close to an ID");
-        trace!("- get_peers: Looking for peers for an infohash");
-        trace!("- announce_peer: Announcing that it's a peer for an infohash");
-        trace!("- ping: Checking if a node is alive");
-        trace!("- NoValues: Response indicating no requested values were found");
+        DhtLogger::trace("Message Types you might see in logs:");
+        DhtLogger::trace("- find_node: Looking for nodes close to an ID");
+        DhtLogger::trace("- get_peers: Looking for peers for an infohash");
+        DhtLogger::trace("- announce_peer: Announcing that it's a peer for an infohash");
+        DhtLogger::trace("- ping: Checking if a node is alive");
+        DhtLogger::trace("- NoValues: Response indicating no requested values were found");
         
-        info!(""); // Blank line to separate updates
+        DhtLogger::info(""); // Blank line to separate updates
     }
 }
