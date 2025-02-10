@@ -1,4 +1,4 @@
-//! Udp socket layer managine incoming/outgoing requests and responses.
+//! UDP socket layer managing incoming/outgoing requests and responses.
 
 use std::cmp::Ordering;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
@@ -103,6 +103,7 @@ impl KrpcSocket {
     /// Send a request to the given address and return the transaction_id
     pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
         let message = self.request_message(request);
+        trace!(context = "socket_message_sending", message = ?message);
 
         self.inflight_requests.push(InflightRequest {
             tid: message.transaction_id,
@@ -127,6 +128,7 @@ impl KrpcSocket {
     ) {
         let message =
             self.response_message(MessageType::Response(response), address, transaction_id);
+        trace!(context = "socket_message_sending", message = ?message);
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending response message");
         });
@@ -166,7 +168,7 @@ impl KrpcSocket {
             let bytes = &buf[..amt];
 
             if from.port() == 0 {
-                trace!("Response from port 0");
+                trace!(context = "socket", message = "Response from port 0");
                 return None;
             }
 
@@ -175,17 +177,32 @@ impl KrpcSocket {
                     // Parsed correctly.
                     let should_return = match message.message_type {
                         MessageType::Request(_) => {
-                            trace!(?message, ?from, "Received request message");
+                            trace!(
+                                context = "socket_message_receiving",
+                                ?message,
+                                ?from,
+                                "Received request message"
+                            );
 
                             true
                         }
                         MessageType::Response(_) => {
-                            trace!(?message, ?from, "Received response message");
+                            trace!(
+                                context = "socket_message_receiving",
+                                ?message,
+                                ?from,
+                                "Received response message"
+                            );
 
                             self.is_expected_response(&message, &from)
                         }
                         MessageType::Error(_) => {
-                            trace!(?message, ?from, "Received error message");
+                            trace!(
+                                context = "socket_message_receiving",
+                                ?message,
+                                ?from,
+                                "Received error message"
+                            );
 
                             self.is_expected_response(&message, &from)
                         }
@@ -196,7 +213,7 @@ impl KrpcSocket {
                     }
                 }
                 Err(error) => {
-                    trace!(?error, ?from, message = ?String::from_utf8_lossy(bytes), "Received invalid message");
+                    trace!(context = "socket_error", ?error, ?from, message = ?String::from_utf8_lossy(bytes));
                 }
             };
         };
@@ -224,11 +241,17 @@ impl KrpcSocket {
 
                     return true;
                 } else {
-                    trace!(?message, "Response from the wrong address");
+                    trace!(
+                        context = "socket_validation",
+                        message = "Response from wrong address"
+                    );
                 }
             }
             Err(_) => {
-                trace!(?message, "Unexpected response id");
+                trace!(
+                    context = "socket_validation",
+                    message = "Unexpected response id"
+                );
             }
         }
 
@@ -277,8 +300,8 @@ impl KrpcSocket {
 
     /// Send a raw dht message
     fn send(&mut self, address: SocketAddrV4, message: Message) -> Result<(), SendMessageError> {
-        trace!(?message, "Sending a message");
         self.socket.send_to(&message.to_bytes()?, address)?;
+        trace!(context = "socket_message_sending", message = ?message);
         Ok(())
     }
 }
