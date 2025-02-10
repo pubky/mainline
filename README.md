@@ -11,7 +11,7 @@ However if you are concerned about spam or DoS, you should consider implementing
 
 ## Getting started
 
-Check the [Examples](https://github.com/Nuhvi/mainline/tree/main/examples).
+Check the [Examples](https://github.com/Pubky/mainline/tree/main/examples).
 
 ## Features
 

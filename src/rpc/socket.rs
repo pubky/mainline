@@ -168,7 +168,10 @@ impl KrpcSocket {
             let bytes = &buf[..amt];
 
             if from.port() == 0 {
-                trace!(context = "socket", message = "Response from port 0");
+                trace!(
+                    context = "socket_validation",
+                    message = "Response from port 0"
+                );
                 return None;
             }
 
@@ -213,7 +216,7 @@ impl KrpcSocket {
                     }
                 }
                 Err(error) => {
-                    trace!(context = "socket_error", ?error, ?from, message = ?String::from_utf8_lossy(bytes));
+                    trace!(context = "socket_error", ?error, ?from, message = ?String::from_utf8_lossy(bytes), "Received invalid Bencode message.");
                 }
             };
         };

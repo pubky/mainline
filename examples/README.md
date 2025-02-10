@@ -3,7 +3,7 @@
 ## Core API Examples
 These examples demonstrate the main functionality of the Mainline DHT library:
 
-### Basic DHT Operations
+### Setup
 ```sh
 # Bootstrap a DHT node
 cargo run --example bootstrap
@@ -18,7 +18,7 @@ cargo run --example cache_bootstrap
 cargo run --example logging
 ```
 
-### Peer Operations
+### Anounce/GET Peers
 ```sh
 # Announce as a peer
 cargo run --example announce_peer <40 bytes hex info_hash>
@@ -27,13 +27,17 @@ cargo run --example announce_peer <40 bytes hex info_hash>
 cargo run --example get_peers <40 bytes hex info_hash>
 ```
 
-### Data Storage
+### PUT/GET Arbitrary Immutable values.
 ```sh
 # Store immutable data
 cargo run --example put_immutable <string>
 
 # Retrieve immutable data
 cargo run --example get_immutable <40 bytes hex target from put_immutable>
+```
+
+### PUT/GET Arbitrary Mutable items.
+```sh
 
 # Store mutable data
 cargo run --example put_mutable <64 bytes hex secret_key> <string>
