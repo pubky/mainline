@@ -2,7 +2,7 @@
 
 All notable changes to mainline dht will be documented in this file.
 
-## [Unreleased]
+## [5.0.0](https://github.com/pubky/mainline/compare/v4.2.1...v5.0.0) - 2025-02-11
 
 ### Added
 
@@ -71,13 +71,13 @@ All notable changes to mainline dht will be documented in this file.
 - Remove `Server` trait and replace it with `RequestFilter` trait.
 - `DhtBuilder` is not consuming, thanks to `Config` being `Clone`.
 
-##  [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
+## [4.2.0](https://github.com/pubky/mainline/compare/v4.1.0...v4.2.0) - 2024-12-13
 
 ### Added
 
 - Make MutableItem de/serializable (mikedilger)
 
-##  [4.1.0](https://github.com/pubky/mainline/compare/v3.0.0...v4.1.0) - 2024-11-29
+## [4.1.0](https://github.com/pubky/mainline/compare/v3.0.0...v4.1.0) - 2024-11-29
 
 ### Added
 
