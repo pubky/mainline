@@ -2,7 +2,7 @@
 
 use std::{net::SocketAddrV4, num::NonZeroUsize};
 
-use rand::{thread_rng, Rng};
+use rand::random_bool;
 
 use crate::common::Id;
 
@@ -57,8 +57,6 @@ impl PeersStore {
 
             let mut results = Vec::with_capacity(20);
 
-            let mut rng = thread_rng();
-
             for (index, (_, addr)) in info_hash_lru.iter().enumerate() {
                 // Calculate the chance of adding the current item based on remaining items and slots
                 let remaining_slots = target_size - results.len();
@@ -66,7 +64,7 @@ impl PeersStore {
                 let current_chance = remaining_slots as f64 / remaining_items as f64;
 
                 // Randomly decide to add the item based on the current chance
-                if rng.gen_bool(current_chance) {
+                if random_bool(current_chance) {
                     results.push(*addr);
                     if results.len() == target_size {
                         break;

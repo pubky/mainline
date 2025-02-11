@@ -1,7 +1,7 @@
 //! Manage tokens for remote client IPs.
 
 use crc::{Crc, CRC_32_ISCSI};
-use rand::{thread_rng, Rng};
+use rand::random;
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddrV4,
@@ -33,11 +33,9 @@ impl Debug for Tokens {
 impl Tokens {
     /// Create a Tokens generator.
     pub fn new() -> Self {
-        let mut rng = thread_rng();
-
         Tokens {
-            prev_secret: rng.gen(),
-            curr_secret: rng.gen(),
+            prev_secret: random(),
+            curr_secret: random(),
             last_updated: Instant::now(),
         }
     }
@@ -60,10 +58,9 @@ impl Tokens {
     /// Rotate the tokens secret.
     pub fn rotate(&mut self) {
         trace!("Rotating secrets");
-        let mut rng = thread_rng();
 
         self.prev_secret = self.curr_secret;
-        self.curr_secret = rng.gen();
+        self.curr_secret = random();
 
         self.last_updated = Instant::now();
     }

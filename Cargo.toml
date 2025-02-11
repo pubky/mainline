@@ -2,7 +2,7 @@
 name = "mainline"
 version = "5.0.0"
 authors = ["nuh.dev"]
-edition = "2018"
+edition = "2021"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
 homepage = "https://github.com/pubky/mainline"
 license = "MIT"
@@ -12,7 +12,7 @@ repository = "https://github.com/pubky/mainline"
 exclude = ["/docs/*", "/examples/*"]
 
 [dependencies]
-rand = "0.8.5"
+rand = "0.9.0"
 serde_bencode = "^0.2.4"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_bytes = "0.11.15"
@@ -21,7 +21,7 @@ crc = "3.2.1"
 sha1_smol = "1.0.1"
 ed25519-dalek = "2.1.1"
 tracing = "0.1"
-lru = { version = "0.12.5", default-features = false }
+lru = { version = "0.13.0", default-features = false }
 dyn-clone = "1.0.18"
 
 document-features = "0.2.10"
@@ -41,7 +41,7 @@ histo = "1.0.0"
 rayon = "1.10"
 dashmap = "6.1"
 flume = "0.11.1"
-colored = "2.0.0"
+colored = "2.2.0"
 chrono = "0.4"
 
 [features]

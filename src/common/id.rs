@@ -1,6 +1,6 @@
 //! Kademlia node Id or a lookup target
 use crc::{Crc, CRC_32_ISCSI};
-use rand::Rng;
+use rand::random;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::{
@@ -23,8 +23,7 @@ pub struct Id([u8; ID_SIZE]);
 impl Id {
     /// Generate a random Id
     pub fn random() -> Id {
-        let mut rng = rand::thread_rng();
-        let bytes: [u8; 20] = rng.gen();
+        let bytes: [u8; 20] = random();
 
         Id(bytes)
     }
@@ -90,10 +89,9 @@ impl Id {
 
     /// Create a new Id from an Ipv4 address according to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_ip(ip: IpAddr) -> Id {
-        let mut rng = rand::thread_rng();
-        let r: u8 = rng.gen();
+        let r: u8 = random();
 
-        let bytes: [u8; 20] = rng.gen();
+        let bytes: [u8; 20] = random();
 
         match ip {
             IpAddr::V4(addr) => from_ipv4_and_r(bytes, addr, r),
@@ -103,10 +101,9 @@ impl Id {
 
     /// Create a new Id from an Ipv4 address according to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_ipv4(ipv4: Ipv4Addr) -> Id {
-        let mut rng = rand::thread_rng();
-        let r: u8 = rng.gen();
+        let r: u8 = random();
 
-        let bytes: [u8; 20] = rng.gen();
+        let bytes: [u8; 20] = random();
 
         from_ipv4_and_r(bytes, ipv4, r)
     }
