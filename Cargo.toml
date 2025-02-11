@@ -33,7 +33,7 @@ flume = { version = "0.11.1", features = [], default-features = false, optional 
 futures-lite = { version = "2.6.0", default-features = false, optional = true }
 
 [dev-dependencies]
-clap = { version = "4.5.28", features = ["derive"] }
+clap = { version = "4.5.29", features = ["derive"] }
 futures = "0.3.31"
 tracing-subscriber = "0.3"
 ctrlc = "3.4.5"
@@ -41,7 +41,7 @@ histo = "1.0.0"
 rayon = "1.10"
 dashmap = "6.1"
 flume = "0.11.1"
-colored = "2.2.0"
+colored = "3.0.0"
 chrono = "0.4"
 
 [features]
