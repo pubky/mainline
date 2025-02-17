@@ -821,26 +821,8 @@ impl Rpc {
 
     fn cache_iterative_query(&mut self, query: &IterativeQuery, closest_responding_nodes: &[Node]) {
         if self.cached_iterative_queries.len() >= MAX_CACHED_ITERATIVE_QUERIES {
-            // Remove least recent closest_nodes
-            if let Some((
-                _,
-                CachedIterativeQuery {
-                    dht_size_estimate,
-                    responders_dht_size_estimate,
-                    subnets,
-                    is_find_node,
-                    ..
-                },
-            )) = self.cached_iterative_queries.pop_lru()
-            {
-                self.dht_size_estimates_sum -= dht_size_estimate;
-                self.responders_based_dht_size_estimates_sum -= responders_dht_size_estimate;
-                self.subnets_sum -= subnets as usize;
-
-                if !is_find_node {
-                    self.responders_based_dht_size_estimates_count -= 1;
-                }
-            };
+            let q = self.cached_iterative_queries.pop_lru();
+            self.decrement_cached_iterative_query_stats(q.map(|q| q.1));
         }
 
         let closest = query.closest();
@@ -855,7 +837,7 @@ impl Rpc {
         let responders_dht_size_estimate = responders.dht_size_estimate();
         let subnets_count = closest.subnets_count();
 
-        self.cached_iterative_queries.put(
+        let previous = self.cached_iterative_queries.put(
             query.target(),
             CachedIterativeQuery {
                 closest_responding_nodes: closest_responding_nodes.into(),
@@ -870,6 +852,8 @@ impl Rpc {
             },
         );
 
+        self.decrement_cached_iterative_query_stats(previous);
+
         self.dht_size_estimates_sum += dht_size_estimate;
         self.responders_based_dht_size_estimates_sum += responders_dht_size_estimate;
         self.subnets_sum += subnets_count as usize;
@@ -883,6 +867,25 @@ impl Rpc {
 
     fn average_subnets(&self) -> usize {
         self.subnets_sum / self.cached_iterative_queries.len().max(1)
+    }
+
+    fn decrement_cached_iterative_query_stats(&mut self, query: Option<CachedIterativeQuery>) {
+        if let Some(CachedIterativeQuery {
+            dht_size_estimate,
+            responders_dht_size_estimate,
+            subnets,
+            is_find_node,
+            ..
+        }) = query
+        {
+            self.dht_size_estimates_sum -= dht_size_estimate;
+            self.responders_based_dht_size_estimates_sum -= responders_dht_size_estimate;
+            self.subnets_sum -= subnets as usize;
+
+            if !is_find_node {
+                self.responders_based_dht_size_estimates_count -= 1;
+            }
+        };
     }
 }
 
