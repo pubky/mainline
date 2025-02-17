@@ -24,7 +24,7 @@ impl Info {
     pub fn local_addr(&self) -> SocketAddrV4 {
         self.local_addr
     }
-    /// Returns the best guess for this node's Public addresss.
+    /// Returns the best guess for this node's Public address.
     ///
     /// If [crate::DhtBuilder::public_ip] was set, this is what will be returned
     /// (plus the local port), otherwise it will rely on consensus from
