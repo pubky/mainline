@@ -2,9 +2,7 @@ use mainline::{Dht, Id};
 use tracing::Level;
 
 fn main() {
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     let dht = Dht::client().unwrap();
 
