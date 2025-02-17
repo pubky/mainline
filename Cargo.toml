@@ -1,6 +1,6 @@
 [package]
 name = "mainline"
-version = "5.2.0"
+version = "5.2.1"
 authors = ["nuh.dev"]
 edition = "2021"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
