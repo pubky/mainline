@@ -2,11 +2,12 @@
 
 use std::{net::SocketAddrV4, num::NonZeroUsize};
 
-use rand::random_bool;
-
 use crate::common::Id;
 
+use getrandom::getrandom;
 use lru::LruCache;
+
+const CHANCE_SCALE: f32 = 2.0 * (1u32 << 31) as f32;
 
 #[derive(Debug, Clone)]
 /// An LRU cache of "Peers" per info hashes.
@@ -57,14 +58,22 @@ impl PeersStore {
 
             let mut results = Vec::with_capacity(20);
 
+            let mut chunk = vec![0_u8; info_hash_lru.iter().len() * 4];
+            getrandom(chunk.as_mut_slice()).expect("getrandom");
+
             for (index, (_, addr)) in info_hash_lru.iter().enumerate() {
                 // Calculate the chance of adding the current item based on remaining items and slots
                 let remaining_slots = target_size - results.len();
                 let remaining_items = info_hash_lru.len() - index;
-                let current_chance = remaining_slots as f64 / remaining_items as f64;
+                let current_chance =
+                    ((remaining_slots as f32 / remaining_items as f32) * CHANCE_SCALE) as u32;
+
+                // Get random integer from the chunk
+                let rand_int =
+                    u32::from_le_bytes(chunk[index..index + 4].try_into().expect("infallible"));
 
                 // Randomly decide to add the item based on the current chance
-                if random_bool(current_chance) {
+                if rand_int < current_chance {
                     results.push(*addr);
                     if results.len() == target_size {
                         break;

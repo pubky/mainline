@@ -12,7 +12,7 @@ repository = "https://github.com/pubky/mainline"
 exclude = ["/docs/*", "/examples/*"]
 
 [dependencies]
-rand = "0.9.0"
+getrandom = "0.2"
 serde_bencode = "^0.2.4"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_bytes = "0.11.15"
