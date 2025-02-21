@@ -307,6 +307,10 @@ impl KrpcSocket {
         trace!(context = "socket_message_sending", message = ?message);
         Ok(())
     }
+
+    pub fn get_socket(&self) -> &UdpSocket {
+        &self.socket
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
