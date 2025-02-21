@@ -887,6 +887,10 @@ impl Rpc {
             }
         };
     }
+    
+    pub(crate) fn get_socket(&self) -> &KrpcSocket {
+        &self.socket
+    }
 }
 
 struct CachedIterativeQuery {

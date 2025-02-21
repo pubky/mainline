@@ -1,9 +1,10 @@
 //! Dht node.
 
 use std::{
-    collections::HashMap,
-    net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs},
-    thread,
+    collections::HashMap, 
+    net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs, UdpSocket}, 
+    sync::Arc, 
+    thread, 
     time::Duration,
 };
 
@@ -451,6 +452,15 @@ impl Dht {
             .expect("Query was dropped before sending a response, please open an issue.")
     }
 
+    /// Return the UdpSocket so it can be used externaly
+    pub fn get_socket(&self) -> Arc<UdpSocket> {
+        let (tx, rx) = flume::bounded(1);
+        self.0.send(ActorMessage::GetSocket(tx))
+            .expect("actor thread unexpectedly shutdown");
+        rx.recv()
+            .expect("Failed to receive socket")
+    }
+
     // === Private Methods ===
 
     pub(crate) fn put_inner(
@@ -493,6 +503,10 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
             loop {
                 match receiver.try_recv() {
                     Ok(actor_message) => match actor_message {
+                        ActorMessage::GetSocket(sender) => {
+                            let socket = Arc::new(rpc.get_socket().get_socket().try_clone().unwrap());
+                            let _ = sender.send(socket);
+                        }
                         ActorMessage::Check(sender) => {
                             let _ = sender.send(Ok(()));
                         }
@@ -613,6 +627,7 @@ pub(crate) enum ActorMessage {
     Get(GetRequestSpecific, ResponseSender),
     Check(Sender<Result<(), std::io::Error>>),
     ToBootstrap(Sender<Vec<String>>),
+    GetSocket(Sender<Arc<UdpSocket>>),
 }
 
 #[derive(Debug, Clone)]
