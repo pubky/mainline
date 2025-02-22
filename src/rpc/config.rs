@@ -10,7 +10,7 @@ use super::{ServerSettings, DEFAULT_REQUEST_TIMEOUT};
 pub struct Config {
     /// Bootstrap nodes
     ///
-    /// Defaults to [DEFAULT_BOOTSTRAP_NODES]
+    /// Defaults to [super::DEFAULT_BOOTSTRAP_NODES]
     pub bootstrap: Option<Vec<SocketAddrV4>>,
     /// Explicit port to listen on.
     ///
