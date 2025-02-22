@@ -9,7 +9,7 @@ pub(crate) mod server;
 mod socket;
 
 use std::collections::HashMap;
-use std::net::SocketAddrV4;
+use std::net::{SocketAddr, SocketAddrV4, ToSocketAddrs};
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
@@ -108,7 +108,10 @@ impl Rpc {
         let socket = KrpcSocket::new(&config)?;
 
         Ok(Rpc {
-            bootstrap: config.bootstrap.into(),
+            bootstrap: config
+                .bootstrap
+                .unwrap_or(to_socket_address(&DEFAULT_BOOTSTRAP_NODES))
+                .into(),
             socket,
 
             routing_table: RoutingTable::new(id),
@@ -919,4 +922,21 @@ pub enum Response {
     Peers(Vec<SocketAddrV4>),
     Immutable(Box<[u8]>),
     Mutable(MutableItem),
+}
+
+pub(crate) fn to_socket_address<T: ToSocketAddrs>(bootstrap: &[T]) -> Vec<SocketAddrV4> {
+    bootstrap
+        .iter()
+        .flat_map(|s| {
+            s.to_socket_addrs().map(|addrs| {
+                addrs
+                    .filter_map(|addr| match addr {
+                        SocketAddr::V4(addr_v4) => Some(addr_v4),
+                        _ => None,
+                    })
+                    .collect::<Box<[_]>>()
+            })
+        })
+        .flatten()
+        .collect()
 }

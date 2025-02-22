@@ -17,11 +17,14 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    rpc::{ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Response, Rpc},
+    rpc::{
+        to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError,
+        Response, Rpc,
+    },
     Node, ServerSettings,
 };
 
-use crate::rpc::config::{to_socket_address, Config};
+use crate::rpc::config::Config;
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
@@ -50,7 +53,7 @@ impl DhtBuilder {
 
     /// Set bootstrapping nodes.
     pub fn bootstrap<T: ToSocketAddrs>(&mut self, bootstrap: &[T]) -> &mut Self {
-        self.0.bootstrap = to_socket_address(bootstrap);
+        self.0.bootstrap = Some(to_socket_address(bootstrap));
 
         self
     }
@@ -60,16 +63,18 @@ impl DhtBuilder {
     /// Useful when you want to augment the default bootstrapping nodes with
     /// dynamic list of nodes you have seen in previous sessions.
     pub fn extra_bootstrap<T: ToSocketAddrs>(&mut self, extra_bootstrap: &[T]) -> &mut Self {
+        let mut bootstrap = self.0.bootstrap.clone().unwrap_or_default();
         for address in to_socket_address(extra_bootstrap) {
-            self.0.bootstrap.push(address);
+            bootstrap.push(address);
         }
+        self.0.bootstrap = Some(bootstrap);
 
         self
     }
 
     /// Remove the existing bootstrapping nodes, usually to create the first node in a new network.
     pub fn no_bootstrap(&mut self) -> &mut Self {
-        self.0.bootstrap = vec![];
+        self.0.bootstrap = Some(vec![]);
 
         self
     }

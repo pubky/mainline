@@ -1,6 +1,6 @@
 [package]
 name = "mainline"
-version = "5.2.1"
+version = "5.3.1"
 authors = ["nuh.dev"]
 edition = "2021"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
@@ -12,7 +12,7 @@ repository = "https://github.com/pubky/mainline"
 exclude = ["/docs/*", "/examples/*"]
 
 [dependencies]
-rand = "0.9.0"
+getrandom = "0.2"
 serde_bencode = "^0.2.4"
 serde = { version = "1.0.217", features = ["derive"] }
 serde_bytes = "0.11.15"
