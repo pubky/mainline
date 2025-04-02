@@ -663,6 +663,10 @@ impl Testnet {
             }
         }
 
+        for node in &nodes {
+            node.bootstrapped();
+        }
+
         let testnet = Self { bootstrap, nodes };
 
         Ok(testnet)
@@ -1065,5 +1069,17 @@ mod test {
             client.put_mutable(MutableItem::new(signer, &[], 1002, None), Some(1000)),
             Err(PutMutableError::Concurrency(ConcurrencyError::CasFailed))
         ));
+    }
+
+    #[test]
+    fn populate_bootstrapping_node_routing_table() {
+        let size = 3;
+
+        let testnet = Testnet::new(size).unwrap();
+
+        assert!(testnet
+            .nodes
+            .iter()
+            .all(|n| n.to_bootstrap().len() == size - 1));
     }
 }

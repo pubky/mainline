@@ -516,6 +516,17 @@ impl Rpc {
         transaction_id: u16,
         request_specific: RequestSpecific,
     ) {
+        // By default we only add nodes that responds to our requests.
+        //
+        // This is the only exception; the first node creating the DHT,
+        // without this exception, the bootstrapping node's routing table
+        // will never be populated.
+        if self.bootstrap.is_empty() {
+            if let RequestTypeSpecific::FindNode(param) = &request_specific.request_type {
+                self.routing_table.add(Node::new(param.target, from));
+            }
+        }
+
         let is_ping = matches!(request_specific.request_type, RequestTypeSpecific::Ping);
 
         if self.server_mode() {
