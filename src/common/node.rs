@@ -128,8 +128,8 @@ impl Node {
 
     /// Returns true if Any of the existing nodes:
     ///  - Have the same IP as this node, And:
-    ///     = The existing nodes is Not secure.
-    ///     = The existing nodes is secure And shares the same first 21 bits.
+    ///    = The existing nodes is Not secure.
+    ///    = The existing nodes is secure And shares the same first 21 bits.
     ///
     /// Effectively, allows only One non-secure node or Eight secure nodes from the same IP, in the routing table or ClosestNodes.
     pub(crate) fn already_exists(&self, nodes: &[Self]) -> bool {

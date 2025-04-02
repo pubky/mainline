@@ -416,9 +416,9 @@ impl Rpc {
     /// to traverse it.
     ///
     /// - `request` [RequestTypeSpecific], except [RequestTypeSpecific::Ping] and
-    ///     [RequestTypeSpecific::Put] which will be ignored.
+    ///   [RequestTypeSpecific::Put] which will be ignored.
     /// - `extra_nodes` option allows the query to visit specific nodes, that won't necessesarily be visited
-    ///     through the query otherwise.
+    ///   through the query otherwise.
     pub fn get(
         &mut self,
         request: GetRequestSpecific,
