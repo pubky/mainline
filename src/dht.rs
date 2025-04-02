@@ -643,7 +643,31 @@ impl Testnet {
     /// Note: this network will be shutdown as soon as this struct
     /// gets dropped, if you want the network to be `'static`, then
     /// you should call [Self::leak].
+    ///
+    /// This will block until all nodes are [bootstrapped][Dht::bootstrapped],
+    /// if you are using an async runtime, consider using [Self::new_async].
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
+        let testnet = Testnet::new_inner(count)?;
+
+        for node in &testnet.nodes {
+            node.bootstrapped();
+        }
+
+        Ok(testnet)
+    }
+
+    /// Similar to [Self::new] but awaits all nodes to bootstrap instead of blocking.
+    pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
+        let testnet = Testnet::new_inner(count)?;
+
+        for node in testnet.nodes.clone() {
+            node.as_async().bootstrapped().await;
+        }
+
+        Ok(testnet)
+    }
+
+    fn new_inner(count: usize) -> Result<Testnet, std::io::Error> {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
 
@@ -661,10 +685,6 @@ impl Testnet {
                 let node = Dht::builder().server_mode().bootstrap(&bootstrap).build()?;
                 nodes.push(node)
             }
-        }
-
-        for node in &nodes {
-            node.bootstrapped();
         }
 
         let testnet = Self { bootstrap, nodes };
