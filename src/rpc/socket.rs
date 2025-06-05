@@ -9,7 +9,7 @@ use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, Respon
 
 use super::config::Config;
 
-const VERSION: [u8; 4] = [82, 83, 0, 4]; // "RS" version 04
+const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
 const MTU: usize = 2048;
 
 pub const DEFAULT_PORT: u16 = 6881;

@@ -643,7 +643,31 @@ impl Testnet {
     /// Note: this network will be shutdown as soon as this struct
     /// gets dropped, if you want the network to be `'static`, then
     /// you should call [Self::leak].
+    ///
+    /// This will block until all nodes are [bootstrapped][Dht::bootstrapped],
+    /// if you are using an async runtime, consider using [Self::new_async].
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
+        let testnet = Testnet::new_inner(count)?;
+
+        for node in &testnet.nodes {
+            node.bootstrapped();
+        }
+
+        Ok(testnet)
+    }
+
+    /// Similar to [Self::new] but awaits all nodes to bootstrap instead of blocking.
+    pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
+        let testnet = Testnet::new_inner(count)?;
+
+        for node in testnet.nodes.clone() {
+            node.as_async().bootstrapped().await;
+        }
+
+        Ok(testnet)
+    }
+
+    fn new_inner(count: usize) -> Result<Testnet, std::io::Error> {
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
 
@@ -1065,5 +1089,17 @@ mod test {
             client.put_mutable(MutableItem::new(signer, &[], 1002, None), Some(1000)),
             Err(PutMutableError::Concurrency(ConcurrencyError::CasFailed))
         ));
+    }
+
+    #[test]
+    fn populate_bootstrapping_node_routing_table() {
+        let size = 3;
+
+        let testnet = Testnet::new(size).unwrap();
+
+        assert!(testnet
+            .nodes
+            .iter()
+            .all(|n| n.to_bootstrap().len() == size - 1));
     }
 }
