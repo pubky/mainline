@@ -305,10 +305,10 @@ mod test {
 
         let node = Node::random();
 
-        assert!(!table.contains(&node.id()));
+        assert!(!table.contains(node.id()));
 
         table.add(node.clone());
-        assert!(table.contains(&node.id()));
+        assert!(table.contains(node.id()));
     }
 
     #[test]
@@ -318,10 +318,10 @@ mod test {
         let node = Node::random();
 
         table.add(node.clone());
-        assert!(table.contains(&node.id()));
+        assert!(table.contains(node.id()));
 
         table.remove(node.id());
-        assert!(!table.contains(&node.id()));
+        assert!(!table.contains(node.id()));
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod test {
 
         for i in 0..MAX_BUCKET_SIZE_K {
             let node = Node::random();
-            assert!(bucket.add(node), "Failed to add node {}", i);
+            assert!(bucket.add(node), "Failed to add node {i}");
         }
 
         let node = Node::random();

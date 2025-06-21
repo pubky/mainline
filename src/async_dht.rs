@@ -657,7 +657,7 @@ mod test {
                 futures::executor::block_on(async {
                     let result = dht.put_mutable(item, None).await;
                     if i == 0 {
-                        assert!(matches!(result, Ok(_)))
+                        assert!(result.is_ok())
                     } else {
                         assert!(matches!(
                             result,

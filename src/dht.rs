@@ -981,7 +981,7 @@ mod test {
             let handle = std::thread::spawn(move || {
                 let result = client.put_mutable(item, None);
                 if i == 0 {
-                    assert!(matches!(result, Ok(_)))
+                    assert!(result.is_ok())
                 } else {
                     assert!(matches!(
                         result,

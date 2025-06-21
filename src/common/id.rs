@@ -158,9 +158,9 @@ fn id_prefix_ipv4(ip: Ipv4Addr, r: u8) -> [u8; 3] {
 impl Display for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         #[allow(clippy::format_collect)]
-        let hex_chars: String = self.0.iter().map(|byte| format!("{:02x}", byte)).collect();
+        let hex_chars: String = self.0.iter().map(|byte| format!("{byte:02x}")).collect();
 
-        write!(f, "{}", hex_chars)
+        write!(f, "{hex_chars}")
     }
 }
 
@@ -207,7 +207,7 @@ impl FromStr for Id {
 
 impl Debug for Id {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "Id({})", self)
+        write!(f, "Id({self})")
     }
 }
 
