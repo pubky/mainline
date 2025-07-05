@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::net::SocketAddrV4;
 
-use flume::{Receiver, Sender, TryRecvError};
+use flume::{Receiver, RecvError, Sender, TryRecvError};
+use tracing::info;
 
+use crate::rpc::config::Config;
 use crate::rpc::{GetRequestSpecific, Info, PutError, Response, Rpc};
 use crate::{Id, MutableItem, Node, PutRequestSpecific};
 
+#[derive(Debug)]
 pub struct Actor {
     rpc: Rpc,
     receiver: Receiver<ActorMessage>,
@@ -14,16 +17,22 @@ pub struct Actor {
 }
 
 impl Actor {
-    pub fn new(rpc: Rpc, receiver: Receiver<ActorMessage>) -> Self {
-        Self {
+    pub fn new(config: Config, receiver: Receiver<ActorMessage>) -> std::io::Result<Self> {
+        let rpc = Rpc::new(config)?;
+
+        let address = rpc.local_addr();
+        info!(?address, "Mainline DHT listening");
+
+        Ok(Self {
             rpc,
             receiver,
             get_senders: HashMap::new(),
             put_senders: HashMap::new(),
-        }
+        })
     }
 
-    pub fn tick(&mut self) -> bool {
+    /// Returns an error if the actor's sender is dropped.
+    pub fn tick(&mut self) -> Result<(), RecvError> {
         match self.receiver.try_recv() {
             Ok(actor_message) => match actor_message {
                 ActorMessage::Check(sender) => {
@@ -66,7 +75,7 @@ impl Actor {
             Err(TryRecvError::Disconnected) => {
                 // Node was dropped, kill this thread.
                 tracing::debug!("mainline::Dht's actor thread was shutdown after Drop.");
-                return false;
+                return Err(RecvError::Disconnected);
             }
             Err(TryRecvError::Empty) => {
                 // No op
@@ -111,7 +120,7 @@ impl Actor {
             }
         }
 
-        true
+        Ok(())
     }
 }
 

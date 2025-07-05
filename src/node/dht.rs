@@ -8,17 +8,13 @@ use std::{
 
 use flume::{Receiver, Sender};
 
-use tracing::info;
-
 use crate::{
     common::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    rpc::{
-        to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError, Rpc,
-    },
+    rpc::{to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError},
     Node, ServerSettings,
 };
 
@@ -122,6 +118,14 @@ impl DhtBuilder {
     pub fn build(&self) -> Result<Dht, std::io::Error> {
         Dht::new(self.0.clone())
     }
+
+    /// Create a Dht node.
+    fn build_to_thread(
+        &self,
+        thread_sender: Sender<(Config, Receiver<ActorMessage>)>,
+    ) -> Result<Dht, std::io::Error> {
+        Dht::new_to_thread(self.0.clone(), thread_sender)
+    }
 }
 
 impl Dht {
@@ -142,6 +146,25 @@ impl Dht {
             .send(ActorMessage::Check(tx))
             .expect("actor thread unexpectedly shutdown");
 
+        rx.recv().expect("actor thread unexpectedly shutdown")?;
+
+        Ok(Dht(sender))
+    }
+
+    fn new_to_thread(
+        config: Config,
+        thread_sender: Sender<(Config, Receiver<ActorMessage>)>,
+    ) -> Result<Self, std::io::Error> {
+        let (sender, receiver) = flume::unbounded();
+
+        thread_sender
+            .send((config, receiver))
+            .expect("simulation thread unexpectedly shutdown");
+
+        let (tx, rx) = flume::bounded(1);
+        sender
+            .send(ActorMessage::Check(tx))
+            .expect("actor thread unexpectedly shutdown");
         rx.recv().expect("actor thread unexpectedly shutdown")?;
 
         Ok(Dht(sender))
@@ -496,19 +519,12 @@ impl<T> Iterator for GetIterator<T> {
 }
 
 fn run(config: Config, receiver: Receiver<ActorMessage>) {
-    match Rpc::new(config) {
-        Ok(rpc) => {
-            let address = rpc.local_addr();
-            info!(?address, "Mainline DHT listening");
-
-            let mut actor = Actor::new(rpc, receiver);
-
-            loop {
-                if !actor.tick() {
-                    break;
-                };
-            }
-        }
+    match Actor::new(config, receiver.clone()) {
+        Ok(mut actor) => loop {
+            if actor.tick().is_err() {
+                break;
+            };
+        },
         Err(err) => {
             if let Ok(ActorMessage::Check(sender)) = receiver.try_recv() {
                 let _ = sender.send(Err(err));
@@ -557,33 +573,91 @@ impl Testnet {
         Ok(testnet)
     }
 
+    /// Similar to [Self::new] but all nodes are sharing the same Udpsocket,
+    /// to enable simulating larger networks.
+    pub fn new_simulation(count: usize) -> Result<Testnet, std::io::Error> {
+        Testnet::new_inner(count, true)
+    }
+
     fn new_inner(count: usize, simulated: bool) -> Result<Testnet, std::io::Error> {
+        let count = if count < 3 {
+            tracing::warn!("Warning: Too few testnet nodes ({count}), will create 3 instead.");
+
+            3
+        } else if !simulated && count > 100 {
+            tracing::warn!("Warning: Too many testnet nodes ({count}), will create 100 instead. Consider using `Testnet::new_simulation()` for more.");
+
+            100
+        } else {
+            count
+        };
+
         let mut nodes: Vec<Dht> = vec![];
         let mut bootstrap = vec![];
 
-        for i in 1..=count {
-            if i >= 100 && i % 100 == 0 {
-                println!("Created {i} out of {count} nodes..");
+        if simulated {
+            let (thread_tx, thread_rx) = flume::unbounded::<(Config, Receiver<ActorMessage>)>();
+
+            thread::Builder::new()
+                .name("Simulation actors thread".to_string())
+                .spawn(move || {
+                    let mut actors = vec![];
+
+                    loop {
+                        if let Ok((config, actor_rx)) = thread_rx.recv() {
+                            match Actor::new(config, actor_rx.clone()) {
+                                Ok(actor) => {
+                                    actors.push(actor);
+                                }
+                                Err(err) => {
+                                    if let Ok(ActorMessage::Check(sender)) = actor_rx.try_recv() {
+                                        let _ = sender.send(Err(err));
+                                    }
+                                }
+                            };
+                        }
+
+                        for actor in actors.iter_mut() {
+                            // If the actor was dropped,
+                            // it must be that the Testnet is being dropped.
+                            let _ = actor.tick();
+                        }
+                    }
+                })?;
+
+            for i in 0..count {
+                let mut builder = Dht::builder();
+
+                builder
+                    .simulated()
+                    // The more nodes, the more packets will lag..
+                    .request_timeout(Duration::from_secs(count.max(10) as u64));
+
+                let node = if i == 0 {
+                    let node = builder.server_mode().no_bootstrap().build()?;
+                    bootstrap.push(node.info().local_addr().to_string());
+                    node
+                } else {
+                    builder
+                        .server_mode()
+                        .bootstrap(&bootstrap)
+                        .build_to_thread(thread_tx.clone())?
+                };
+
+                nodes.push(node)
             }
+        } else {
+            for i in 0..count {
+                let node = if i == 0 {
+                    let node = Dht::builder().server_mode().no_bootstrap().build()?;
+                    bootstrap.push(node.info().local_addr().to_string());
+                    node
+                } else {
+                    Dht::builder().server_mode().bootstrap(&bootstrap).build()?
+                };
 
-            let mut builder = Dht::builder();
-
-            if simulated {
-                builder.simulated();
-            };
-
-            // The more nodes, the more packets will lag..
-            builder.request_timeout(Duration::from_secs(count as u64));
-
-            let node = if i == 1 {
-                let node = builder.server_mode().no_bootstrap().build()?;
-                bootstrap.push(node.info().local_addr().to_string());
-                node
-            } else {
-                builder.server_mode().bootstrap(&bootstrap).build()?
-            };
-
-            nodes.push(node)
+                nodes.push(node)
+            }
         }
 
         let testnet = Self {
@@ -632,7 +706,7 @@ pub enum PutMutableError {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use std::{str::FromStr, time::Instant};
 
     use crate::rpc::ConcurrencyError;
     use ed25519_dalek::SigningKey;
@@ -1013,5 +1087,48 @@ mod test {
             .nodes
             .iter()
             .all(|n| n.to_bootstrap().len() == size - 1));
+    }
+
+    #[test]
+    fn simulation_smoke_test() {
+        // 400 is more than what UdpSocket would allow,
+        // change it to higher values if you want.
+        let count = 400;
+
+        let instant = Instant::now();
+        let testnet = Testnet::new_simulation(count).unwrap();
+
+        println!(
+            "Finished creating a testnet of {count} nodes in {} seconds.",
+            instant.elapsed().as_secs()
+        );
+
+        let a = testnet.new_node().build().unwrap();
+        let b = testnet.new_node().build().unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let key = signer.verifying_key().to_bytes();
+        let seq = 1000;
+        let value = b"Hello World!";
+
+        let item = MutableItem::new(signer.clone(), value, seq, None);
+
+        a.put_mutable(item.clone(), None).unwrap();
+
+        let _response_first = b
+            .get_mutable(&key, None, None)
+            .next()
+            .expect("No mutable values");
+
+        let response_second = b
+            .get_mutable(&key, None, None)
+            .next()
+            .expect("No mutable values");
+
+        assert_eq!(&response_second, &item);
     }
 }
