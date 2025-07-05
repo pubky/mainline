@@ -384,7 +384,7 @@ mod test {
     use crate::{
         common::PutMutableRequestArguments,
         errors::{ConcurrencyError, PutError, PutMutableError},
-        Dht, Id, MutableItem, PutRequestSpecific, Testnet,
+        Id, MutableItem, PutRequestSpecific, Testnet,
     };
 
     use crate::node::actor::ActorMessage;
@@ -394,16 +394,8 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
-            let b = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let a = testnet.new_node().build().unwrap().as_async();
+            let b = testnet.new_node().build().unwrap().as_async();
 
             let info_hash = Id::random();
 
@@ -424,16 +416,8 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
-            let b = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let a = testnet.new_node().build().unwrap().as_async();
+            let b = testnet.new_node().build().unwrap().as_async();
 
             let value = b"Hello World!";
             let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
@@ -453,16 +437,8 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
-            let b = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let a = testnet.new_node().build().unwrap().as_async();
+            let b = testnet.new_node().build().unwrap().as_async();
 
             let signer = SigningKey::from_bytes(&[
                 56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -493,16 +469,8 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
-            let b = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let a = testnet.new_node().build().unwrap().as_async();
+            let b = testnet.new_node().build().unwrap().as_async();
 
             let signer = SigningKey::from_bytes(&[
                 56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -532,11 +500,7 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let a = testnet.new_node().build().unwrap().as_async();
 
             let first = a.put_immutable(&[1, 2, 3]).await;
             let second = a.put_immutable(&[1, 2, 3]).await;
@@ -552,16 +516,8 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let a = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
-            let b = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let a = testnet.new_node().build().unwrap().as_async();
+            let b = testnet.new_node().build().unwrap().as_async();
 
             let signer = SigningKey::from_bytes(&[
                 56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -597,11 +553,7 @@ mod test {
     fn concurrent_put_mutable_same() {
         let testnet = Testnet::new(10).unwrap();
 
-        let dht = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .build()
-            .unwrap()
-            .as_async();
+        let dht = testnet.new_node().build().unwrap().as_async();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -635,11 +587,7 @@ mod test {
     fn concurrent_put_mutable_different() {
         let testnet = Testnet::new(10).unwrap();
 
-        let dht = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .build()
-            .unwrap()
-            .as_async();
+        let dht = testnet.new_node().build().unwrap().as_async();
 
         let mut handles = vec![];
 
@@ -685,11 +633,7 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let dht = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let dht = testnet.new_node().build().unwrap().as_async();
 
             let signer = SigningKey::from_bytes(&[
                 56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -734,11 +678,7 @@ mod test {
         async fn test() {
             let testnet = Testnet::new(10).unwrap();
 
-            let dht = Dht::builder()
-                .bootstrap(&testnet.bootstrap)
-                .build()
-                .unwrap()
-                .as_async();
+            let dht = testnet.new_node().build().unwrap().as_async();
 
             let signer = SigningKey::from_bytes(&[
                 56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
