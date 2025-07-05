@@ -9,17 +9,22 @@
 
 mod common;
 #[cfg(feature = "node")]
-mod dht;
+mod node {
+    mod actor;
+    #[cfg(feature = "async")]
+    pub mod async_dht;
+    pub mod dht;
+}
 mod rpc;
 
 // Public modules
 #[cfg(feature = "async")]
-pub mod async_dht;
+pub use node::async_dht;
 
 pub use common::{Id, MutableItem, Node, RoutingTable};
 
 #[cfg(feature = "node")]
-pub use dht::{Dht, DhtBuilder, Testnet};
+pub use node::dht::{Dht, DhtBuilder, Testnet};
 #[cfg(feature = "node")]
 pub use rpc::{
     messages::{MessageType, PutRequestSpecific, RequestSpecific},
@@ -34,7 +39,7 @@ pub mod errors {
     #[cfg(feature = "node")]
     pub use super::common::ErrorSpecific;
     #[cfg(feature = "node")]
-    pub use super::dht::PutMutableError;
+    pub use super::node::dht::PutMutableError;
     #[cfg(feature = "node")]
     pub use super::rpc::{ConcurrencyError, PutError, PutQueryError};
 

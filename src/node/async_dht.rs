@@ -14,7 +14,8 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
+    node::actor::{ActorMessage, ResponseSender},
+    node::dht::{Dht, PutMutableError},
     rpc::{GetRequestSpecific, Info, PutError, PutQueryError},
 };
 
@@ -380,9 +381,13 @@ mod test {
     use ed25519_dalek::SigningKey;
     use futures::StreamExt;
 
-    use crate::{dht::Testnet, rpc::ConcurrencyError};
+    use crate::{
+        common::PutMutableRequestArguments,
+        errors::{ConcurrencyError, PutError, PutMutableError},
+        Dht, Id, MutableItem, PutRequestSpecific, Testnet,
+    };
 
-    use super::*;
+    use crate::node::actor::ActorMessage;
 
     #[test]
     fn announce_get_peer() {
