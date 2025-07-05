@@ -1,13 +1,15 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
 use std::cmp::Ordering;
-use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
 use super::config::Config;
+
+mod udp;
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
 const MTU: usize = 2048;
@@ -21,7 +23,7 @@ pub const READ_TIMEOUT: Duration = Duration::from_millis(10);
 #[derive(Debug)]
 pub struct KrpcSocket {
     next_tid: u16,
-    socket: UdpSocket,
+    socket: Box<dyn udp::Udp>,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
     /// We don't need a HashMap, since we know the capacity is `65536` requests.
@@ -40,15 +42,14 @@ pub struct InflightRequest {
 
 impl KrpcSocket {
     pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
-        let request_timeout = config.request_timeout;
-        let port = config.port;
-
-        let socket = if let Some(port) = port {
-            UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
+        let mut socket: Box<dyn udp::Udp> = if config.simulated {
+            udp::sim::UdpSocket::bind()?
+        } else if let Some(port) = config.port {
+            udp::real::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
-            match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
+            match udp::real::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
                 Ok(socket) => Ok(socket),
-                Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
+                Err(_) => udp::real::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
             }?
         };
 
@@ -63,7 +64,7 @@ impl KrpcSocket {
             socket,
             next_tid: 0,
             server_mode: config.server_mode,
-            request_timeout,
+            request_timeout: config.request_timeout,
             inflight_requests: Vec::with_capacity(u16::MAX as usize),
 
             local_addr,
@@ -303,7 +304,7 @@ impl KrpcSocket {
 
     /// Send a raw dht message
     fn send(&mut self, address: SocketAddrV4, message: Message) -> Result<(), SendMessageError> {
-        self.socket.send_to(&message.to_bytes()?, address)?;
+        self.socket.send_to(&message.to_bytes()?, address.into())?;
         trace!(context = "socket_message_sending", message = ?message);
         Ok(())
     }

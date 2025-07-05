@@ -35,6 +35,11 @@ pub struct Config {
     ///
     /// Defaults to None, where we depend on suggestions from responding nodes.
     pub public_ip: Option<Ipv4Addr>,
+    /// Use a simulated UdpSocket to enable local simulation with thousands or millions of nodes,
+    /// which wouldn't be possible to do with opening real udp sockets.
+    ///
+    /// Any custom [Self::port] will be ignored.
+    pub simulated: bool,
 }
 
 impl Default for Config {
@@ -46,6 +51,7 @@ impl Default for Config {
             server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
+            simulated: false,
         }
     }
 }
