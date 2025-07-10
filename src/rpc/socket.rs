@@ -52,9 +52,6 @@ impl KrpcSocket {
             }?
         };
 
-        // Increase OS-level UDP socket buffers to prevent packet loss under high throughput.
-        // The default buffer size (~128KB) is often too small for DHT traffic at scale.
-        // This sets the size for both SO_RCVBUF and SO_SNDBUF.
         set_socket_buffers(&socket, UDP_SOCKET_BUFFER_SIZE)?;
 
         let local_addr = match socket.local_addr()? {
@@ -329,6 +326,9 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
     a.ip() == b.ip()
 }
 
+// Increase OS-level UDP socket buffers to prevent packet loss under high throughput.
+// The default buffer size (~128KB) is often too small for DHT traffic at scale.
+// This sets the size for both SO_RCVBUF and SO_SNDBUF.
 #[cfg(unix)]
 pub fn set_socket_buffers(socket: &UdpSocket, size: i32) -> std::io::Result<()> {
     use std::io::Error;
