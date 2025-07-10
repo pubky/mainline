@@ -3,7 +3,8 @@
 use libc::{setsockopt, SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
 use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
-use std::os::unix::io::AsRawFd; // On Linux/macOS
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
 
@@ -367,6 +368,7 @@ fn set_socket_buffers(socket: &UdpSocket, size: i32) {
 fn set_socket_buffers(_socket: &UdpSocket, _size: i32) {
     // no-op
 }
+
 #[cfg(test)]
 mod test {
     use std::thread;
