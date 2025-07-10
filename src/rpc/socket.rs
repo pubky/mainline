@@ -55,7 +55,7 @@ impl KrpcSocket {
         // Increase OS-level UDP socket buffers to prevent packet loss under high throughput.
         // The default buffer size (~128KB) is often too small for DHT traffic at scale.
         // This sets the size for both SO_RCVBUF and SO_SNDBUF.
-        set_socket_buffers(&socket, UDP_SOCKET_BUFFER_SIZE);
+        set_socket_buffers(&socket, UDP_SOCKET_BUFFER_SIZE)?;
 
         let local_addr = match socket.local_addr()? {
             SocketAddr::V4(addr) => addr,
@@ -330,43 +330,49 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
 }
 
 #[cfg(unix)]
-fn set_socket_buffers(socket: &UdpSocket, size: i32) {
+pub fn set_socket_buffers(socket: &UdpSocket, size: i32) -> std::io::Result<()> {
+    use std::io::Error;
+
+    // Extract raw file descriptor for FFI calls
     let fd = socket.as_raw_fd();
 
-    unsafe {
-        let recv = setsockopt(
+    // Increase receive buffer to reduce packet drops under high load.
+    let recv = unsafe {
+        setsockopt(
             fd,
             SOL_SOCKET,
             SO_RCVBUF,
             &size as *const _ as *const _,
             std::mem::size_of_val(&size) as u32,
-        );
-        if recv != 0 {
-            eprintln!(
-                "Failed to set SO_RCVBUF: {}",
-                std::io::Error::last_os_error()
-            );
-        }
+        )
+    };
 
-        let send = setsockopt(
+    // OS may clamp the size or reject large values depending on sysctl limits.
+    if recv != 0 {
+        return Err(Error::last_os_error());
+    }
+
+    // Increase send buffer; typically less critical for DHT than receive but still helpful for bursts.
+    let send = unsafe {
+        setsockopt(
             fd,
             SOL_SOCKET,
             SO_SNDBUF,
             &size as *const _ as *const _,
             std::mem::size_of_val(&size) as u32,
-        );
-        if send != 0 {
-            eprintln!(
-                "Failed to set SO_SNDBUF: {}",
-                std::io::Error::last_os_error()
-            );
-        }
+        )
+    };
+    if send != 0 {
+        return Err(Error::last_os_error());
     }
+
+    Ok(())
 }
 
 #[cfg(not(unix))]
-fn set_socket_buffers(_socket: &UdpSocket, _size: i32) {
-    // no-op
+fn set_socket_buffers(_socket: &UdpSocket, _size: i32) -> std::io::Result<()> {
+    // No-op on non-Unix platforms; add implementation if needed (e.g., Windows WSA).
+    Ok(())
 }
 
 #[cfg(test)]
