@@ -1,6 +1,7 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
 use libc::{setsockopt, SOL_SOCKET, SO_RCVBUF, SO_SNDBUF};
+use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::os::unix::io::AsRawFd; // On Linux/macOS
 use std::time::{Duration, Instant};
@@ -25,14 +26,13 @@ pub struct KrpcSocket {
     socket: UdpSocket,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
-    inflight_requests: Vec<InflightRequest>,
+    inflight_requests: BTreeMap<u16, InflightRequest>,
 
     local_addr: SocketAddrV4,
 }
 
 #[derive(Debug)]
 pub struct InflightRequest {
-    tid: u16,
     to: SocketAddrV4,
     sent_at: Instant,
 }
@@ -68,7 +68,7 @@ impl KrpcSocket {
             next_tid: 0,
             server_mode: config.server_mode,
             request_timeout,
-            inflight_requests: Vec::with_capacity(u16::MAX as usize),
+            inflight_requests: BTreeMap::new(),
 
             local_addr,
         })
@@ -99,9 +99,7 @@ impl KrpcSocket {
 
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: &u16) -> bool {
-        self.inflight_requests
-            .iter()
-            .any(|r| &r.tid == transaction_id)
+        self.inflight_requests.contains_key(transaction_id)
     }
 
     /// Send a request to the given address and return the transaction_id
@@ -110,12 +108,13 @@ impl KrpcSocket {
         trace!(context = "socket_message_sending", message = ?message);
 
         let tid = message.transaction_id;
-        self.inflight_requests.push(InflightRequest {
+        self.inflight_requests.insert(
             tid,
-            to: address,
-            sent_at: Instant::now(),
-        });
-
+            InflightRequest {
+                to: address,
+                sent_at: Instant::now(),
+            },
+        );
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending request message");
         });
@@ -152,7 +151,7 @@ impl KrpcSocket {
 
         let timeout = self.request_timeout;
         self.inflight_requests
-            .retain(|r| r.sent_at.elapsed() <= timeout);
+            .retain(|_, req| req.sent_at.elapsed() <= timeout);
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
@@ -237,13 +236,9 @@ impl KrpcSocket {
     // === Private Methods ===
 
     fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
-        if let Some(pos) = self
-            .inflight_requests
-            .iter()
-            .position(|r| r.tid == message.transaction_id)
-        {
-            if compare_socket_addr(&self.inflight_requests[pos].to, from) {
-                self.inflight_requests.remove(pos);
+        // Positive or an error response or to an inflight request.
+        if let Some(request) = self.inflight_requests.remove(&message.transaction_id) {
+            if compare_socket_addr(&request.to, from) {
                 return true;
             } else {
                 trace!(
@@ -442,11 +437,13 @@ mod test {
             tx.send(server_address).unwrap();
 
             loop {
-                server.inflight_requests.push(InflightRequest {
-                    tid: 8,
-                    to: client_address,
-                    sent_at: Instant::now(),
-                });
+                server.inflight_requests.insert(
+                    8,
+                    InflightRequest {
+                        to: client_address,
+                        sent_at: Instant::now(),
+                    },
+                );
 
                 if let Some((message, from)) = server.recv_from() {
                     assert_eq!(from.port(), client_address.port());
@@ -480,11 +477,13 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.push(InflightRequest {
-            tid: 8,
-            to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
-            sent_at: Instant::now(),
-        });
+        server.inflight_requests.insert(
+            8,
+            InflightRequest {
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
+                sent_at: Instant::now(),
+            },
+        );
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
@@ -506,7 +505,86 @@ mod test {
     }
 
     #[test]
-    fn packet_loss() {
+    fn packet_loss_blocking() {
+        let num_clients = 10;
+        let requests_per_client = 1000;
+        let client_request_rate = std::time::Duration::from_micros(500); // 2000 req/sec per client
+        let test_timeout = std::time::Duration::from_secs(10);
+
+        let server = std::sync::Arc::new(std::sync::Mutex::new(KrpcSocket::server().unwrap()));
+        let server_addr = server.lock().unwrap().local_addr();
+
+        let server_clone = std::sync::Arc::clone(&server);
+        let server_handle = std::thread::spawn(move || {
+            let mut responses = 0;
+            let start = std::time::Instant::now();
+            while start.elapsed() < test_timeout {
+                let mut server = server_clone.lock().unwrap();
+                if let Some((msg, from)) = server.recv_from() {
+                    if let MessageType::Request(_) = msg.message_type {
+                        let response = ResponseSpecific::Ping(PingResponseArguments {
+                            responder_id: Id::random(),
+                        });
+                        server.response(from, msg.transaction_id, response);
+                        responses += 1;
+                    }
+                }
+                drop(server);
+            }
+            println!("Server sent {} responses", responses);
+        });
+
+        let mut client_handles = Vec::new();
+        for _ in 0..num_clients {
+            let server_addr = server_addr.clone();
+            let handle = std::thread::spawn(move || {
+                let mut client = KrpcSocket::client().unwrap();
+                let request = RequestSpecific {
+                    requester_id: Id::random(),
+                    request_type: RequestTypeSpecific::Ping,
+                };
+                let mut sent = 0;
+                let mut received = 0;
+                for _ in 0..requests_per_client {
+                    client.request(server_addr, request.clone());
+                    sent += 1;
+                    std::thread::sleep(client_request_rate);
+                    // Try to receive responses quickly
+                    for _ in 0..2 {
+                        if let Some((msg, _)) = client.recv_from() {
+                            if let MessageType::Response(_) = msg.message_type {
+                                received += 1;
+                            }
+                        }
+                    }
+                }
+                let response_timeout = std::time::Duration::from_secs(1);
+                let response_start = std::time::Instant::now();
+                while response_start.elapsed() < response_timeout && received < sent {
+                    if let Some((msg, _)) = client.recv_from() {
+                        if let MessageType::Response(_) = msg.message_type {
+                            received += 1;
+                        }
+                    }
+                }
+                println!(
+                    "Client sent {}, received {} (loss: {:.1}%)",
+                    sent,
+                    received,
+                    100.0 * (sent - received) as f64 / sent as f64
+                );
+            });
+            client_handles.push(handle);
+        }
+
+        for handle in client_handles {
+            handle.join().unwrap();
+        }
+        server_handle.join().unwrap();
+    }
+
+    #[test]
+    fn packet_loss_non_blocking() {
         let num_clients = 10;
         let requests_per_client = 1000;
         let client_request_rate = std::time::Duration::from_micros(500); // 2000 req/sec per client
@@ -621,7 +699,7 @@ mod test {
         let mut client = KrpcSocket::client().unwrap();
         let mut sent = 0;
         let mut received = 0;
-        let mut inflight = Vec::new();
+        let mut inflight = BTreeMap::new();
         let start = Instant::now();
 
         // Simulate client sending as many requests as possible in a single thread
@@ -633,24 +711,18 @@ mod test {
                     request_type: RequestTypeSpecific::Ping,
                 },
             );
-            inflight.push(InflightRequest {
-                tid,
-                to: server_addr,
-                sent_at: Instant::now(),
-            });
+            inflight.insert(tid, Instant::now());
             sent += 1;
 
             // Drain responses if available
             while let Some((msg, _)) = client.recv_from() {
                 if let MessageType::Response(_) = msg.message_type {
-                    if let Some(pos) = inflight.iter().position(|r| r.tid == msg.transaction_id) {
-                        inflight.remove(pos);
-                        received += 1;
-                    }
+                    inflight.remove(&msg.transaction_id);
+                    received += 1;
                 }
             }
 
-            inflight.retain(|r| r.sent_at.elapsed() < timeout);
+            inflight.retain(|_, t| t.elapsed() < timeout);
         }
 
         // Give extra time to receive late responses
@@ -658,9 +730,7 @@ mod test {
         while end_wait.elapsed() < timeout {
             while let Some((msg, _)) = client.recv_from() {
                 if let MessageType::Response(_) = msg.message_type {
-                    if let Some(pos) = inflight.iter().position(|r| r.tid == msg.transaction_id) {
-                        inflight.remove(pos);
-                    }
+                    inflight.remove(&msg.transaction_id);
                     received += 1;
                 }
             }
@@ -722,7 +792,7 @@ mod test {
 
             let handle = std::thread::spawn(move || {
                 let mut client = KrpcSocket::client().unwrap();
-                let mut inflight = Vec::new();
+                let mut inflight = BTreeMap::new();
                 let start = Instant::now();
 
                 while start.elapsed() < test_duration {
@@ -733,35 +803,25 @@ mod test {
                             request_type: RequestTypeSpecific::Ping,
                         },
                     );
-                    inflight.push(InflightRequest {
-                        tid,
-                        to: server_addr,
-                        sent_at: Instant::now(),
-                    });
+                    inflight.insert(tid, Instant::now());
                     sent_total.fetch_add(1, Ordering::Relaxed);
 
                     while let Some((msg, _)) = client.recv_from() {
                         if let MessageType::Response(_) = msg.message_type {
-                            if let Some(pos) =
-                                inflight.iter().position(|r| r.tid == msg.transaction_id)
-                            {
-                                inflight.remove(pos);
+                            if inflight.remove(&msg.transaction_id).is_some() {
                                 received_total.fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
 
-                    inflight.retain(|r| r.sent_at.elapsed() < timeout);
+                    inflight.retain(|_, t| t.elapsed() < timeout);
                 }
 
                 let end_wait = Instant::now();
                 while end_wait.elapsed() < timeout {
                     while let Some((msg, _)) = client.recv_from() {
                         if let MessageType::Response(_) = msg.message_type {
-                            if let Some(pos) =
-                                inflight.iter().position(|r| r.tid == msg.transaction_id)
-                            {
-                                inflight.remove(pos);
+                            if inflight.remove(&msg.transaction_id).is_some() {
                                 received_total.fetch_add(1, Ordering::Relaxed);
                             }
                         }
