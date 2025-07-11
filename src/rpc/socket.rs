@@ -52,7 +52,7 @@ impl KrpcSocket {
             }?
         };
 
-        set_socket_buffers(&socket, UDP_SOCKET_BUFFER_SIZE)?;
+        set_socket_buffers(&socket, UDP_SOCKET_BUFFER_SIZE);
 
         let local_addr = match socket.local_addr()? {
             SocketAddr::V4(addr) => addr,
@@ -330,9 +330,7 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
 // The default buffer size (~128KB) is often too small for DHT traffic at scale.
 // This sets the size for both SO_RCVBUF and SO_SNDBUF.
 #[cfg(unix)]
-pub fn set_socket_buffers(socket: &UdpSocket, size: i32) -> std::io::Result<()> {
-    use std::io::Error;
-
+pub fn set_socket_buffers(socket: &UdpSocket, size: i32) {
     // Extract raw file descriptor for FFI calls
     let fd = socket.as_raw_fd();
 
@@ -349,10 +347,10 @@ pub fn set_socket_buffers(socket: &UdpSocket, size: i32) -> std::io::Result<()> 
 
     // OS may clamp the size or reject large values depending on sysctl limits.
     if recv != 0 {
-        return Err(Error::last_os_error());
+        println!("Failed to set SO_RCVBUF size to {}", size);
     }
 
-    // Increase send buffer; typically less critical for DHT than receive but still helpful for bursts.
+    // Increase send buffer, typically less critical for DHT than receive but still helpful for bursts.
     let send = unsafe {
         setsockopt(
             fd,
@@ -363,16 +361,13 @@ pub fn set_socket_buffers(socket: &UdpSocket, size: i32) -> std::io::Result<()> 
         )
     };
     if send != 0 {
-        return Err(Error::last_os_error());
+        println!("Failed to set SO_SNDBUF size to {}", size);
     }
-
-    Ok(())
 }
 
 #[cfg(not(unix))]
-fn set_socket_buffers(_socket: &UdpSocket, _size: i32) -> std::io::Result<()> {
-    // No-op on non-Unix platforms; add implementation if needed (e.g., Windows WSA).
-    Ok(())
+fn set_socket_buffers(_socket: &UdpSocket, _size: i32) {
+    // No-op on non-Unix platforms, add implementation if needed (e.g., Windows WSA).
 }
 
 #[cfg(test)]
