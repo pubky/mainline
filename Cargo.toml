@@ -23,7 +23,6 @@ ed25519-dalek = "2.1.1"
 tracing = "0.1"
 lru = { version = "0.13.0", default-features = false }
 dyn-clone = "1.0.18"
-libc = "0.2.174"
 document-features = "0.2.10"
 
 # `node` dependencies
@@ -43,7 +42,6 @@ dashmap = "6.1"
 flume = "0.11.1"
 colored = "3.0.0"
 chrono = "0.4"
-num_cpus = "1.17.0"
 
 [features]
 ## Include [Dht] node.
