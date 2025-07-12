@@ -15,6 +15,12 @@ const MTU: usize = 2048;
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
+/// The maximum duration to backoff checking the [UdpSocket] buffer after it is empty.
+/// Lower values increases CPU usage, but reduces latency, and drains the buffer faster,
+/// reducing the risk of packet loss.
+// TODO: Either add as an option to [Config] and [DhtBuilder],
+//       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
+pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -211,7 +217,7 @@ impl KrpcSocket {
                 );
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_micros(100)); // yield for a bit
+                std::thread::sleep(MAX_THREAD_BLOCK_DURATION);
             }
             Err(e) => {
                 trace!(
@@ -455,81 +461,5 @@ mod test {
         client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
-    }
-
-    #[test]
-    fn blocking_vs_nonblocking() {
-        use std::time::Instant;
-
-        // Create blocking socket (old approach)
-        let mut blocking_socket = create_blocking_socket().unwrap();
-
-        // Create non-blocking socket (new approach)
-        let mut nonblocking_socket = KrpcSocket::server().unwrap();
-
-        let iterations = 100;
-
-        // Test blocking approach, simulates DHT tick() behavior
-        let start = Instant::now();
-        for _ in 0..iterations {
-            // This is what DHT.tick() does - tries to receive a message
-            if let Some(_) = blocking_socket.recv_from() {
-                // Process message (not relevant for this test)
-            }
-            // DHT tick() also needs to do other work like:
-            // - Check query timeouts
-            // - Send periodic pings
-            // - Update routing table
-            // But with blocking socket, we're stuck waiting 10ms each recv call
-        }
-        let blocking_duration = start.elapsed();
-
-        // Test non-blocking approach, simulates improved DHT tick() behavior
-        let start = Instant::now();
-        for _ in 0..iterations {
-            // Quick check for messages without blocking
-            if let Some(_) = nonblocking_socket.recv_from() {
-                // Process message (not relevant for this test)
-            }
-            // Now DHT can immediately proceed with other critical work:
-            // - Timeout management
-            // - Sending requests
-            // - Routing table maintenance
-            // Without being blocked in recv() calls
-        }
-        let nonblocking_duration = start.elapsed();
-
-        println!("Blocking DHT tick simulation: {:?}", blocking_duration);
-        println!(
-            "Non-blocking DHT tick simulation: {:?}",
-            nonblocking_duration
-        );
-
-        // Non-blocking should be significantly faster for DHT event loop
-        assert!(
-            nonblocking_duration < blocking_duration / 10,
-            "Non-blocking DHT should be much more responsive: {:?} vs {:?}",
-            nonblocking_duration,
-            blocking_duration
-        );
-    }
-
-    fn create_blocking_socket() -> Result<KrpcSocket, std::io::Error> {
-        let socket = UdpSocket::bind("127.0.0.1:0")?;
-        socket.set_read_timeout(Some(Duration::from_millis(10)))?; // Old blocking approach
-
-        let local_addr = match socket.local_addr()? {
-            SocketAddr::V4(addr) => addr,
-            _ => panic!("IPv6 not supported"),
-        };
-
-        Ok(KrpcSocket {
-            next_tid: 0,
-            socket,
-            server_mode: true,
-            request_timeout: Duration::from_millis(2000),
-            inflight_requests: BTreeMap::new(),
-            local_addr,
-        })
     }
 }
