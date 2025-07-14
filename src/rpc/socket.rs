@@ -1,6 +1,6 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
-use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
@@ -15,7 +15,12 @@ const MTU: usize = 2048;
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-pub const READ_TIMEOUT: Duration = Duration::from_millis(10);
+/// The maximum duration to backoff checking the [UdpSocket] buffer after it is empty.
+/// Lower values increases CPU usage, but reduces latency, and drains the buffer faster,
+/// reducing the risk of packet loss.
+// TODO: Either add as an option to [Config] and [DhtBuilder],
+//       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
+pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -24,16 +29,13 @@ pub struct KrpcSocket {
     socket: UdpSocket,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
-    /// We don't need a HashMap, since we know the capacity is `65536` requests.
-    /// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
-    inflight_requests: Vec<InflightRequest>,
+    inflight_requests: BTreeMap<u16, InflightRequest>,
 
     local_addr: SocketAddrV4,
 }
 
 #[derive(Debug)]
 pub struct InflightRequest {
-    tid: u16,
     to: SocketAddrV4,
     sent_at: Instant,
 }
@@ -57,14 +59,14 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_read_timeout(Some(READ_TIMEOUT))?;
+        socket.set_nonblocking(true)?;
 
         Ok(Self {
             socket,
             next_tid: 0,
             server_mode: config.server_mode,
             request_timeout,
-            inflight_requests: Vec::with_capacity(u16::MAX as usize),
+            inflight_requests: BTreeMap::new(),
 
             local_addr,
         })
@@ -95,9 +97,7 @@ impl KrpcSocket {
 
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: &u16) -> bool {
-        self.inflight_requests
-            .binary_search_by(|request| request.tid.cmp(transaction_id))
-            .is_ok()
+        self.inflight_requests.contains_key(transaction_id)
     }
 
     /// Send a request to the given address and return the transaction_id
@@ -105,17 +105,17 @@ impl KrpcSocket {
         let message = self.request_message(request);
         trace!(context = "socket_message_sending", message = ?message);
 
-        self.inflight_requests.push(InflightRequest {
-            tid: message.transaction_id,
-            to: address,
-            sent_at: Instant::now(),
-        });
-
         let tid = message.transaction_id;
+        self.inflight_requests.insert(
+            tid,
+            InflightRequest {
+                to: address,
+                sent_at: Instant::now(),
+            },
+        );
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending request message");
         });
-
         tid
     }
 
@@ -147,79 +147,86 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        // Cleanup timed-out transaction_ids.
-        // Find the first timedout request, and delete all earlier requests.
-        match self.inflight_requests.binary_search_by(|request| {
-            if request.sent_at.elapsed() > self.request_timeout {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            }
-        }) {
-            Ok(index) => {
-                self.inflight_requests.drain(..index);
-            }
-            Err(index) => {
-                self.inflight_requests.drain(..index);
-            }
-        };
+        let timeout = self.request_timeout;
+        self.inflight_requests
+            .retain(|_, req| req.sent_at.elapsed() <= timeout);
 
-        if let Ok((amt, SocketAddr::V4(from))) = self.socket.recv_from(&mut buf) {
-            let bytes = &buf[..amt];
+        match self.socket.recv_from(&mut buf) {
+            Ok((amt, SocketAddr::V4(from))) => {
+                let bytes = &buf[..amt];
 
-            if from.port() == 0 {
-                trace!(
-                    context = "socket_validation",
-                    message = "Response from port 0"
-                );
-                return None;
-            }
+                if from.port() == 0 {
+                    trace!(
+                        context = "socket_validation",
+                        message = "Response from port 0"
+                    );
+                    return None;
+                }
 
-            match Message::from_bytes(bytes) {
-                Ok(message) => {
-                    // Parsed correctly.
-                    let should_return = match message.message_type {
-                        MessageType::Request(_) => {
-                            trace!(
-                                context = "socket_message_receiving",
-                                ?message,
-                                ?from,
-                                "Received request message"
-                            );
+                match Message::from_bytes(bytes) {
+                    Ok(message) => {
+                        let should_return = match message.message_type {
+                            MessageType::Request(_) => {
+                                trace!(
+                                    context = "socket_message_receiving",
+                                    ?message,
+                                    ?from,
+                                    "Received request message"
+                                );
+                                true
+                            }
+                            MessageType::Response(_) => {
+                                trace!(
+                                    context = "socket_message_receiving",
+                                    ?message,
+                                    ?from,
+                                    "Received response message"
+                                );
+                                self.is_expected_response(&message, &from)
+                            }
+                            MessageType::Error(_) => {
+                                trace!(
+                                    context = "socket_message_receiving",
+                                    ?message,
+                                    ?from,
+                                    "Received error message"
+                                );
+                                self.is_expected_response(&message, &from)
+                            }
+                        };
 
-                            true
+                        if should_return {
+                            return Some((message, from));
                         }
-                        MessageType::Response(_) => {
-                            trace!(
-                                context = "socket_message_receiving",
-                                ?message,
-                                ?from,
-                                "Received response message"
-                            );
-
-                            self.is_expected_response(&message, &from)
-                        }
-                        MessageType::Error(_) => {
-                            trace!(
-                                context = "socket_message_receiving",
-                                ?message,
-                                ?from,
-                                "Received error message"
-                            );
-
-                            self.is_expected_response(&message, &from)
-                        }
-                    };
-
-                    if should_return {
-                        return Some((message, from));
+                    }
+                    Err(error) => {
+                        trace!(
+                            context = "socket_error",
+                            ?error,
+                            ?from,
+                            message = ?String::from_utf8_lossy(bytes),
+                            "Received invalid Bencode message."
+                        );
                     }
                 }
-                Err(error) => {
-                    trace!(context = "socket_error", ?error, ?from, message = ?String::from_utf8_lossy(bytes), "Received invalid Bencode message.");
-                }
-            };
-        };
+            }
+            Ok((_, SocketAddr::V6(_))) => {
+                trace!(
+                    context = "socket_validation",
+                    message = "Received IPv6 packet"
+                );
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(MAX_THREAD_BLOCK_DURATION);
+            }
+            Err(e) => {
+                trace!(
+                    context = "socket_error",
+                    ?e,
+                    "recv_from failed unexpectedly"
+                );
+            }
+        }
 
         None
     }
@@ -228,36 +235,21 @@ impl KrpcSocket {
 
     fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
         // Positive or an error response or to an inflight request.
-        match self
-            .inflight_requests
-            .binary_search_by(|request| request.tid.cmp(&message.transaction_id))
-        {
-            Ok(index) => {
-                let inflight_request = self
-                    .inflight_requests
-                    .get(index)
-                    .expect("should be infallible");
-
-                if compare_socket_addr(&inflight_request.to, from) {
-                    // Confirm that it is a response we actually sent.
-                    self.inflight_requests.remove(index);
-
-                    return true;
-                } else {
-                    trace!(
-                        context = "socket_validation",
-                        message = "Response from wrong address"
-                    );
-                }
-            }
-            Err(_) => {
+        if let Some(request) = self.inflight_requests.remove(&message.transaction_id) {
+            if compare_socket_addr(&request.to, from) {
+                return true;
+            } else {
                 trace!(
                     context = "socket_validation",
-                    message = "Unexpected response id"
+                    message = "Response from wrong address"
                 );
             }
+        } else {
+            trace!(
+                context = "socket_validation",
+                message = "Unexpected response id"
+            );
         }
-
         false
     }
 
@@ -404,11 +396,13 @@ mod test {
             tx.send(server_address).unwrap();
 
             loop {
-                server.inflight_requests.push(InflightRequest {
-                    tid: 8,
-                    to: client_address,
-                    sent_at: Instant::now(),
-                });
+                server.inflight_requests.insert(
+                    8,
+                    InflightRequest {
+                        to: client_address,
+                        sent_at: Instant::now(),
+                    },
+                );
 
                 if let Some((message, from)) = server.recv_from() {
                     assert_eq!(from.port(), client_address.port());
@@ -442,11 +436,13 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.push(InflightRequest {
-            tid: 8,
-            to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
-            sent_at: Instant::now(),
-        });
+        server.inflight_requests.insert(
+            8,
+            InflightRequest {
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
+                sent_at: Instant::now(),
+            },
+        );
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
