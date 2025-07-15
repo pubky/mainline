@@ -21,6 +21,11 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 
 // TODO: Either add as an option to [Config] and [DhtBuilder],
 //       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
 pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
+/// How frequently to prune expired inflight requests (e.g., timeouts).
+/// Cleaning up on every recv_from wastes CPU, so we only prune at fixed intervals
+/// to balance responsiveness and efficiency. This may increase memory usage slightly,
+/// as expired requests remain longer before being dropped.
+pub const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(100);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -29,9 +34,9 @@ pub struct KrpcSocket {
     socket: UdpSocket,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
-    inflight_requests: BTreeMap<u16, InflightRequest>,
-
     local_addr: SocketAddrV4,
+    inflight_requests: BTreeMap<u16, InflightRequest>,
+    last_inflight_cleanup: Instant,
 }
 
 #[derive(Debug)]
@@ -66,9 +71,9 @@ impl KrpcSocket {
             next_tid: 0,
             server_mode: config.server_mode,
             request_timeout,
-            inflight_requests: BTreeMap::new(),
-
             local_addr,
+            inflight_requests: BTreeMap::new(),
+            last_inflight_cleanup: Instant::now(),
         })
     }
 
@@ -147,9 +152,15 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        let timeout = self.request_timeout;
-        self.inflight_requests
-            .retain(|_, req| req.sent_at.elapsed() <= timeout);
+        // Periodically prune inflight requests that have timed out,
+        // instead of doing this on every socket read to save CPU cycles.
+        let now = Instant::now();
+        if now.duration_since(self.last_inflight_cleanup) >= INFLIGHT_CLEANUP_INTERVAL {
+            let timeout = self.request_timeout;
+            self.inflight_requests
+                .retain(|_, req| req.sent_at.elapsed() <= timeout);
+            self.last_inflight_cleanup = now;
+        }
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
