@@ -1,6 +1,5 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
-use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
@@ -21,11 +20,6 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 
 // TODO: Either add as an option to [Config] and [DhtBuilder],
 //       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
 pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
-/// How frequently to prune expired inflight requests (e.g., timeouts).
-/// Cleaning up on every recv_from wastes CPU, so we only prune at fixed intervals
-/// to balance responsiveness and efficiency. This may increase memory usage slightly,
-/// as expired requests remain longer before being dropped.
-pub const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(100);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -33,13 +27,11 @@ pub struct KrpcSocket {
     next_tid: u16,
     socket: UdpSocket,
     pub(crate) server_mode: bool,
-    request_timeout: Duration,
     local_addr: SocketAddrV4,
-    inflight_requests: BTreeMap<u16, InflightRequest>,
-    last_inflight_cleanup: Instant,
+    inflight_requests: InflightRequestsMap,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InflightRequest {
     to: SocketAddrV4,
     sent_at: Instant,
@@ -47,7 +39,6 @@ pub struct InflightRequest {
 
 impl KrpcSocket {
     pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
-        let request_timeout = config.request_timeout;
         let port = config.port;
 
         let socket = if let Some(port) = port {
@@ -70,10 +61,8 @@ impl KrpcSocket {
             socket,
             next_tid: 0,
             server_mode: config.server_mode,
-            request_timeout,
             local_addr,
-            inflight_requests: BTreeMap::new(),
-            last_inflight_cleanup: Instant::now(),
+            inflight_requests: InflightRequestsMap::new(config.request_timeout),
         })
     }
 
@@ -112,7 +101,7 @@ impl KrpcSocket {
 
         let tid = message.transaction_id;
         self.inflight_requests.insert(
-            tid,
+            &tid,
             InflightRequest {
                 to: address,
                 sent_at: Instant::now(),
@@ -152,15 +141,7 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        // Periodically prune inflight requests that have timed out,
-        // instead of doing this on every socket read to save CPU cycles.
-        let now = Instant::now();
-        if now.duration_since(self.last_inflight_cleanup) >= INFLIGHT_CLEANUP_INTERVAL {
-            let timeout = self.request_timeout;
-            self.inflight_requests
-                .retain(|_, req| req.sent_at.elapsed() <= timeout);
-            self.last_inflight_cleanup = now;
-        }
+        self.inflight_requests.cleanup();
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
@@ -337,9 +318,66 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
     a.ip() == b.ip()
 }
 
+#[derive(Debug)]
+struct InflightRequestsMap {
+    request_timeout: Duration,
+    requests: Vec<(u16, InflightRequest)>,
+}
+
+impl InflightRequestsMap {
+    fn new(request_timeout: Duration) -> Self {
+        Self {
+            request_timeout,
+            requests: vec![],
+        }
+    }
+
+    fn contains_key(&self, key: &u16) -> bool {
+        match self.find_index(key) {
+            Ok(_) => true,
+            _ => false,
+        }
+    }
+
+    fn insert(&mut self, key: &u16, inflight_request: InflightRequest) {
+        let index = match self.find_index(key) {
+            // TODO: this should be even much harder to hit if the key is scoped to the ip
+            Ok(_) => unreachable!(
+                "shouldn't be adding the same tid twice, cleanup expired requests faster!"
+            ),
+            Err(index) => index,
+        };
+
+        self.requests.insert(index, (*key, inflight_request));
+    }
+
+    fn remove(&mut self, key: &u16) -> Option<InflightRequest> {
+        match self.find_index(key) {
+            Ok(index) => Some(self.requests.remove(index).1),
+            Err(_) => None,
+        }
+    }
+
+    fn find_index(&self, key: &u16) -> Result<usize, usize> {
+        self.requests.binary_search_by(|(tid, _)| tid.cmp(key))
+    }
+
+    fn cleanup(&mut self) {
+        match self
+            .requests
+            .binary_search_by(|(_, request)| request.sent_at.elapsed().cmp(&self.request_timeout))
+        {
+            Ok(index) => self.requests = self.requests[index..].to_vec(),
+            Err(_) => {
+                // noop
+            }
+        };
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::thread;
+    use std::{collections::BTreeMap, thread};
 
     use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
 
@@ -408,7 +446,7 @@ mod test {
 
             loop {
                 server.inflight_requests.insert(
-                    8,
+                    &8,
                     InflightRequest {
                         to: client_address,
                         sent_at: Instant::now(),
@@ -448,7 +486,7 @@ mod test {
         let client_address = client.local_addr();
 
         server.inflight_requests.insert(
-            8,
+            &8,
             InflightRequest {
                 to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
                 sent_at: Instant::now(),
@@ -474,6 +512,12 @@ mod test {
         server_thread.join().unwrap();
     }
 
+    /// How frequently to prune expired inflight requests (e.g., timeouts).
+    /// Cleaning up on every recv_from wastes CPU, so we only prune at fixed intervals
+    /// to balance responsiveness and efficiency. This may increase memory usage slightly,
+    /// as expired requests remain longer before being dropped.
+    pub const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(100);
+
     // Test to check how many loops we can do when calling retain every iteration vs. using a time-based approach.
     #[test]
     fn prune_everytime_vs_time_based() {
@@ -486,11 +530,12 @@ mod test {
         let expired_at = Instant::now() + Duration::from_secs(10); // Set expiry 10s in the future
 
         // Test 1: Aggressive pruning - clean expired requests on every iteration
-        let mut inflight_always = BTreeMap::new();
+        let mut inflight_always = InflightRequestsMap::new(DEFAULT_REQUEST_TIMEOUT);
         for i in 0..inflight_count {
             inflight_always.insert(
-                i,
-                InflightRequest {
+                &i,
+                super::InflightRequest {
+                    to: SocketAddrV4::new(0.into(), 0),
                     sent_at: expired_at,
                 },
             );
@@ -499,7 +544,7 @@ mod test {
         let start = Instant::now();
         let mut always_prune_result = 0;
         while start.elapsed() < test_duration {
-            inflight_always.retain(|_, req| req.sent_at.elapsed() <= DEFAULT_REQUEST_TIMEOUT);
+            inflight_always.cleanup();
             always_prune_result += 1;
         }
         let always_prune_elapsed = start.elapsed();
