@@ -333,10 +333,15 @@ impl InflightRequestsMap {
     }
 
     fn contains_key(&self, key: &u16) -> bool {
-        match self.find_index(key) {
-            Ok(_) => true,
-            _ => false,
+        if let Ok(index) = self.find_index(key) {
+            if let Some(request) = self.requests.get(index).map(|(_, r)| r) {
+                if request.sent_at.elapsed() < self.request_timeout {
+                    return true;
+                }
+            };
         }
+
+        false
     }
 
     fn insert(&mut self, key: &u16, inflight_request: InflightRequest) {
@@ -377,7 +382,7 @@ impl InflightRequestsMap {
 
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeMap, thread};
+    use std::thread;
 
     use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
 
@@ -427,6 +432,8 @@ mod test {
         client.request(server_address, request);
 
         server_thread.join().unwrap();
+
+        std::thread::sleep(Duration::from_secs(2));
     }
 
     #[test]
@@ -444,15 +451,16 @@ mod test {
             let server_address = server.local_addr();
             tx.send(server_address).unwrap();
 
-            loop {
-                server.inflight_requests.insert(
-                    &8,
-                    InflightRequest {
-                        to: client_address,
-                        sent_at: Instant::now(),
-                    },
-                );
+            // Expect the request
+            server.inflight_requests.insert(
+                &8,
+                InflightRequest {
+                    to: client_address,
+                    sent_at: Instant::now(),
+                },
+            );
 
+            loop {
                 if let Some((message, from)) = server.recv_from() {
                     assert_eq!(from.port(), client_address.port());
                     assert_eq!(message.transaction_id, 8);
@@ -464,6 +472,10 @@ mod test {
                             responder_id,
                         }))
                     );
+                    assert!(
+                        server.inflight_requests.requests.is_empty(),
+                        "receiving removes the inflight request"
+                    );
                     break;
                 }
             }
@@ -474,6 +486,26 @@ mod test {
         client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn inflight_request_timeout() {
+        let mut server = KrpcSocket::client().unwrap();
+
+        let tid = &8;
+        let sent_at = Instant::now();
+
+        server.inflight_requests.insert(
+            tid,
+            InflightRequest {
+                to: SocketAddrV4::new([0, 0, 0, 0].into(), 0),
+                sent_at,
+            },
+        );
+
+        std::thread::sleep(DEFAULT_REQUEST_TIMEOUT);
+
+        assert!(!server.inflight(tid));
     }
 
     #[test]
@@ -510,82 +542,5 @@ mod test {
         client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
-    }
-
-    /// How frequently to prune expired inflight requests (e.g., timeouts).
-    /// Cleaning up on every recv_from wastes CPU, so we only prune at fixed intervals
-    /// to balance responsiveness and efficiency. This may increase memory usage slightly,
-    /// as expired requests remain longer before being dropped.
-    pub const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(100);
-
-    // Test to check how many loops we can do when calling retain every iteration vs. using a time-based approach.
-    #[test]
-    fn prune_everytime_vs_time_based() {
-        struct InflightRequest {
-            sent_at: Instant,
-        }
-
-        let inflight_count = 1_000;
-        let test_duration = Duration::from_secs(1);
-        let expired_at = Instant::now() + Duration::from_secs(10); // Set expiry 10s in the future
-
-        // Test 1: Aggressive pruning - clean expired requests on every iteration
-        let mut inflight_always = InflightRequestsMap::new(DEFAULT_REQUEST_TIMEOUT);
-        for i in 0..inflight_count {
-            inflight_always.insert(
-                &i,
-                super::InflightRequest {
-                    to: SocketAddrV4::new(0.into(), 0),
-                    sent_at: expired_at,
-                },
-            );
-        }
-
-        let start = Instant::now();
-        let mut always_prune_result = 0;
-        while start.elapsed() < test_duration {
-            inflight_always.cleanup();
-            always_prune_result += 1;
-        }
-        let always_prune_elapsed = start.elapsed();
-
-        // Test 2: Batched pruning, clean expired requests every 100ms
-        let mut inflight_interval = BTreeMap::new();
-        for i in 0..inflight_count {
-            inflight_interval.insert(
-                i,
-                InflightRequest {
-                    sent_at: expired_at,
-                },
-            );
-        }
-
-        let mut last_prune = Instant::now();
-        let start = Instant::now();
-        let mut interval_prune_result = 0;
-        while start.elapsed() < test_duration {
-            let now = Instant::now();
-            if now.duration_since(last_prune) >= INFLIGHT_CLEANUP_INTERVAL {
-                inflight_interval.retain(|_, req| req.sent_at.elapsed() <= DEFAULT_REQUEST_TIMEOUT);
-                last_prune = now;
-            }
-            interval_prune_result += 1;
-        }
-        let interval_prune_elapsed = start.elapsed();
-
-        println!(
-            "Always prune: {:?} over {} loops\nPrune on interval (100ms): {:?} over {} loops\nThroughput gain: {:.2}%",
-            always_prune_elapsed,
-            always_prune_result,
-            interval_prune_elapsed,
-            interval_prune_result,
-            ((interval_prune_result as f64 / always_prune_result as f64) - 1.0) * 100.0
-        );
-
-        assert!(
-            interval_prune_elapsed < always_prune_elapsed
-                || interval_prune_result > always_prune_result / 2,
-            "Expected interval-based pruning to use less CPU per iteration"
-        );
     }
 }
