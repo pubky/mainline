@@ -321,6 +321,9 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
 #[derive(Debug)]
 struct InflightRequestsMap {
     request_timeout: Duration,
+    // Sorted Vec used instead of BTreeMap for better performance under moderate load.
+    // Vec gives faster lookups and iteration due to tight memory layout and fewer
+    // allocations under typical DHT load (±1000 inflight requests).
     requests: Vec<(u16, InflightRequest)>,
 }
 
@@ -353,6 +356,9 @@ impl InflightRequestsMap {
             Err(index) => index,
         };
 
+        // Inserting into the Vec may require shifting elements, but this is fast enough as
+        // long as the list stays reasonably small, which is the case (±1000 inflight requests)
+        // and why it performs better than BTreeMap.
         self.requests.insert(index, (key, inflight_request));
     }
 
@@ -364,10 +370,14 @@ impl InflightRequestsMap {
     }
 
     fn find_index(&self, key: u16) -> Result<usize, usize> {
+        // Fast lookup using binary search since the list is kept sorted by key.
         self.requests.binary_search_by(|(tid, _)| tid.cmp(&key))
     }
 
     fn cleanup(&mut self) {
+        // Find the first unexpired request by checking how long each has been pending.
+        // Drop all older (expired) ones at once by slicing the Vec.
+        // This is much faster than calling retain every call to recv_from.
         match self
             .requests
             .binary_search_by(|(_, request)| request.sent_at.elapsed().cmp(&self.request_timeout))
