@@ -176,7 +176,7 @@ impl IterativeQuery {
         let done = !self
             .inflight_requests
             .iter()
-            .any(|&tid| socket.inflight(&tid));
+            .any(|&tid| socket.inflight(tid));
 
         if done {
             debug!(id=?self.target(), closest = ?self.closest.len(), visited = ?self.visited.len(), responders = ?self.responders.len(), "Done query");

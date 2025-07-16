@@ -90,7 +90,7 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Returns true if this message's transaction_id is still inflight
-    pub fn inflight(&self, transaction_id: &u16) -> bool {
+    pub fn inflight(&self, transaction_id: u16) -> bool {
         self.inflight_requests.contains_key(transaction_id)
     }
 
@@ -101,7 +101,7 @@ impl KrpcSocket {
 
         let tid = message.transaction_id;
         self.inflight_requests.insert(
-            &tid,
+            tid,
             InflightRequest {
                 to: address,
                 sent_at: Instant::now(),
@@ -227,7 +227,7 @@ impl KrpcSocket {
 
     fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
         // Positive or an error response or to an inflight request.
-        if let Some(request) = self.inflight_requests.remove(&message.transaction_id) {
+        if let Some(request) = self.inflight_requests.remove(message.transaction_id) {
             if compare_socket_addr(&request.to, from) {
                 return true;
             } else {
@@ -332,7 +332,7 @@ impl InflightRequestsMap {
         }
     }
 
-    fn contains_key(&self, key: &u16) -> bool {
+    fn contains_key(&self, key: u16) -> bool {
         if let Ok(index) = self.find_index(key) {
             if let Some(request) = self.requests.get(index).map(|(_, r)| r) {
                 if request.sent_at.elapsed() < self.request_timeout {
@@ -344,7 +344,7 @@ impl InflightRequestsMap {
         false
     }
 
-    fn insert(&mut self, key: &u16, inflight_request: InflightRequest) {
+    fn insert(&mut self, key: u16, inflight_request: InflightRequest) {
         let index = match self.find_index(key) {
             // TODO: this should be even much harder to hit if the key is scoped to the ip
             Ok(_) => unreachable!(
@@ -353,18 +353,18 @@ impl InflightRequestsMap {
             Err(index) => index,
         };
 
-        self.requests.insert(index, (*key, inflight_request));
+        self.requests.insert(index, (key, inflight_request));
     }
 
-    fn remove(&mut self, key: &u16) -> Option<InflightRequest> {
+    fn remove(&mut self, key: u16) -> Option<InflightRequest> {
         match self.find_index(key) {
             Ok(index) => Some(self.requests.remove(index).1),
             Err(_) => None,
         }
     }
 
-    fn find_index(&self, key: &u16) -> Result<usize, usize> {
-        self.requests.binary_search_by(|(tid, _)| tid.cmp(key))
+    fn find_index(&self, key: u16) -> Result<usize, usize> {
+        self.requests.binary_search_by(|(tid, _)| tid.cmp(&key))
     }
 
     fn cleanup(&mut self) {
@@ -453,7 +453,7 @@ mod test {
 
             // Expect the request
             server.inflight_requests.insert(
-                &8,
+                8,
                 InflightRequest {
                     to: client_address,
                     sent_at: Instant::now(),
@@ -492,7 +492,7 @@ mod test {
     fn inflight_request_timeout() {
         let mut server = KrpcSocket::client().unwrap();
 
-        let tid = &8;
+        let tid = 8;
         let sent_at = Instant::now();
 
         server.inflight_requests.insert(
@@ -518,7 +518,7 @@ mod test {
         let client_address = client.local_addr();
 
         server.inflight_requests.insert(
-            &8,
+            8,
             InflightRequest {
                 to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
                 sent_at: Instant::now(),
