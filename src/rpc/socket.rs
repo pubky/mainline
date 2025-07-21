@@ -1,10 +1,12 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
+use std::io::ErrorKind;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
+use crate::rpc::config::PollStrategy;
 
 use super::config::Config;
 
@@ -15,6 +17,9 @@ pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 
+pub const MIN_POLL_INTERVAL: Duration = Duration::from_micros(100);
+pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
@@ -22,6 +27,8 @@ pub struct KrpcSocket {
     pub(crate) server_mode: bool,
     local_addr: SocketAddrV4,
     inflight_requests: InflightRequests,
+    poll_strategy: PollStrategy,
+    poll_interval: Duration,
 }
 
 impl KrpcSocket {
@@ -42,13 +49,24 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_nonblocking(true)?;
+        match config.poll_strategy {
+            PollStrategy::NonBlocking => {
+                println!("using non-blocking");
+                socket.set_nonblocking(true)?;
+            }
+            PollStrategy::AdaptiveBackoff => {
+                println!("using adaptive backoff");
+                socket.set_read_timeout(Some(MIN_POLL_INTERVAL))?;
+            }
+        }
 
         Ok(Self {
             socket,
             server_mode: config.server_mode,
             local_addr,
             inflight_requests: InflightRequests::new(),
+            poll_strategy: config.poll_strategy,
+            poll_interval: MIN_POLL_INTERVAL,
         })
     }
 
@@ -120,13 +138,23 @@ impl KrpcSocket {
     /// On success, returns the dht message and the origin.
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
-
         self.inflight_requests.cleanup();
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
-                let bytes = &buf[..amt];
+                // tighten adaptive timeout on activity
+                if let PollStrategy::AdaptiveBackoff = self.poll_strategy {
+                    if self.poll_interval > MIN_POLL_INTERVAL {
+                        if !self.inflight_requests.is_empty() {
+                            self.poll_interval = MIN_POLL_INTERVAL;
+                        } else if self.server_mode {
+                            self.poll_interval = (self.poll_interval / 2).max(MIN_POLL_INTERVAL);
+                        }
+                        let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                    }
+                }
 
+                let bytes = &buf[..amt];
                 if from.port() == 0 {
                     trace!(
                         context = "socket_validation",
@@ -137,75 +165,62 @@ impl KrpcSocket {
 
                 match Message::from_bytes(bytes) {
                     Ok(message) => {
-                        let should_return = match message.message_type {
-                            MessageType::Request(_) => {
-                                trace!(
-                                    context = "socket_message_receiving",
-                                    ?message,
-                                    ?from,
-                                    "Received request message"
-                                );
-                                true
-                            }
-                            MessageType::Response(_) => {
-                                trace!(
-                                    context = "socket_message_receiving",
-                                    ?message,
-                                    ?from,
-                                    "Received response message"
-                                );
-                                self.is_expected_response(&message, &from)
-                            }
-                            MessageType::Error(_) => {
-                                trace!(
-                                    context = "socket_message_receiving",
-                                    ?message,
-                                    ?from,
-                                    "Received error message"
-                                );
+                        let is_good = match &message.message_type {
+                            MessageType::Request(_) => true,
+                            MessageType::Response(_) | MessageType::Error(_) => {
                                 self.is_expected_response(&message, &from)
                             }
                         };
 
-                        if should_return {
+                        if is_good {
+                            trace!(
+                                context = "socket_message_receiving",
+                                ?message,
+                                ?from,
+                                "Received message"
+                            );
                             return Some((message, from));
                         }
                     }
-                    Err(error) => {
+                    Err(err) => {
                         trace!(
                             context = "socket_error",
-                            ?error,
+                            ?err,
                             ?from,
                             message = ?String::from_utf8_lossy(bytes),
-                            "Received invalid Bencode message."
+                            "Invalid Bencode message"
                         );
                     }
                 }
             }
+
             Ok((_, SocketAddr::V6(_))) => {
-                trace!(
-                    context = "socket_validation",
-                    message = "Received IPv6 packet"
-                );
+                // ignore IPv6
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // WouldBlock means no data available right now on non-blocking socket.
-                // Use adaptive sleep to poll faster when we're expecting responses (active),
-                // slower when idle to reduce CPU usage.
-                let sleep_duration = if !self.inflight_requests.is_empty() {
-                    Duration::from_micros(100) // Fast polling, we sent requests and expect responses
-                } else {
-                    Duration::from_millis(1) // Slow polling, no pending requests, save CPU
-                };
-                std::thread::sleep(sleep_duration);
-            }
-            Err(e) => {
-                trace!(
-                    context = "socket_error",
-                    ?e,
-                    "recv_from failed unexpectedly"
-                );
-            }
+
+            Err(e) => match self.poll_strategy {
+                PollStrategy::NonBlocking => {
+                    if e.kind() == ErrorKind::WouldBlock {
+                        let sleep_dur = if !self.inflight_requests.is_empty() {
+                            Duration::from_micros(100)
+                        } else {
+                            Duration::from_millis(1)
+                        };
+                        std::thread::sleep(sleep_dur);
+                    } else {
+                        trace!(context = "socket_error", ?e, "recv_from failed");
+                    }
+                }
+                PollStrategy::AdaptiveBackoff => match e.kind() {
+                    ErrorKind::WouldBlock => {
+                        if self.poll_interval < MAX_POLL_INTERVAL {
+                            self.poll_interval = (self.poll_interval * 2).min(MAX_POLL_INTERVAL);
+                            let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                        }
+                    }
+                    _ => tracing::warn!("IO error {e}"),
+                },
+            },
         }
 
         None
@@ -566,4 +581,74 @@ mod test {
 
         server_thread.join().unwrap();
     }
+
+    #[test]
+    fn adaptive_poll_uses_low_cpu_long() {
+        let mut sock = KrpcSocket::client().unwrap();
+        const RUSAGE_SELF: i32 = 0;
+
+        unsafe {
+            let mut before = RUsage {
+                ru_utime: TimeVal {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+                ru_stime: TimeVal {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+            };
+            getrusage(RUSAGE_SELF, &mut before);
+
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(10) {
+                let _ = sock.recv_from();
+            }
+
+            let mut after = RUsage {
+                ru_utime: TimeVal {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+                ru_stime: TimeVal {
+                    tv_sec: 0,
+                    tv_usec: 0,
+                },
+            };
+            getrusage(RUSAGE_SELF, &mut after);
+
+            let used = cpu_time(&after) - cpu_time(&before);
+            println!("CPU over 10 s: {:?}", used);
+
+            // allow up to ~200 ms (2%) over 10 s
+            assert!(
+                used < Duration::from_millis(200),
+                "idle CPU too high over 10 s: {:?}",
+                used
+            );
+        }
+    }
+}
+
+#[repr(C)]
+struct TimeVal {
+    tv_sec: i64,
+    tv_usec: i64,
+}
+
+#[repr(C)]
+struct RUsage {
+    ru_utime: TimeVal,
+    ru_stime: TimeVal,
+    // other fields elided
+}
+
+extern "C" {
+    fn getrusage(who: i32, usage: *mut RUsage) -> i32;
+}
+
+fn cpu_time(usage: &RUsage) -> Duration {
+    let u = usage.ru_utime.tv_sec as f64 + usage.ru_utime.tv_usec as f64 * 1e-6;
+    let s = usage.ru_stime.tv_sec as f64 + usage.ru_stime.tv_usec as f64 * 1e-6;
+    Duration::from_secs_f64(u + s)
 }

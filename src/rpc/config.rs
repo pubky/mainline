@@ -5,6 +5,12 @@ use std::{
 
 use super::{ServerSettings, DEFAULT_REQUEST_TIMEOUT};
 
+#[derive(Debug, Clone, Copy)]
+pub enum PollStrategy {
+    NonBlocking,
+    AdaptiveBackoff,
+}
+
 #[derive(Debug, Clone)]
 /// Dht Configurations
 pub struct Config {
@@ -35,6 +41,7 @@ pub struct Config {
     ///
     /// Defaults to None, where we depend on suggestions from responding nodes.
     pub public_ip: Option<Ipv4Addr>,
+    pub poll_strategy: PollStrategy,
 }
 
 impl Default for Config {
@@ -46,6 +53,7 @@ impl Default for Config {
             server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
+            poll_strategy: PollStrategy::NonBlocking,
         }
     }
 }
