@@ -14,27 +14,14 @@ const MTU: usize = 2048;
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-/// The maximum duration to backoff checking the [UdpSocket] buffer after it is empty.
-/// Lower values increases CPU usage, but reduces latency, and drains the buffer faster,
-/// reducing the risk of packet loss.
-// TODO: Either add as an option to [Config] and [DhtBuilder],
-//       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
-pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
-    next_tid: u32,
     socket: UdpSocket,
     pub(crate) server_mode: bool,
     local_addr: SocketAddrV4,
-    inflight_requests: InflightRequestsMap,
-}
-
-#[derive(Debug, Clone)]
-pub struct InflightRequest {
-    to: SocketAddrV4,
-    sent_at: Instant,
+    inflight_requests: InflightRequests,
 }
 
 impl KrpcSocket {
@@ -59,10 +46,9 @@ impl KrpcSocket {
 
         Ok(Self {
             socket,
-            next_tid: 0,
             server_mode: config.server_mode,
             local_addr,
-            inflight_requests: InflightRequestsMap::new(config.request_timeout),
+            inflight_requests: InflightRequests::new(),
         })
     }
 
@@ -91,22 +77,16 @@ impl KrpcSocket {
 
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: u32) -> bool {
-        self.inflight_requests.contains_key(transaction_id)
+        self.inflight_requests.get(transaction_id).is_some()
     }
 
     /// Send a request to the given address and return the transaction_id
     pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u32 {
-        let message = self.request_message(request);
+        let transaction_id = self.inflight_requests.add(address);
+        let message = self.request_message(transaction_id, request);
         trace!(context = "socket_message_sending", message = ?message);
 
         let tid = message.transaction_id;
-        self.inflight_requests.insert(
-            tid,
-            InflightRequest {
-                to: address,
-                sent_at: Instant::now(),
-            },
-        );
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending request message");
         });
@@ -209,7 +189,15 @@ impl KrpcSocket {
                 );
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(MAX_THREAD_BLOCK_DURATION);
+                // WouldBlock means no data available right now on non-blocking socket.
+                // Use adaptive sleep to poll faster when we're expecting responses (active),
+                // slower when idle to reduce CPU usage.
+                let sleep_duration = if !self.inflight_requests.is_empty() {
+                    Duration::from_micros(100) // Fast polling, we sent requests and expect responses
+                } else {
+                    Duration::from_millis(1) // Slow polling, no pending requests, save CPU
+                };
+                std::thread::sleep(sleep_duration);
             }
             Err(e) => {
                 trace!(
@@ -245,20 +233,8 @@ impl KrpcSocket {
         false
     }
 
-    /// Increments self.next_tid and returns the previous value.
-    fn tid(&mut self) -> u32 {
-        // We don't bother much with reusing freed transaction ids,
-        // since the timeout is so short we are unlikely to run out
-        // of 65535 ids in 2 seconds.
-        let tid = self.next_tid;
-        self.next_tid = self.next_tid.wrapping_add(1);
-        tid
-    }
-
     /// Set transactin_id, version and read_only
-    fn request_message(&mut self, message: RequestSpecific) -> Message {
-        let transaction_id = self.tid();
-
+    fn request_message(&mut self, transaction_id: u32, message: RequestSpecific) -> Message {
         Message {
             transaction_id,
             message_type: MessageType::Request(message),
@@ -318,94 +294,146 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
     a.ip() == b.ip()
 }
 
-#[derive(Debug)]
-pub struct InflightRequestsMap {
-    request_timeout: Duration,
-    by_tid: Vec<(u32, InflightRequest)>, // sorted by TID
-    by_time: Vec<(Instant, u32)>,        // sorted by timestamp
+#[derive(Debug, Clone)]
+pub struct InflightRequest {
+    tid: u32,
+    to: SocketAddrV4,
+    sent_at: Instant,
 }
 
-impl InflightRequestsMap {
-    /// Create a new map with the given timeout and strategy.
-    pub fn new(request_timeout: Duration) -> Self {
+#[derive(Debug)]
+/// We don't need a map, since we know the maximum size is `65536` requests.
+/// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
+struct InflightRequests {
+    next_tid: u32,
+    requests: Vec<InflightRequest>,
+    estimated_rtt: Duration,
+    deviation_rtt: Duration,
+}
+
+impl InflightRequests {
+    fn new() -> Self {
         Self {
-            request_timeout,
-            by_tid: Vec::new(),
-            by_time: Vec::new(),
+            next_tid: 0,
+            requests: Vec::new(),
+            estimated_rtt: Duration::from_secs(5),
+            deviation_rtt: Duration::from_secs(0),
         }
     }
 
-    pub fn insert(&mut self, tid: u32, req: InflightRequest) {
-        match self.by_tid.binary_search_by_key(&tid, |&(k, _)| k) {
-            Ok(_) => panic!("duplicate TID inserted"),
-            Err(idx) => self.by_tid.insert(idx, (tid, req.clone())),
-        }
-        let ts = req.sent_at;
-        match self.by_time.binary_search_by_key(&ts, |&(ts, _)| ts) {
-            Ok(idx) | Err(idx) => self.by_time.insert(idx, (ts, tid)),
-        }
+    /// Increments self.next_tid and returns the previous value.
+    fn tid(&mut self) -> u32 {
+        // We don't reuse freed transaction ids, to preserve the sortablitiy
+        // of both `tid`s and `sent_at`.
+        let tid = self.next_tid;
+        self.next_tid = self.next_tid.wrapping_add(1);
+        tid
     }
 
-    pub fn contains_key(&self, tid: u32) -> bool {
-        let now = Instant::now();
-        let timeout = self.request_timeout;
-        if let Ok(idx) = self.by_tid.binary_search_by_key(&tid, |&(k, _)| k) {
-            let req = &self.by_tid[idx].1;
-            now.duration_since(req.sent_at) < timeout
-        } else {
-            false
-        }
+    fn request_timeout(&self) -> Duration {
+        self.estimated_rtt + self.deviation_rtt.mul_f64(4.0)
     }
 
-    pub fn remove(&mut self, tid: u32) -> Option<InflightRequest> {
-        if let Ok(idx) = self.by_tid.binary_search_by_key(&tid, |&(k, _)| k) {
-            let (_k, req) = self.by_tid.remove(idx);
-            if let Some(pos) = self.by_time.iter().position(|&(_, t)| t == tid) {
-                self.by_time.remove(pos);
+    fn is_empty(&self) -> bool {
+        self.requests.is_empty()
+    }
+
+    fn get(&self, key: u32) -> Option<&InflightRequest> {
+        if let Ok(index) = self.find_by_tid(key) {
+            if let Some(request) = self.requests.get(index) {
+                if request.sent_at.elapsed() < self.request_timeout() {
+                    return Some(request);
+                }
+            };
+        }
+
+        None
+    }
+
+    /// Adds a [InflightRequest] with new transaction_id, and returns that id.
+    fn add(&mut self, to: SocketAddrV4) -> u32 {
+        let tid = self.tid();
+        self.requests.push(InflightRequest {
+            tid,
+            to,
+            sent_at: Instant::now(),
+        });
+
+        tid
+    }
+
+    fn remove(&mut self, key: u32) -> Option<InflightRequest> {
+        match self.find_by_tid(key) {
+            Ok(index) => {
+                let request = self.requests.remove(index);
+
+                self.update_rtt_estimates(request.sent_at.elapsed());
+
+                Some(request)
             }
-            Some(req)
-        } else {
-            None
+            Err(_) => None,
         }
     }
 
-    pub fn cleanup(&mut self) {
-        let now = Instant::now();
-        let timeout = self.request_timeout;
-        let idx = self
-            .by_time
-            .iter()
-            .position(|&(ts, _)| now.duration_since(ts) < timeout)
-            .unwrap_or(self.by_time.len());
-        for &(_ts, tid) in &self.by_time[..idx] {
-            if let Ok(pos) = self.by_tid.binary_search_by_key(&tid, |&(k, _)| k) {
-                self.by_tid.remove(pos);
-            }
+    fn update_rtt_estimates(&mut self, sample_rtt: Duration) {
+        // Use TCP-like alpha = 1/8, beta = 1/4
+        let alpha = 0.125;
+        let beta = 0.25;
+
+        let sample_rtt_secs = sample_rtt.as_secs_f64();
+        let est_rtt_secs = self.estimated_rtt.as_secs_f64();
+        let dev_rtt_secs = self.deviation_rtt.as_secs_f64();
+
+        let new_est_rtt = (1.0 - alpha) * est_rtt_secs + alpha * sample_rtt_secs;
+        let new_dev_rtt =
+            (1.0 - beta) * dev_rtt_secs + beta * (sample_rtt_secs - new_est_rtt).abs();
+
+        self.estimated_rtt = Duration::from_secs_f64(new_est_rtt);
+        self.deviation_rtt = Duration::from_secs_f64(new_dev_rtt);
+    }
+
+    fn find_by_tid(&self, tid: u32) -> Result<usize, usize> {
+        self.requests
+            .binary_search_by(|request| request.tid.cmp(&tid))
+    }
+
+    /// Removes timeedout requests if necessary to save memory
+    fn cleanup(&mut self) {
+        if self.requests.len() < self.requests.capacity() {
+            return;
         }
-        self.by_time.drain(0..idx);
+
+        let index = match self
+            .requests
+            .binary_search_by(|request| self.request_timeout().cmp(&request.sent_at.elapsed()))
+        {
+            Ok(index) => index,
+            Err(index) => index,
+        };
+
+        self.requests.drain(0..index);
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::thread;
-
-    use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
-
     use super::*;
+    use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn tid() {
         let mut socket = KrpcSocket::server().unwrap();
 
-        assert_eq!(socket.tid(), 0);
-        assert_eq!(socket.tid(), 1);
-        assert_eq!(socket.tid(), 2);
+        assert_eq!(socket.inflight_requests.tid(), 0);
+        assert_eq!(socket.inflight_requests.tid(), 1);
+        assert_eq!(socket.inflight_requests.tid(), 2);
 
-        socket.next_tid = u32::MAX;
+        socket.inflight_requests.next_tid = u32::MAX;
 
-        assert_eq!(socket.tid(), 4294967295);
-        assert_eq!(socket.tid(), 0);
+        assert_eq!(socket.inflight_requests.tid(), 4294967295);
+        assert_eq!(socket.inflight_requests.tid(), 0);
     }
 
     #[test]
@@ -414,7 +442,7 @@ mod test {
         let server_address = server.local_addr();
 
         let mut client = KrpcSocket::client().unwrap();
-        client.next_tid = 120;
+        client.inflight_requests.next_tid = 120;
 
         let client_address = client.local_addr();
         let request = RequestSpecific {
@@ -457,14 +485,11 @@ mod test {
             let server_address = server.local_addr();
             tx.send(server_address).unwrap();
 
-            // Expect the request
-            server.inflight_requests.insert(
-                8,
-                InflightRequest {
-                    to: client_address,
-                    sent_at: Instant::now(),
-                },
-            );
+            server.inflight_requests.requests.push(InflightRequest {
+                tid: 8,
+                to: client_address,
+                sent_at: Instant::now(),
+            });
 
             loop {
                 if let Some((message, from)) = server.recv_from() {
@@ -477,10 +502,6 @@ mod test {
                         MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                             responder_id,
                         }))
-                    );
-                    assert!(
-                        server.inflight_requests.by_tid.is_empty(),
-                        "receiving removes the inflight request"
                     );
                     break;
                 }
@@ -501,15 +522,13 @@ mod test {
         let tid = 8;
         let sent_at = Instant::now();
 
-        server.inflight_requests.insert(
+        server.inflight_requests.requests.push(InflightRequest {
             tid,
-            InflightRequest {
-                to: SocketAddrV4::new([0, 0, 0, 0].into(), 0),
-                sent_at,
-            },
-        );
+            to: SocketAddrV4::new([0, 0, 0, 0].into(), 0),
+            sent_at,
+        });
 
-        std::thread::sleep(DEFAULT_REQUEST_TIMEOUT);
+        std::thread::sleep(server.inflight_requests.request_timeout());
 
         assert!(!server.inflight(tid));
     }
@@ -523,13 +542,11 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.insert(
-            8,
-            InflightRequest {
-                to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
-                sent_at: Instant::now(),
-            },
-        );
+        server.inflight_requests.requests.push(InflightRequest {
+            tid: 8,
+            to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
+            sent_at: Instant::now(),
+        });
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
