@@ -15,7 +15,7 @@ use super::InvalidIdSize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Message {
-    pub transaction_id: u16,
+    pub transaction_id: u32,
 
     /// The version of the requester or responder.
     pub version: Option<[u8; 4]>,
@@ -401,7 +401,7 @@ impl Message {
 
     fn from_serde_message(msg: internal::DHTMessage) -> Result<Message, DecodeMessageError> {
         Ok(Message {
-            transaction_id: u16::from_be_bytes(msg.transaction_id),
+            transaction_id: u32::from_be_bytes(msg.transaction_id),
             version: msg.version,
             requester_ip: match msg.ip {
                 Some(ip) => Some(bytes_to_sockaddr(ip)?),
@@ -981,7 +981,7 @@ mod tests {
         let serde_message = internal::DHTMessage {
             ip: None,
             read_only: None,
-            transaction_id: [1, 2],
+            transaction_id: [1, 2, 3, 4],
             version: None,
             variant: internal::DHTMessageVariant::Response(
                 internal::DHTResponseSpecific::NoValues {
