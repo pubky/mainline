@@ -17,8 +17,13 @@ pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 
-pub const MIN_POLL_INTERVAL: Duration = Duration::from_micros(100);
-pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(1);
+// Adaptive‑backoff timeouts
+pub const ADAPTIVE_TIMEOUT_MIN: Duration = Duration::from_micros(100);
+pub const ADAPTIVE_TIMEOUT_MAX: Duration = Duration::from_secs(1);
+
+// Fixed‑poll sleeps
+pub const POLL_INTERVAL_EAGER: Duration = Duration::from_micros(100);
+pub const POLL_INTERVAL_RELAXED: Duration = Duration::from_millis(1);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -54,7 +59,7 @@ impl KrpcSocket {
                 socket.set_nonblocking(true)?;
             }
             PollStrategy::AdaptiveBackoff => {
-                socket.set_read_timeout(Some(MIN_POLL_INTERVAL))?;
+                socket.set_read_timeout(Some(ADAPTIVE_TIMEOUT_MIN))?;
             }
         }
 
@@ -64,7 +69,7 @@ impl KrpcSocket {
             local_addr,
             inflight_requests: InflightRequests::new(),
             poll_strategy: config.poll_strategy,
-            poll_interval: MIN_POLL_INTERVAL,
+            poll_interval: ADAPTIVE_TIMEOUT_MIN,
         })
     }
 
@@ -142,11 +147,11 @@ impl KrpcSocket {
             Ok((amt, SocketAddr::V4(from))) => {
                 // tighten adaptive timeout on activity
                 if let PollStrategy::AdaptiveBackoff = self.poll_strategy {
-                    if self.poll_interval > MIN_POLL_INTERVAL {
+                    if self.poll_interval > ADAPTIVE_TIMEOUT_MIN {
                         if !self.inflight_requests.is_empty() {
-                            self.poll_interval = MIN_POLL_INTERVAL;
+                            self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
                         } else if self.server_mode {
-                            self.poll_interval = (self.poll_interval / 2).max(MIN_POLL_INTERVAL);
+                            self.poll_interval = (self.poll_interval / 2).max(ADAPTIVE_TIMEOUT_MIN);
                         }
                         let _ = self.socket.set_read_timeout(Some(self.poll_interval));
                     }
@@ -199,20 +204,20 @@ impl KrpcSocket {
             Err(e) => match self.poll_strategy {
                 PollStrategy::NonBlocking => {
                     if e.kind() == ErrorKind::WouldBlock {
-                        let sleep_dur = if !self.inflight_requests.is_empty() {
-                            Duration::from_micros(100)
+                        let sleep_duration = if !self.inflight_requests.is_empty() {
+                            POLL_INTERVAL_EAGER
                         } else {
-                            Duration::from_millis(1)
+                            POLL_INTERVAL_RELAXED
                         };
-                        std::thread::sleep(sleep_dur);
+                        std::thread::sleep(sleep_duration);
                     } else {
                         trace!(context = "socket_error", ?e, "recv_from failed");
                     }
                 }
                 PollStrategy::AdaptiveBackoff => match e.kind() {
                     ErrorKind::WouldBlock => {
-                        if self.poll_interval < MAX_POLL_INTERVAL {
-                            self.poll_interval = (self.poll_interval * 2).min(MAX_POLL_INTERVAL);
+                        if self.poll_interval < ADAPTIVE_TIMEOUT_MAX {
+                            self.poll_interval = (self.poll_interval * 2).min(ADAPTIVE_TIMEOUT_MAX);
                             let _ = self.socket.set_read_timeout(Some(self.poll_interval));
                         }
                     }
