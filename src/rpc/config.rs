@@ -7,7 +7,14 @@ use super::{ServerSettings, DEFAULT_REQUEST_TIMEOUT};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PollStrategy {
+    /// Use a non‐blocking socket and sleep manually on `WouldBlock`.
+    /// Offers the lowest possible receive latency, at the expense of higher CPU usage.
     NonBlocking,
+
+    /// Use a socket `read_timeout` that:
+    /// - Resets to a short interval when activity is detected (inflight requests or server mode),
+    /// - Doubles up to a max interval on each `WouldBlock`.
+    /// Trades slightly higher receive latency for significantly lower CPU usage when idle.
     AdaptiveBackoff,
 }
 

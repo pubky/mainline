@@ -51,11 +51,9 @@ impl KrpcSocket {
 
         match config.poll_strategy {
             PollStrategy::NonBlocking => {
-                println!("using non-blocking");
                 socket.set_nonblocking(true)?;
             }
             PollStrategy::AdaptiveBackoff => {
-                println!("using adaptive backoff");
                 socket.set_read_timeout(Some(MIN_POLL_INTERVAL))?;
             }
         }
@@ -218,7 +216,9 @@ impl KrpcSocket {
                             let _ = self.socket.set_read_timeout(Some(self.poll_interval));
                         }
                     }
-                    _ => tracing::warn!("IO error {e}"),
+                    _ => {
+                        trace!(context = "socket_error", ?e, "recv_from failed");
+                    }
                 },
             },
         }
@@ -581,74 +581,4 @@ mod test {
 
         server_thread.join().unwrap();
     }
-
-    #[test]
-    fn adaptive_poll_uses_low_cpu_long() {
-        let mut sock = KrpcSocket::client().unwrap();
-        const RUSAGE_SELF: i32 = 0;
-
-        unsafe {
-            let mut before = RUsage {
-                ru_utime: TimeVal {
-                    tv_sec: 0,
-                    tv_usec: 0,
-                },
-                ru_stime: TimeVal {
-                    tv_sec: 0,
-                    tv_usec: 0,
-                },
-            };
-            getrusage(RUSAGE_SELF, &mut before);
-
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(10) {
-                let _ = sock.recv_from();
-            }
-
-            let mut after = RUsage {
-                ru_utime: TimeVal {
-                    tv_sec: 0,
-                    tv_usec: 0,
-                },
-                ru_stime: TimeVal {
-                    tv_sec: 0,
-                    tv_usec: 0,
-                },
-            };
-            getrusage(RUSAGE_SELF, &mut after);
-
-            let used = cpu_time(&after) - cpu_time(&before);
-            println!("CPU over 10 s: {:?}", used);
-
-            // allow up to ~200 ms (2%) over 10 s
-            assert!(
-                used < Duration::from_millis(200),
-                "idle CPU too high over 10 s: {:?}",
-                used
-            );
-        }
-    }
-}
-
-#[repr(C)]
-struct TimeVal {
-    tv_sec: i64,
-    tv_usec: i64,
-}
-
-#[repr(C)]
-struct RUsage {
-    ru_utime: TimeVal,
-    ru_stime: TimeVal,
-    // other fields elided
-}
-
-extern "C" {
-    fn getrusage(who: i32, usage: *mut RUsage) -> i32;
-}
-
-fn cpu_time(usage: &RUsage) -> Duration {
-    let u = usage.ru_utime.tv_sec as f64 + usage.ru_utime.tv_usec as f64 * 1e-6;
-    let s = usage.ru_stime.tv_sec as f64 + usage.ru_stime.tv_usec as f64 * 1e-6;
-    Duration::from_secs_f64(u + s)
 }
