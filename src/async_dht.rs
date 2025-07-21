@@ -654,6 +654,10 @@ mod test {
             let item = MutableItem::new(signer.clone(), &value, seq, None);
 
             let handle = std::thread::spawn(move || {
+                // for the second writer, wait briefly so the first has time to store
+                if i == 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
                 futures::executor::block_on(async {
                     let result = dht.put_mutable(item, None).await;
                     if i == 0 {
