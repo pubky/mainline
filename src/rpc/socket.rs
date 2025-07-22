@@ -23,7 +23,7 @@ pub const ADAPTIVE_TIMEOUT_MAX: Duration = Duration::from_secs(1);
 
 // Fixed‑poll sleeps
 pub const POLL_INTERVAL_EAGER: Duration = Duration::from_micros(100);
-pub const POLL_INTERVAL_RELAXED: Duration = Duration::from_millis(1);
+pub const POLL_INTERVAL_RELAXED: Duration = Duration::from_millis(20);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -143,92 +143,117 @@ impl KrpcSocket {
         let mut buf = [0u8; MTU];
         self.inflight_requests.cleanup();
 
-        match self.socket.recv_from(&mut buf) {
+        match self.poll_strategy {
+            PollStrategy::NonBlocking => self.recv_from_nonblocking(&mut buf),
+            PollStrategy::AdaptiveBackoff => self.recv_from_adaptive(&mut buf),
+        }
+    }
+
+    fn recv_from_nonblocking(&mut self, buf: &mut [u8; MTU]) -> Option<(Message, SocketAddrV4)> {
+        match self.socket.recv_from(buf) {
+            Ok((amt, SocketAddr::V4(from))) => self.process_packet(buf, amt, from),
+            Ok((_, SocketAddr::V6(_))) => None, // ignore IPv6
+            Err(e) => {
+                if e.kind() == ErrorKind::WouldBlock {
+                    let sleep = if !self.inflight_requests.is_empty() {
+                        POLL_INTERVAL_EAGER
+                    } else {
+                        POLL_INTERVAL_RELAXED
+                    };
+                    std::thread::sleep(sleep);
+                } else {
+                    trace!(
+                        context = "socket_error",
+                        ?e,
+                        "recv_from (non-blocking) failed"
+                    );
+                }
+                None
+            }
+        }
+    }
+
+    fn recv_from_adaptive(&mut self, buf: &mut [u8; MTU]) -> Option<(Message, SocketAddrV4)> {
+        match self.socket.recv_from(buf) {
             Ok((amt, SocketAddr::V4(from))) => {
-                // tighten adaptive timeout on activity
-                if let PollStrategy::AdaptiveBackoff = self.poll_strategy {
-                    if self.poll_interval > ADAPTIVE_TIMEOUT_MIN {
-                        if !self.inflight_requests.is_empty() {
-                            self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
-                        } else if self.server_mode {
-                            self.poll_interval = (self.poll_interval / 2).max(ADAPTIVE_TIMEOUT_MIN);
-                        }
+                self.handle_adaptive_timeout();
+                self.process_packet(buf, amt, from)
+            }
+            Ok((_, SocketAddr::V6(_))) => None, // ignore IPv6
+            Err(e) => {
+                if e.kind() == ErrorKind::WouldBlock {
+                    if self.poll_interval < ADAPTIVE_TIMEOUT_MAX {
+                        self.poll_interval = (self.poll_interval * 2).min(ADAPTIVE_TIMEOUT_MAX);
                         let _ = self.socket.set_read_timeout(Some(self.poll_interval));
                     }
+                } else {
+                    trace!(context = "socket_error", ?e, "recv_from (adaptive) failed")
                 }
+                None
+            }
+        }
+    }
 
-                let bytes = &buf[..amt];
-                if from.port() == 0 {
-                    trace!(
-                        context = "socket_validation",
-                        message = "Response from port 0"
-                    );
-                    return None;
-                }
-
-                match Message::from_bytes(bytes) {
-                    Ok(message) => {
-                        let is_good = match &message.message_type {
-                            MessageType::Request(_) => true,
-                            MessageType::Response(_) | MessageType::Error(_) => {
-                                self.is_expected_response(&message, &from)
-                            }
-                        };
-
-                        if is_good {
-                            trace!(
-                                context = "socket_message_receiving",
-                                ?message,
-                                ?from,
-                                "Received message"
-                            );
-                            return Some((message, from));
-                        }
-                    }
-                    Err(err) => {
-                        trace!(
-                            context = "socket_error",
-                            ?err,
-                            ?from,
-                            message = ?String::from_utf8_lossy(bytes),
-                            "Invalid Bencode message"
-                        );
-                    }
-                }
+    fn handle_adaptive_timeout(&mut self) {
+        if self.poll_interval > ADAPTIVE_TIMEOUT_MIN {
+            if !self.inflight_requests.is_empty() {
+                // If there are pending requests be maximally responsive.
+                self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
+            } else if self.server_mode {
+                // If idle and running in server mode, halve the poll_interval, but never below the minimum.
+                self.poll_interval = (self.poll_interval / 2).max(ADAPTIVE_TIMEOUT_MIN);
             }
 
-            Ok((_, SocketAddr::V6(_))) => {
-                // ignore IPv6
-            }
+            // Apply the new timeout to the socket.
+            let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+        }
+    }
 
-            Err(e) => match self.poll_strategy {
-                PollStrategy::NonBlocking => {
-                    if e.kind() == ErrorKind::WouldBlock {
-                        let sleep_duration = if !self.inflight_requests.is_empty() {
-                            POLL_INTERVAL_EAGER
-                        } else {
-                            POLL_INTERVAL_RELAXED
-                        };
-                        std::thread::sleep(sleep_duration);
-                    } else {
-                        trace!(context = "socket_error", ?e, "recv_from failed");
-                    }
-                }
-                PollStrategy::AdaptiveBackoff => match e.kind() {
-                    ErrorKind::WouldBlock => {
-                        if self.poll_interval < ADAPTIVE_TIMEOUT_MAX {
-                            self.poll_interval = (self.poll_interval * 2).min(ADAPTIVE_TIMEOUT_MAX);
-                            let _ = self.socket.set_read_timeout(Some(self.poll_interval));
-                        }
-                    }
-                    _ => {
-                        trace!(context = "socket_error", ?e, "recv_from failed");
-                    }
-                },
-            },
+    fn process_packet(
+        &mut self,
+        buf: &[u8; MTU],
+        amt: usize,
+        from: SocketAddrV4,
+    ) -> Option<(Message, SocketAddrV4)> {
+        if from.port() == 0 {
+            trace!(
+                context = "socket_validation",
+                message = "Response from port 0"
+            );
+            return None;
         }
 
-        None
+        let bytes = &buf[..amt];
+        match Message::from_bytes(bytes) {
+            Ok(message) => {
+                let ok = match &message.message_type {
+                    MessageType::Request(_) => true,
+                    MessageType::Response(_) | MessageType::Error(_) => {
+                        self.is_expected_response(&message, &from)
+                    }
+                };
+                if ok {
+                    trace!(
+                        context = "socket_message_receiving",
+                        ?message,
+                        ?from,
+                        "Received message"
+                    );
+                    Some((message, from))
+                } else {
+                    None
+                }
+            }
+            Err(err) => {
+                trace!(
+                    context = "socket_error",
+                    ?err, ?from,
+                    message = ?String::from_utf8_lossy(bytes),
+                    "Invalid Bencode message"
+                );
+                None
+            }
+        }
     }
 
     // === Private Methods ===
@@ -322,7 +347,7 @@ pub struct InflightRequest {
 }
 
 #[derive(Debug)]
-/// We don't need a map, since we know the maximum size is `65536` requests.
+/// We don't need a map, since we know the maximum size is `65535` requests.
 /// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
 struct InflightRequests {
     next_tid: u32,
@@ -342,9 +367,9 @@ impl InflightRequests {
     }
 
     /// Increments self.next_tid and returns the previous value.
-    fn tid(&mut self) -> u32 {
-        // We don't reuse freed transaction ids, to preserve the sortablitiy
-        // of both `tid`s and `sent_at`.
+    fn get_next_tid(&mut self) -> u32 {
+        // Ordering will hold until wrap occurs at 4294967295 requests.
+        // After wrap the ordering can break, but we can revisit if we ever hit that point.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
@@ -359,20 +384,17 @@ impl InflightRequests {
     }
 
     fn get(&self, key: u32) -> Option<&InflightRequest> {
-        if let Ok(index) = self.find_by_tid(key) {
-            if let Some(request) = self.requests.get(index) {
-                if request.sent_at.elapsed() < self.request_timeout() {
-                    return Some(request);
-                }
-            };
+        let index = self.find_by_tid(key).ok()?;
+        let request = self.requests.get(index)?;
+        if request.sent_at.elapsed() < self.request_timeout() {
+            return Some(request);
         }
-
         None
     }
 
     /// Adds a [InflightRequest] with new transaction_id, and returns that id.
     fn add(&mut self, to: SocketAddrV4) -> u32 {
-        let tid = self.tid();
+        let tid = self.get_next_tid();
         self.requests.push(InflightRequest {
             tid,
             to,
@@ -417,8 +439,10 @@ impl InflightRequests {
             .binary_search_by(|request| request.tid.cmp(&tid))
     }
 
-    /// Removes timeedout requests if necessary to save memory
+    /// Removes timed-out requests if necessary to save memory
     fn cleanup(&mut self) {
+        // Because we call cleanup every recv_from, we want to prevent wasteful
+        // cleanup and only trigger when we are at capacity of the vec
         if self.requests.len() < self.requests.capacity() {
             return;
         }
@@ -446,14 +470,14 @@ mod test {
     fn tid() {
         let mut socket = KrpcSocket::server().unwrap();
 
-        assert_eq!(socket.inflight_requests.tid(), 0);
-        assert_eq!(socket.inflight_requests.tid(), 1);
-        assert_eq!(socket.inflight_requests.tid(), 2);
+        assert_eq!(socket.inflight_requests.get_next_tid(), 0);
+        assert_eq!(socket.inflight_requests.get_next_tid(), 1);
+        assert_eq!(socket.inflight_requests.get_next_tid(), 2);
 
         socket.inflight_requests.next_tid = u32::MAX;
 
-        assert_eq!(socket.inflight_requests.tid(), 4294967295);
-        assert_eq!(socket.inflight_requests.tid(), 0);
+        assert_eq!(socket.inflight_requests.get_next_tid(), 4294967295);
+        assert_eq!(socket.inflight_requests.get_next_tid(), 0);
     }
 
     #[test]
