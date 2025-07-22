@@ -224,36 +224,40 @@ impl KrpcSocket {
         }
 
         let bytes = &buf[..amt];
-        match Message::from_bytes(bytes) {
-            Ok(message) => {
-                let ok = match &message.message_type {
-                    MessageType::Request(_) => true,
-                    MessageType::Response(_) | MessageType::Error(_) => {
-                        self.is_expected_response(&message, &from)
-                    }
-                };
-                if ok {
-                    trace!(
-                        context = "socket_message_receiving",
-                        ?message,
-                        ?from,
-                        "Received message"
-                    );
-                    Some((message, from))
-                } else {
-                    None
-                }
-            }
+
+        let message = match Message::from_bytes(bytes) {
+            Ok(m) => m,
             Err(err) => {
                 trace!(
                     context = "socket_error",
-                    ?err, ?from,
+                    ?err,
+                    ?from,
                     message = ?String::from_utf8_lossy(bytes),
                     "Invalid Bencode message"
                 );
-                None
+                return None;
             }
+        };
+
+        let ok = match &message.message_type {
+            MessageType::Request(_) => true,
+            MessageType::Response(_) | MessageType::Error(_) => {
+                self.is_expected_response(&message, &from)
+            }
+        };
+
+        if !ok {
+            return None;
         }
+
+        trace!(
+            context = "socket_message_receiving",
+            ?message,
+            ?from,
+            "Received message"
+        );
+
+        Some((message, from))
     }
 
     // === Private Methods ===
