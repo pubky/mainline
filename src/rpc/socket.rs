@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
-use crate::rpc::config::PollStrategy;
+use crate::rpc::config::SocketStrategy;
 
 use super::config::Config;
 
@@ -17,13 +17,9 @@ pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 
-// Adaptive‑backoff timeouts
 pub const ADAPTIVE_TIMEOUT_MIN: Duration = Duration::from_micros(100);
-pub const ADAPTIVE_TIMEOUT_MAX: Duration = Duration::from_secs(1);
-
-// Fixed‑poll sleeps
-pub const POLL_INTERVAL_EAGER: Duration = Duration::from_micros(100);
-pub const POLL_INTERVAL_RELAXED: Duration = Duration::from_millis(20);
+pub const RTT_TIMEOUT_MAX: Duration = Duration::from_millis(10);
+pub const POLL_INTERVAL_MAX: Duration = Duration::from_millis(10);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -32,7 +28,7 @@ pub struct KrpcSocket {
     pub(crate) server_mode: bool,
     local_addr: SocketAddrV4,
     inflight_requests: InflightRequests,
-    poll_strategy: PollStrategy,
+    socket_strategy: SocketStrategy,
     poll_interval: Duration,
 }
 
@@ -54,11 +50,11 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        match config.poll_strategy {
-            PollStrategy::NonBlocking => {
+        match config.socket_strategy {
+            SocketStrategy::Hybrid => {
                 socket.set_nonblocking(true)?;
             }
-            PollStrategy::AdaptiveBackoff => {
+            SocketStrategy::Blocking => {
                 socket.set_read_timeout(Some(ADAPTIVE_TIMEOUT_MIN))?;
             }
         }
@@ -68,7 +64,7 @@ impl KrpcSocket {
             server_mode: config.server_mode,
             local_addr,
             inflight_requests: InflightRequests::new(),
-            poll_strategy: config.poll_strategy,
+            socket_strategy: config.socket_strategy,
             poll_interval: ADAPTIVE_TIMEOUT_MIN,
         })
     }
@@ -143,34 +139,73 @@ impl KrpcSocket {
         let mut buf = [0u8; MTU];
         self.inflight_requests.cleanup();
 
-        match self.poll_strategy {
-            PollStrategy::NonBlocking => self.recv_from_nonblocking(&mut buf),
-            PollStrategy::AdaptiveBackoff => self.recv_from_adaptive(&mut buf),
+        match self.socket_strategy {
+            SocketStrategy::Hybrid => self.recv_from_nonblocking(&mut buf),
+            SocketStrategy::Blocking => self.recv_from_adaptive(&mut buf),
         }
     }
 
     fn recv_from_nonblocking(&mut self, buf: &mut [u8; MTU]) -> Option<(Message, SocketAddrV4)> {
+        // Attempt immediate non-blocking read.
         match self.socket.recv_from(buf) {
-            Ok((amt, SocketAddr::V4(from))) => self.process_packet(buf, amt, from),
-            Ok((_, SocketAddr::V6(_))) => None, // ignore IPv6
+            Ok((amt, SocketAddr::V4(from))) => {
+                self.handle_adaptive_poll_interval();
+                return self.process_packet(buf, amt, from);
+            }
+            Ok((_, SocketAddr::V6(_))) => return None, // ignore IPv6
             Err(e) => {
-                if e.kind() == ErrorKind::WouldBlock {
-                    let sleep = if !self.inflight_requests.is_empty() {
-                        POLL_INTERVAL_EAGER
-                    } else {
-                        POLL_INTERVAL_RELAXED
-                    };
-                    std::thread::sleep(sleep);
-                } else {
+                if e.kind() != ErrorKind::WouldBlock {
                     trace!(
                         context = "socket_error",
                         ?e,
                         "recv_from (non-blocking) failed"
                     );
+                    return None;
                 }
-                None
+                // Continue to dynamic mode switching logic below
             }
         }
+
+        // If non-blocking read fails, temporarily switch to read_timeout mode for precision kernel-based waiting
+        // instead of using thread sleep (which can cause missed packets due to scheduling delays)
+        let has_inflight = !self.inflight_requests.is_empty();
+
+        let timeout_duration = if has_inflight {
+            // Use RTT-aware timeout when we have inflight requests
+            let rtt_based_timeout = (self.inflight_requests.estimated_rtt() / 20) // 5% of estimated RTT
+                .clamp(ADAPTIVE_TIMEOUT_MIN, RTT_TIMEOUT_MAX);
+
+            // Adaptive scaling for repeated timeouts
+            let adaptive_timeout = if self.poll_interval < POLL_INTERVAL_MAX {
+                self.poll_interval = (self.poll_interval.mul_f32(1.1)).min(POLL_INTERVAL_MAX);
+                self.poll_interval
+            } else {
+                POLL_INTERVAL_MAX
+            };
+
+            // Use the smaller of RTT-based or adaptive timeout
+            rtt_based_timeout.min(adaptive_timeout)
+        } else {
+            // Use minimal timeout when idle, reset adaptive interval for next burst
+            self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
+            ADAPTIVE_TIMEOUT_MIN
+        };
+
+        let _ = self.socket.set_read_timeout(Some(timeout_duration));
+
+        let result = match self.socket.recv_from(buf) {
+            Ok((amt, SocketAddr::V4(from))) => {
+                self.handle_adaptive_poll_interval();
+                Some(self.process_packet(buf, amt, from))
+            }
+            Ok((_, SocketAddr::V6(_))) => None,
+            Err(_) => None,
+        };
+
+        // Restore non-blocking mode, for next recv_from call.
+        let _ = self.socket.set_nonblocking(true);
+
+        result.flatten()
     }
 
     fn recv_from_adaptive(&mut self, buf: &mut [u8; MTU]) -> Option<(Message, SocketAddrV4)> {
@@ -182,9 +217,19 @@ impl KrpcSocket {
             Ok((_, SocketAddr::V6(_))) => None, // ignore IPv6
             Err(e) => {
                 if e.kind() == ErrorKind::WouldBlock {
-                    if self.poll_interval < ADAPTIVE_TIMEOUT_MAX {
-                        self.poll_interval = (self.poll_interval * 2).min(ADAPTIVE_TIMEOUT_MAX);
-                        let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                    if !self.inflight_requests.is_empty() {
+                        // Use conservative adaptive timeouts when we have inflight requests
+                        if self.poll_interval < POLL_INTERVAL_MAX {
+                            self.poll_interval =
+                                (self.poll_interval.mul_f32(1.1)).min(POLL_INTERVAL_MAX);
+                            let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                        }
+                    } else {
+                        // Reset timeout when idle for next burst of activity
+                        if self.poll_interval > ADAPTIVE_TIMEOUT_MIN {
+                            self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
+                            let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                        }
                     }
                 } else {
                     trace!(context = "socket_error", ?e, "recv_from (adaptive) failed")
@@ -206,6 +251,23 @@ impl KrpcSocket {
 
             // Apply the new timeout to the socket.
             let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+        }
+    }
+
+    fn handle_adaptive_poll_interval(&mut self) {
+        if self.poll_interval > ADAPTIVE_TIMEOUT_MIN {
+            if !self.inflight_requests.is_empty() {
+                // If there are pending requests be maximally responsive
+                self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
+            } else if self.server_mode {
+                // If idle and running in server mode, halve the poll_interval, but never below the minimum
+                self.poll_interval = (self.poll_interval / 2).max(ADAPTIVE_TIMEOUT_MIN);
+                trace!(
+                    context = "adaptive_poll",
+                    "Server mode idle scale down: {:?}",
+                    self.poll_interval
+                );
+            }
         }
     }
 
@@ -385,6 +447,10 @@ impl InflightRequests {
 
     fn is_empty(&self) -> bool {
         self.requests.is_empty()
+    }
+
+    fn estimated_rtt(&self) -> Duration {
+        self.estimated_rtt
     }
 
     fn get(&self, key: u32) -> Option<&InflightRequest> {

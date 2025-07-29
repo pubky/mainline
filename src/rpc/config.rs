@@ -6,16 +6,9 @@ use std::{
 use super::{ServerSettings, DEFAULT_REQUEST_TIMEOUT};
 
 #[derive(Debug, Clone, Copy)]
-pub enum PollStrategy {
-    /// Use a non‐blocking socket and sleep manually on `WouldBlock`.
-    /// Offers the lowest possible receive latency, at the expense of higher CPU usage.
-    NonBlocking,
-
-    /// Use a socket `read_timeout` that:
-    /// - Resets to a short interval when activity is detected (inflight requests or server mode),
-    /// - Doubles up to a max interval on each `WouldBlock`.
-    /// Trades slightly higher receive latency for significantly lower CPU usage when idle.
-    AdaptiveBackoff,
+pub enum SocketStrategy {
+    Hybrid,   // Uses non-blocking socket first, then switches to read_timeout if needed.
+    Blocking, // Solely uses read_timeout.
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +41,7 @@ pub struct Config {
     ///
     /// Defaults to None, where we depend on suggestions from responding nodes.
     pub public_ip: Option<Ipv4Addr>,
-    pub poll_strategy: PollStrategy,
+    pub socket_strategy: SocketStrategy,
 }
 
 impl Default for Config {
@@ -60,7 +53,7 @@ impl Default for Config {
             server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
-            poll_strategy: PollStrategy::NonBlocking,
+            socket_strategy: SocketStrategy::Hybrid,
         }
     }
 }
