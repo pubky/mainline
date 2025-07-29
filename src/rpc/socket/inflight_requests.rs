@@ -132,3 +132,77 @@ impl InflightRequests {
         self.requests.drain(0..index);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddrV4;
+
+    #[test]
+    fn demonstrate_wrap_around_problem() {
+        let mut inflight = InflightRequests::new();
+
+        // Manually create a vector with the wrap-around problem
+        inflight.requests = vec![
+            InflightRequest {
+                tid: u32::MAX - 2,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), 1234),
+                sent_at: Instant::now(),
+            },
+            InflightRequest {
+                tid: u32::MAX - 1,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), 1235),
+                sent_at: Instant::now(),
+            },
+            InflightRequest {
+                tid: u32::MAX,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), 1236),
+                sent_at: Instant::now(),
+            },
+            InflightRequest {
+                tid: 0,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), 1237),
+                sent_at: Instant::now(),
+            },
+            InflightRequest {
+                tid: 1,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), 1238),
+                sent_at: Instant::now(),
+            },
+            InflightRequest {
+                tid: 2,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), 1239),
+                sent_at: Instant::now(),
+            },
+        ];
+
+        println!("Transaction IDs in vector:");
+        for (i, request) in inflight.requests.iter().enumerate() {
+            println!("  [{}]: {}", i, request.tid);
+        }
+
+        // Try to find transaction ID 0 using binary search
+        let search_tid = 0;
+        let result = inflight.find_by_tid(search_tid);
+
+        println!("Binary search for tid={}: {:?}", search_tid, result);
+
+        // The problem: binary search expects a sorted vector, but our vector has:
+        // [u32::MAX-2, u32::MAX-1, u32::MAX, 0, 1, 2]
+        // This is NOT sorted by transaction ID due to wrap-around!
+
+        // Binary search will fail or return incorrect results
+        match result {
+            Ok(index) => {
+                println!("Binary search found tid={} at index {}", search_tid, index);
+                println!("But the vector is not sorted by transaction ID due to wrap-around!");
+                println!("This demonstrates why we need the double vector approach.");
+            }
+            Err(insert_index) => {
+                println!("Binary search failed to find tid={}", search_tid);
+                println!("Would insert at index {}", insert_index);
+                println!("This demonstrates why we need the double vector approach.");
+            }
+        }
+    }
+}
