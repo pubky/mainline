@@ -5,12 +5,6 @@ use std::{
 
 use super::{ServerSettings, DEFAULT_REQUEST_TIMEOUT};
 
-#[derive(Debug, Clone, Copy)]
-pub enum SocketStrategy {
-    Hybrid,   // Uses non-blocking socket first, then switches to read_timeout if needed.
-    Blocking, // Solely uses read_timeout.
-}
-
 #[derive(Debug, Clone)]
 /// Dht Configurations
 pub struct Config {
@@ -41,7 +35,6 @@ pub struct Config {
     ///
     /// Defaults to None, where we depend on suggestions from responding nodes.
     pub public_ip: Option<Ipv4Addr>,
-    pub socket_strategy: SocketStrategy,
 }
 
 impl Default for Config {
@@ -53,7 +46,6 @@ impl Default for Config {
             server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
-            socket_strategy: SocketStrategy::Hybrid,
         }
     }
 }
