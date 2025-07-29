@@ -8,6 +8,8 @@ use tracing::{debug, error, trace};
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
 use super::config::Config;
+pub mod inflight_requests;
+use inflight_requests::{InflightRequest, InflightRequests};
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
 const MTU: usize = 2048;
@@ -18,7 +20,7 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 
 
 pub const ADAPTIVE_TIMEOUT_MIN: Duration = Duration::from_micros(100);
 pub const RTT_TIMEOUT_MAX: Duration = Duration::from_millis(10);
-pub const POLL_INTERVAL_MAX: Duration = Duration::from_millis(10);
+pub const POLL_INTERVAL_MAX: Duration = Duration::from_millis(5);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -138,11 +140,7 @@ impl KrpcSocket {
             Ok((_, SocketAddr::V6(_))) => return None, // ignore IPv6
             Err(e) => {
                 if e.kind() != ErrorKind::WouldBlock {
-                    trace!(
-                        context = "socket_error",
-                        ?e,
-                        "recv_from (non-blocking) failed"
-                    );
+                    trace!(context = "socket_error", ?e, "recv_from failed");
                     return None;
                 }
                 // If read fails continue to read_timeout mode below.
@@ -342,130 +340,6 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
     a.ip() == b.ip()
 }
 
-#[derive(Debug, Clone)]
-pub struct InflightRequest {
-    tid: u32,
-    to: SocketAddrV4,
-    sent_at: Instant,
-}
-
-#[derive(Debug)]
-/// We don't need a map, since we know the maximum size is `65535` requests.
-/// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
-struct InflightRequests {
-    next_tid: u32,
-    requests: Vec<InflightRequest>,
-    estimated_rtt: Duration,
-    deviation_rtt: Duration,
-}
-
-impl InflightRequests {
-    fn new() -> Self {
-        Self {
-            next_tid: 0,
-            requests: Vec::new(),
-            estimated_rtt: Duration::from_secs(5),
-            deviation_rtt: Duration::from_secs(0),
-        }
-    }
-
-    /// Increments self.next_tid and returns the previous value.
-    fn get_next_tid(&mut self) -> u32 {
-        // Ordering will hold until wrap occurs at 4294967295 requests.
-        // After wrap the ordering can break, but we can revisit if we ever hit that point.
-        let tid = self.next_tid;
-        self.next_tid = self.next_tid.wrapping_add(1);
-        tid
-    }
-
-    fn request_timeout(&self) -> Duration {
-        self.estimated_rtt + self.deviation_rtt.mul_f64(4.0)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.requests.is_empty()
-    }
-
-    fn estimated_rtt(&self) -> Duration {
-        self.estimated_rtt
-    }
-
-    fn get(&self, key: u32) -> Option<&InflightRequest> {
-        let index = self.find_by_tid(key).ok()?;
-        let request = self.requests.get(index)?;
-        if request.sent_at.elapsed() < self.request_timeout() {
-            return Some(request);
-        }
-        None
-    }
-
-    /// Adds a [InflightRequest] with new transaction_id, and returns that id.
-    fn add(&mut self, to: SocketAddrV4) -> u32 {
-        let tid = self.get_next_tid();
-        self.requests.push(InflightRequest {
-            tid,
-            to,
-            sent_at: Instant::now(),
-        });
-
-        tid
-    }
-
-    fn remove(&mut self, key: u32) -> Option<InflightRequest> {
-        match self.find_by_tid(key) {
-            Ok(index) => {
-                let request = self.requests.remove(index);
-
-                self.update_rtt_estimates(request.sent_at.elapsed());
-
-                Some(request)
-            }
-            Err(_) => None,
-        }
-    }
-
-    fn update_rtt_estimates(&mut self, sample_rtt: Duration) {
-        // Use TCP-like alpha = 1/8, beta = 1/4
-        let alpha = 0.125;
-        let beta = 0.25;
-
-        let sample_rtt_secs = sample_rtt.as_secs_f64();
-        let est_rtt_secs = self.estimated_rtt.as_secs_f64();
-        let dev_rtt_secs = self.deviation_rtt.as_secs_f64();
-
-        let new_est_rtt = (1.0 - alpha) * est_rtt_secs + alpha * sample_rtt_secs;
-        let new_dev_rtt =
-            (1.0 - beta) * dev_rtt_secs + beta * (sample_rtt_secs - new_est_rtt).abs();
-
-        self.estimated_rtt = Duration::from_secs_f64(new_est_rtt);
-        self.deviation_rtt = Duration::from_secs_f64(new_dev_rtt);
-    }
-
-    fn find_by_tid(&self, tid: u32) -> Result<usize, usize> {
-        self.requests
-            .binary_search_by(|request| request.tid.cmp(&tid))
-    }
-
-    /// Removes timed-out requests if necessary to save memory
-    fn cleanup(&mut self) {
-        // Because we call cleanup every recv_from, we want to prevent wasteful
-        // cleanup and only trigger when we are at capacity of the vec
-        if self.requests.len() < self.requests.capacity() {
-            return;
-        }
-
-        let index = match self
-            .requests
-            .binary_search_by(|request| self.request_timeout().cmp(&request.sent_at.elapsed()))
-        {
-            Ok(index) => index,
-            Err(index) => index,
-        };
-
-        self.requests.drain(0..index);
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -616,5 +490,154 @@ mod test {
         client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn high_u32_transaction_ids_packet_loss() {
+        const NUM_REQUESTS: usize = 200_000;
+
+        // Test with high transaction IDs
+        let high_tid_loss_rate = {
+            let (tx, rx) = flume::bounded(1);
+            let mut client = KrpcSocket::client().unwrap();
+            let client_address = client.local_addr();
+            client.inflight_requests.next_tid = u32::MAX - 100_000;
+
+            let server_thread = thread::spawn(move || {
+                let mut server = KrpcSocket::server().unwrap();
+                let server_address = server.local_addr();
+                tx.send(server_address).unwrap();
+
+                let mut received_count = 0;
+                let start_time = Instant::now();
+                let timeout = Duration::from_secs(15);
+
+                while received_count < NUM_REQUESTS && start_time.elapsed() < timeout {
+                    if let Some((message, from)) = server.recv_from() {
+                        assert_eq!(from.port(), client_address.port());
+                        let response = ResponseSpecific::Ping(PingResponseArguments {
+                            responder_id: Id::random(),
+                        });
+                        server.response(client_address, message.transaction_id, response);
+                        received_count += 1;
+                    }
+                }
+            });
+
+            let server_address = rx.recv().unwrap();
+
+            for _ in 0..NUM_REQUESTS {
+                let request = RequestSpecific {
+                    requester_id: Id::random(),
+                    request_type: RequestTypeSpecific::Ping,
+                };
+                client.request(server_address, request);
+            }
+
+            let mut successful_responses = 0;
+            let start_time = Instant::now();
+            let timeout = Duration::from_secs(15);
+
+            while successful_responses < NUM_REQUESTS && start_time.elapsed() < timeout {
+                if let Some((message, _)) = client.recv_from() {
+                    if matches!(
+                        message.message_type,
+                        MessageType::Response(ResponseSpecific::Ping(_))
+                    ) {
+                        successful_responses += 1;
+                    }
+                }
+            }
+
+            server_thread.join().unwrap();
+            1.0 - (successful_responses as f64 / NUM_REQUESTS as f64)
+        };
+
+        // Test with low transaction IDs as control
+        let low_tid_loss_rate = {
+            let (tx, rx) = flume::bounded(1);
+            let mut client = KrpcSocket::client().unwrap();
+            let client_address = client.local_addr();
+            client.inflight_requests.next_tid = 0;
+
+            let server_thread = thread::spawn(move || {
+                let mut server = KrpcSocket::server().unwrap();
+                let server_address = server.local_addr();
+                tx.send(server_address).unwrap();
+
+                let mut received_count = 0;
+                let start_time = Instant::now();
+                let timeout = Duration::from_secs(15);
+
+                while received_count < NUM_REQUESTS && start_time.elapsed() < timeout {
+                    if let Some((message, from)) = server.recv_from() {
+                        assert_eq!(from.port(), client_address.port());
+                        let response = ResponseSpecific::Ping(PingResponseArguments {
+                            responder_id: Id::random(),
+                        });
+                        server.response(client_address, message.transaction_id, response);
+                        received_count += 1;
+                    }
+                }
+            });
+
+            let server_address = rx.recv().unwrap();
+
+            for _ in 0..NUM_REQUESTS {
+                let request = RequestSpecific {
+                    requester_id: Id::random(),
+                    request_type: RequestTypeSpecific::Ping,
+                };
+                client.request(server_address, request);
+            }
+
+            let mut successful_responses = 0;
+            let start_time = Instant::now();
+            let timeout = Duration::from_secs(15);
+
+            while successful_responses < NUM_REQUESTS && start_time.elapsed() < timeout {
+                if let Some((message, _)) = client.recv_from() {
+                    if matches!(
+                        message.message_type,
+                        MessageType::Response(ResponseSpecific::Ping(_))
+                    ) {
+                        successful_responses += 1;
+                    }
+                }
+            }
+
+            server_thread.join().unwrap();
+            1.0 - (successful_responses as f64 / NUM_REQUESTS as f64)
+        };
+
+        println!(
+            "High TID packet loss rate: {:.2}%",
+            high_tid_loss_rate * 100.0
+        );
+        println!(
+            "Low TID packet loss rate: {:.2}%",
+            low_tid_loss_rate * 100.0
+        );
+
+        // High transaction IDs should have similar packet loss to low ones
+        assert!(
+            (high_tid_loss_rate - low_tid_loss_rate).abs() < 0.1,
+            "Packet loss rates should be similar. High TID: {:.2}%, Low TID: {:.2}%",
+            high_tid_loss_rate * 100.0,
+            low_tid_loss_rate * 100.0
+        );
+
+        // Both should have reasonable loss rates (<20%)
+        assert!(
+            high_tid_loss_rate < 0.2,
+            "High transaction IDs should have <20% packet loss, got {:.2}%",
+            high_tid_loss_rate * 100.0
+        );
+
+        assert!(
+            low_tid_loss_rate < 0.2,
+            "Low transaction IDs should have <20% packet loss, got {:.2}%",
+            low_tid_loss_rate * 100.0
+        );
     }
 }
