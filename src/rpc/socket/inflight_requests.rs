@@ -1,14 +1,10 @@
-// This implementation has a critical flaw with high u32 transaction IDs.
-//
-// When transaction IDs wrap around (from u32::MAX to 0), the binary search
-// in `find_by_tid()` fails because the vector is no longer sorted by transaction ID.
-//
-// Example: If we have requests with TIDs [u32::MAX-2, u32::MAX-1, u32::MAX, 0, 1, 2],
-// the binary search will fail because 0 comes after u32::MAX in the vector but is
-// numerically smaller.
-
 use std::net::SocketAddrV4;
 use std::time::{Duration, Instant};
+
+/// Dual vector approach solves transaction ID wrap-around problem:
+/// - requests_by_tid: sorted by tid for O(log n) lookup
+/// - requests_by_time: sorted by timestamp for O(log n) cleanup
+/// Without this, binary search fails when tid wraps from u32::MAX to 0.
 
 #[derive(Debug, Clone)]
 pub struct InflightRequest {
@@ -18,11 +14,10 @@ pub struct InflightRequest {
 }
 
 #[derive(Debug)]
-/// We don't need a map, since we know the maximum size is `65535` requests.
-/// Requests are also ordered by their transaction_id and thus sent_at, so lookup is fast.
 pub struct InflightRequests {
     pub(crate) next_tid: u32,
-    pub(crate) requests: Vec<InflightRequest>,
+    pub(crate) requests_by_tid: Vec<InflightRequest>,
+    pub(crate) requests_by_time: Vec<InflightRequest>,
     estimated_rtt: Duration,
     deviation_rtt: Duration,
 }
@@ -31,7 +26,8 @@ impl InflightRequests {
     pub fn new() -> Self {
         Self {
             next_tid: 0,
-            requests: Vec::new(),
+            requests_by_tid: Vec::new(),
+            requests_by_time: Vec::new(),
             estimated_rtt: Duration::from_secs(5),
             deviation_rtt: Duration::from_secs(0),
         }
@@ -39,8 +35,6 @@ impl InflightRequests {
 
     /// Increments self.next_tid and returns the previous value.
     pub fn get_next_tid(&mut self) -> u32 {
-        // Ordering will hold until wrap occurs at 4294967295 requests.
-        // After wrap the ordering can break, but we can revisit if we ever hit that point.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
@@ -51,7 +45,7 @@ impl InflightRequests {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.requests.is_empty()
+        self.requests_by_tid.is_empty()
     }
 
     pub fn estimated_rtt(&self) -> Duration {
@@ -60,7 +54,7 @@ impl InflightRequests {
 
     pub fn get(&self, key: u32) -> Option<&InflightRequest> {
         let index = self.find_by_tid(key).ok()?;
-        let request = self.requests.get(index)?;
+        let request = self.requests_by_tid.get(index)?;
         if request.sent_at.elapsed() < self.request_timeout() {
             return Some(request);
         }
@@ -70,19 +64,42 @@ impl InflightRequests {
     /// Adds a [InflightRequest] with new transaction_id, and returns that id.
     pub fn add(&mut self, to: SocketAddrV4) -> u32 {
         let tid = self.get_next_tid();
-        self.requests.push(InflightRequest {
+        let request = InflightRequest {
             tid,
             to,
             sent_at: Instant::now(),
-        });
+        };
+
+        // Insert into requests_by_tid maintaining sort order
+        let tid_index = self
+            .requests_by_tid
+            .binary_search_by(|r| r.tid.cmp(&tid))
+            .unwrap_err();
+        self.requests_by_tid.insert(tid_index, request.clone());
+
+        // Insert into requests_by_time maintaining sort order
+        let time_index = self
+            .requests_by_time
+            .binary_search_by(|r| r.sent_at.cmp(&request.sent_at))
+            .unwrap_err();
+        self.requests_by_time.insert(time_index, request);
 
         tid
     }
 
     pub fn remove(&mut self, key: u32) -> Option<InflightRequest> {
         match self.find_by_tid(key) {
-            Ok(index) => {
-                let request = self.requests.remove(index);
+            Ok(tid_index) => {
+                let request = self.requests_by_tid.remove(tid_index);
+
+                // Find the exact position in time-sorted vector using binary search by timestamp
+                // Since both vectors contain the same requests, this should always succeed
+                if let Ok(time_index) = self
+                    .requests_by_time
+                    .binary_search_by(|r| r.sent_at.cmp(&request.sent_at))
+                {
+                    self.requests_by_time.remove(time_index);
+                }
 
                 self.update_rtt_estimates(request.sent_at.elapsed());
 
@@ -110,31 +127,43 @@ impl InflightRequests {
     }
 
     fn find_by_tid(&self, tid: u32) -> Result<usize, usize> {
-        self.requests
+        self.requests_by_tid
             .binary_search_by(|request| request.tid.cmp(&tid))
     }
 
     /// Removes timed-out requests if necessary to save memory
     pub fn cleanup(&mut self) {
         // Micro optimization to skip cleanup when vector is less than 90% full
-        if self.requests.len() < self.requests.capacity() * 90 / 100 {
+        if self.requests_by_tid.len() < self.requests_by_tid.capacity() * 90 / 100 {
             return;
         }
 
         let index = match self
-            .requests
+            .requests_by_time
             .binary_search_by(|request| self.request_timeout().cmp(&request.sent_at.elapsed()))
         {
             Ok(index) => index,
             Err(index) => index,
         };
 
-        self.requests.drain(0..index);
+        // Remove timed out requests from both vectors
+        let timed_out_requests: Vec<_> = self.requests_by_time.drain(0..index).collect();
+
+        // Remove the same requests from requests_by_tid
+        for request in timed_out_requests {
+            if let Ok(index) = self
+                .requests_by_tid
+                .binary_search_by(|r| r.tid.cmp(&request.tid))
+            {
+                self.requests_by_tid.remove(index);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::InflightRequest;
     use super::*;
     use std::net::SocketAddrV4;
 
@@ -143,7 +172,7 @@ mod tests {
         let mut inflight = InflightRequests::new();
 
         // Manually create a vector with the wrap-around problem
-        inflight.requests = vec![
+        inflight.requests_by_tid = vec![
             InflightRequest {
                 tid: u32::MAX - 2,
                 to: SocketAddrV4::new([127, 0, 0, 1].into(), 1234),
@@ -177,7 +206,7 @@ mod tests {
         ];
 
         println!("Transaction IDs in vector:");
-        for (i, request) in inflight.requests.iter().enumerate() {
+        for (i, request) in inflight.requests_by_tid.iter().enumerate() {
             println!("  [{}]: {}", i, request.tid);
         }
 

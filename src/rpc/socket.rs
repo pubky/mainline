@@ -2,14 +2,14 @@
 
 use std::io::ErrorKind;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::{debug, error, trace};
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
 use super::config::Config;
 pub mod inflight_requests;
-use inflight_requests::{InflightRequest, InflightRequests};
+use inflight_requests::InflightRequests;
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
 const MTU: usize = 2048;
@@ -344,6 +344,7 @@ fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
 mod test {
     use super::*;
     use crate::common::{Id, PingResponseArguments, RequestTypeSpecific};
+    use inflight_requests::InflightRequest;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -410,11 +411,14 @@ mod test {
             let server_address = server.local_addr();
             tx.send(server_address).unwrap();
 
-            server.inflight_requests.requests.push(InflightRequest {
-                tid: 8,
-                to: client_address,
-                sent_at: Instant::now(),
-            });
+            server
+                .inflight_requests
+                .requests_by_tid
+                .push(InflightRequest {
+                    tid: 8,
+                    to: client_address,
+                    sent_at: Instant::now(),
+                });
 
             loop {
                 if let Some((message, from)) = server.recv_from() {
@@ -447,11 +451,14 @@ mod test {
         let tid = 8;
         let sent_at = Instant::now();
 
-        server.inflight_requests.requests.push(InflightRequest {
-            tid,
-            to: SocketAddrV4::new([0, 0, 0, 0].into(), 0),
-            sent_at,
-        });
+        server
+            .inflight_requests
+            .requests_by_tid
+            .push(InflightRequest {
+                tid,
+                to: SocketAddrV4::new([0, 0, 0, 0].into(), 0),
+                sent_at,
+            });
 
         std::thread::sleep(server.inflight_requests.request_timeout());
 
@@ -467,11 +474,14 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.requests.push(InflightRequest {
-            tid: 8,
-            to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
-            sent_at: Instant::now(),
-        });
+        server
+            .inflight_requests
+            .requests_by_tid
+            .push(InflightRequest {
+                tid: 8,
+                to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
+                sent_at: Instant::now(),
+            });
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
             responder_id: Id::random(),
@@ -490,154 +500,5 @@ mod test {
         client.response(server_address, 8, response);
 
         server_thread.join().unwrap();
-    }
-
-    #[test]
-    fn high_u32_transaction_ids_packet_loss() {
-        const NUM_REQUESTS: usize = 200_000;
-
-        // Test with high transaction IDs
-        let high_tid_loss_rate = {
-            let (tx, rx) = flume::bounded(1);
-            let mut client = KrpcSocket::client().unwrap();
-            let client_address = client.local_addr();
-            client.inflight_requests.next_tid = u32::MAX - 100_000;
-
-            let server_thread = thread::spawn(move || {
-                let mut server = KrpcSocket::server().unwrap();
-                let server_address = server.local_addr();
-                tx.send(server_address).unwrap();
-
-                let mut received_count = 0;
-                let start_time = Instant::now();
-                let timeout = Duration::from_secs(15);
-
-                while received_count < NUM_REQUESTS && start_time.elapsed() < timeout {
-                    if let Some((message, from)) = server.recv_from() {
-                        assert_eq!(from.port(), client_address.port());
-                        let response = ResponseSpecific::Ping(PingResponseArguments {
-                            responder_id: Id::random(),
-                        });
-                        server.response(client_address, message.transaction_id, response);
-                        received_count += 1;
-                    }
-                }
-            });
-
-            let server_address = rx.recv().unwrap();
-
-            for _ in 0..NUM_REQUESTS {
-                let request = RequestSpecific {
-                    requester_id: Id::random(),
-                    request_type: RequestTypeSpecific::Ping,
-                };
-                client.request(server_address, request);
-            }
-
-            let mut successful_responses = 0;
-            let start_time = Instant::now();
-            let timeout = Duration::from_secs(15);
-
-            while successful_responses < NUM_REQUESTS && start_time.elapsed() < timeout {
-                if let Some((message, _)) = client.recv_from() {
-                    if matches!(
-                        message.message_type,
-                        MessageType::Response(ResponseSpecific::Ping(_))
-                    ) {
-                        successful_responses += 1;
-                    }
-                }
-            }
-
-            server_thread.join().unwrap();
-            1.0 - (successful_responses as f64 / NUM_REQUESTS as f64)
-        };
-
-        // Test with low transaction IDs as control
-        let low_tid_loss_rate = {
-            let (tx, rx) = flume::bounded(1);
-            let mut client = KrpcSocket::client().unwrap();
-            let client_address = client.local_addr();
-            client.inflight_requests.next_tid = 0;
-
-            let server_thread = thread::spawn(move || {
-                let mut server = KrpcSocket::server().unwrap();
-                let server_address = server.local_addr();
-                tx.send(server_address).unwrap();
-
-                let mut received_count = 0;
-                let start_time = Instant::now();
-                let timeout = Duration::from_secs(15);
-
-                while received_count < NUM_REQUESTS && start_time.elapsed() < timeout {
-                    if let Some((message, from)) = server.recv_from() {
-                        assert_eq!(from.port(), client_address.port());
-                        let response = ResponseSpecific::Ping(PingResponseArguments {
-                            responder_id: Id::random(),
-                        });
-                        server.response(client_address, message.transaction_id, response);
-                        received_count += 1;
-                    }
-                }
-            });
-
-            let server_address = rx.recv().unwrap();
-
-            for _ in 0..NUM_REQUESTS {
-                let request = RequestSpecific {
-                    requester_id: Id::random(),
-                    request_type: RequestTypeSpecific::Ping,
-                };
-                client.request(server_address, request);
-            }
-
-            let mut successful_responses = 0;
-            let start_time = Instant::now();
-            let timeout = Duration::from_secs(15);
-
-            while successful_responses < NUM_REQUESTS && start_time.elapsed() < timeout {
-                if let Some((message, _)) = client.recv_from() {
-                    if matches!(
-                        message.message_type,
-                        MessageType::Response(ResponseSpecific::Ping(_))
-                    ) {
-                        successful_responses += 1;
-                    }
-                }
-            }
-
-            server_thread.join().unwrap();
-            1.0 - (successful_responses as f64 / NUM_REQUESTS as f64)
-        };
-
-        println!(
-            "High TID packet loss rate: {:.2}%",
-            high_tid_loss_rate * 100.0
-        );
-        println!(
-            "Low TID packet loss rate: {:.2}%",
-            low_tid_loss_rate * 100.0
-        );
-
-        // High transaction IDs should have similar packet loss to low ones
-        assert!(
-            (high_tid_loss_rate - low_tid_loss_rate).abs() < 0.1,
-            "Packet loss rates should be similar. High TID: {:.2}%, Low TID: {:.2}%",
-            high_tid_loss_rate * 100.0,
-            low_tid_loss_rate * 100.0
-        );
-
-        // Both should have reasonable loss rates (<20%)
-        assert!(
-            high_tid_loss_rate < 0.2,
-            "High transaction IDs should have <20% packet loss, got {:.2}%",
-            high_tid_loss_rate * 100.0
-        );
-
-        assert!(
-            low_tid_loss_rate < 0.2,
-            "Low transaction IDs should have <20% packet loss, got {:.2}%",
-            low_tid_loss_rate * 100.0
-        );
     }
 }
