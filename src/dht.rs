@@ -966,7 +966,7 @@ mod test {
             228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
         ]);
 
-        // First
+        // First put, use actor message instead of put_mutable to prevent processing
         {
             let item = MutableItem::new(signer.clone(), b"Hello World!0", 1000, None);
 
@@ -981,7 +981,7 @@ mod test {
 
         std::thread::sleep(Duration::from_millis(100));
 
-        // Second
+        // Second put
         {
             let item = MutableItem::new(signer, b"Hello World!1", 1000, None);
             let result = client.put_mutable(item, None);
