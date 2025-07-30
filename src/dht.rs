@@ -961,41 +961,55 @@ mod test {
             .build()
             .unwrap();
 
-        let mut handles = vec![];
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
 
-        for i in 0..2 {
-            let client = client.clone();
+        let seq = 1000;
+        let value1 = b"Hello World!0";
+        let value2 = b"Hello World!1";
 
-            let signer = SigningKey::from_bytes(&[
-                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
-                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
-            ]);
+        let item1 = MutableItem::new(signer.clone(), value1, seq, None);
+        let item2 = MutableItem::new(signer.clone(), value2, seq, None);
 
-            let seq = 1000;
+        // Use a single DHT instance shared between threads
+        let client = std::sync::Arc::new(client);
 
-            let mut value = b"Hello World!".to_vec();
-            value.push(i);
+        // Start the first request in a separate thread
+        let client1 = client.clone();
+        let handle1 = std::thread::spawn(move || {
+            let start = std::time::Instant::now();
+            let result = client1.put_mutable(item1, None);
+            let duration = start.elapsed();
+            println!("First request took: {:?}, result: {:?}", duration, result);
+            result
+        });
 
-            let item = MutableItem::new(signer.clone(), &value, seq, None);
+        // Give the first request time to establish its query in the system
+        std::thread::sleep(std::time::Duration::from_millis(200));
 
-            let handle = std::thread::spawn(move || {
-                let result = client.put_mutable(item, None);
-                if i == 0 {
-                    assert!(matches!(result, Ok(_)))
-                } else {
-                    assert!(matches!(
-                        result,
-                        Err(PutMutableError::Concurrency(ConcurrencyError::ConflictRisk))
-                    ))
-                }
-            });
+        // Start the second request
+        let start2 = std::time::Instant::now();
+        let result2 = client.put_mutable(item2, None);
+        let duration2 = start2.elapsed();
+        println!(
+            "Second request took: {:?}, result: {:?}",
+            duration2, result2
+        );
 
-            handles.push(handle);
-        }
+        // Wait for the first request to complete
+        let result1 = handle1.join().unwrap();
 
-        for handle in handles {
-            handle.join().unwrap();
-        }
+        // Verify results: first should succeed, second should fail with ConflictRisk
+        assert!(matches!(result1, Ok(_)), "First request should succeed");
+        assert!(
+            matches!(
+                result2,
+                Err(PutMutableError::Concurrency(ConcurrencyError::ConflictRisk))
+            ),
+            "Second request should fail with ConflictRisk"
+        );
     }
 
     #[test]

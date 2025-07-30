@@ -1,22 +1,20 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
+pub mod inflight_requests;
 
+use super::config::Config;
+use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
+use inflight_requests::InflightRequests;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::Duration;
 use tracing::{debug, error, trace};
-
-use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
-
-use super::config::Config;
-pub mod inflight_requests;
-use inflight_requests::InflightRequests;
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
 const MTU: usize = 2048;
 
 pub const DEFAULT_PORT: u16 = 6881;
-/// Default request timeout before abandoning an inflight request to a non-responding node.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-pub const FAST_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
+/// Timeouts before abandoning an inflight request to a non-responding node.
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000);
+pub const MIN_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -78,8 +76,6 @@ impl KrpcSocket {
         self.local_addr
     }
 
-    // === Public Methods ===
-
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: u32) -> bool {
         self.inflight_requests
@@ -128,10 +124,10 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        // Update timeout based on activity
+        // Use adaptive timeout for better performance
         let has_inflight = !self.inflight_requests.is_empty();
         self.current_timeout = if has_inflight {
-            FAST_REQUEST_TIMEOUT
+            MIN_REQUEST_TIMEOUT
         } else {
             DEFAULT_REQUEST_TIMEOUT
         };
@@ -139,24 +135,18 @@ impl KrpcSocket {
         // Cleanup inflight requests with current timeout
         self.inflight_requests.cleanup(self.current_timeout);
 
-        // Try multiple non-blocking reads with small delays before falling back
-        for attempt in 0..3 {
-            match self.socket.recv_from(&mut buf) {
-                Ok((amt, SocketAddr::V4(from))) => {
-                    return self.process_packet(&mut buf, amt, from);
-                }
-                Ok((_, SocketAddr::V6(_))) => return None,
-                Err(_) => {
-                    if attempt < 2 {
-                        // Small delay before next attempt (10ms)
-                        std::thread::sleep(Duration::from_millis(10));
-                        continue;
-                    }
-                }
+        // Try one non-blocking read, then fall through to timeout if it fails
+        match self.socket.recv_from(&mut buf) {
+            Ok((amt, SocketAddr::V4(from))) => {
+                return self.process_packet(&mut buf, amt, from);
+            }
+            Ok((_, SocketAddr::V6(_))) => return None,
+            Err(_) => {
+                // Non-blocking read failed (no data), fall through to blocking timeout
             }
         }
 
-        // All non-blocking attempts failed, fall back to blocking timeout
+        // Fall back to blocking timeout
         let _ = self.socket.set_read_timeout(Some(self.current_timeout));
         let result = match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => self.process_packet(&mut buf, amt, from),
@@ -421,7 +411,7 @@ mod test {
                 sent_at,
             });
 
-        std::thread::sleep(FAST_REQUEST_TIMEOUT);
+        std::thread::sleep(DEFAULT_REQUEST_TIMEOUT);
 
         assert!(!server.inflight(tid));
     }

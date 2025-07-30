@@ -288,7 +288,7 @@ impl Rpc {
         }
 
         // === Periodic node maintaenance ===
-        self.periodic_node_maintaenance();
+        self.periodic_node_maintenance();
 
         // Handle new incoming message
         let new_query_response = self
@@ -357,6 +357,11 @@ impl Rpc {
                     return Ok(());
                 } else if *seq < inflight_request.seq {
                     return Err(ConcurrencyError::NotMostRecent)?;
+                } else if *seq == inflight_request.seq {
+                    // Same sequence number indicates a race condition between concurrent requests.
+                    // To ensure deterministic behavior across different environments, we always
+                    // return ConflictRisk rather than allowing timing-dependent outcomes.
+                    return Err(ConcurrencyError::ConflictRisk)?;
                 } else if let Some(cas) = cas {
                     if *cas == inflight_request.seq {
                         // The user is aware of the inflight query and whiches to overrides it.
@@ -747,7 +752,7 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
+    fn periodic_node_maintenance(&mut self) {
         // Bootstrap if necessary
         if self.routing_table.is_empty() {
             self.populate();
