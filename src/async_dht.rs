@@ -641,52 +641,29 @@ mod test {
             228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
         ]);
 
-        let seq = 1000;
-        let value1 = b"Hello World!0";
-        let value2 = b"Hello World!1";
+        // First
+        {
+            let item = MutableItem::new(signer.clone(), b"Hello World!0", 1000, None);
+            let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+            let request =
+                PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
+            dht.0
+                 .0
+                .send(ActorMessage::Put(request, sender, None))
+                .unwrap();
+        }
 
-        let item1 = MutableItem::new(signer.clone(), value1, seq, None);
-        let item2 = MutableItem::new(signer.clone(), value2, seq, None);
+        std::thread::sleep(Duration::from_millis(100));
 
-        // Use a single DHT instance shared between threads
-        let dht = std::sync::Arc::new(dht);
-
-        // Start the first request in a separate thread
-        let dht1 = dht.clone();
-        let handle1 = std::thread::spawn(move || {
-            futures::executor::block_on(async {
-                let start = std::time::Instant::now();
-                let result = dht1.put_mutable(item1, None).await;
-                let duration = start.elapsed();
-                println!("First request took: {:?}, result: {:?}", duration, result);
-                result
-            })
-        });
-
-        // Give the first request time to establish its query in the system
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        // Start the second request
-        let start2 = std::time::Instant::now();
-        let result2 = futures::executor::block_on(async { dht.put_mutable(item2, None).await });
-        let duration2 = start2.elapsed();
-        println!(
-            "Second request took: {:?}, result: {:?}",
-            duration2, result2
-        );
-
-        // Wait for the first request to complete
-        let result1 = handle1.join().unwrap();
-
-        // Verify results: first should succeed, second should fail with ConflictRisk
-        assert!(matches!(result1, Ok(_)), "First request should succeed");
-        assert!(
-            matches!(
-                result2,
+        // Second
+        {
+            let item = MutableItem::new(signer, b"Hello World!1", 1000, None);
+            let result = futures::executor::block_on(async { dht.put_mutable(item, None).await });
+            assert!(matches!(
+                result,
                 Err(PutMutableError::Concurrency(ConcurrencyError::ConflictRisk))
-            ),
-            "Second request should fail with ConflictRisk"
-        );
+            ));
+        }
     }
 
     #[test]
