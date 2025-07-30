@@ -18,8 +18,6 @@ pub struct InflightRequests {
     pub(crate) next_tid: u32,
     pub(crate) requests_by_tid: Vec<InflightRequest>,
     pub(crate) requests_by_time: Vec<InflightRequest>,
-    estimated_rtt: Duration,
-    deviation_rtt: Duration,
 }
 
 impl InflightRequests {
@@ -28,8 +26,6 @@ impl InflightRequests {
             next_tid: 0,
             requests_by_tid: Vec::new(),
             requests_by_time: Vec::new(),
-            estimated_rtt: Duration::from_secs(5),
-            deviation_rtt: Duration::from_secs(0),
         }
     }
 
@@ -40,22 +36,14 @@ impl InflightRequests {
         tid
     }
 
-    pub fn request_timeout(&self) -> Duration {
-        self.estimated_rtt + self.deviation_rtt.mul_f64(4.0)
-    }
-
     pub fn is_empty(&self) -> bool {
         self.requests_by_tid.is_empty()
     }
 
-    pub fn estimated_rtt(&self) -> Duration {
-        self.estimated_rtt
-    }
-
-    pub fn get(&self, key: u32) -> Option<&InflightRequest> {
+    pub fn get(&self, key: u32, timeout: Duration) -> Option<&InflightRequest> {
         let index = self.find_by_tid(key).ok()?;
         let request = self.requests_by_tid.get(index)?;
-        if request.sent_at.elapsed() < self.request_timeout() {
+        if request.sent_at.elapsed() < timeout {
             return Some(request);
         }
         None
@@ -101,29 +89,10 @@ impl InflightRequests {
                     self.requests_by_time.remove(time_index);
                 }
 
-                self.update_rtt_estimates(request.sent_at.elapsed());
-
                 Some(request)
             }
             Err(_) => None,
         }
-    }
-
-    fn update_rtt_estimates(&mut self, sample_rtt: Duration) {
-        // Use TCP-like alpha = 1/8, beta = 1/4
-        let alpha = 0.125;
-        let beta = 0.25;
-
-        let sample_rtt_secs = sample_rtt.as_secs_f64();
-        let est_rtt_secs = self.estimated_rtt.as_secs_f64();
-        let dev_rtt_secs = self.deviation_rtt.as_secs_f64();
-
-        let new_est_rtt = (1.0 - alpha) * est_rtt_secs + alpha * sample_rtt_secs;
-        let new_dev_rtt =
-            (1.0 - beta) * dev_rtt_secs + beta * (sample_rtt_secs - new_est_rtt).abs();
-
-        self.estimated_rtt = Duration::from_secs_f64(new_est_rtt);
-        self.deviation_rtt = Duration::from_secs_f64(new_dev_rtt);
     }
 
     fn find_by_tid(&self, tid: u32) -> Result<usize, usize> {
@@ -132,30 +101,48 @@ impl InflightRequests {
     }
 
     /// Removes timed-out requests if necessary to save memory
-    pub fn cleanup(&mut self) {
-        // Micro optimization to skip cleanup when vector is less than 90% full
-        if self.requests_by_tid.len() < self.requests_by_tid.capacity() * 90 / 100 {
+    pub fn cleanup(&mut self, timeout: Duration) {
+        // Early exit if no requests
+        if self.requests_by_time.is_empty() {
             return;
         }
 
+        // Early exit if oldest request hasn't timed out yet
+        if let Some(oldest) = self.requests_by_time.first() {
+            if oldest.sent_at.elapsed() < timeout {
+                return;
+            }
+        }
+
+        // Find the cutoff index for timed out requests
+        let cutoff_time = Instant::now() - timeout;
         let index = match self
             .requests_by_time
-            .binary_search_by(|request| self.request_timeout().cmp(&request.sent_at.elapsed()))
+            .binary_search_by(|request| request.sent_at.cmp(&cutoff_time))
         {
             Ok(index) => index,
             Err(index) => index,
         };
 
-        // Remove timed out requests from both vectors
-        let timed_out_requests: Vec<_> = self.requests_by_time.drain(0..index).collect();
+        // Early exit if no requests need cleanup
+        if index == 0 {
+            return;
+        }
 
-        // Remove the same requests from requests_by_tid
-        for request in timed_out_requests {
-            if let Ok(index) = self
+        // Collect the requests to be removed before draining
+        let requests_to_remove: Vec<_> = self.requests_by_time[..index].to_vec();
+
+        // Remove from requests_by_time (already sorted by time)
+        self.requests_by_time.drain(0..index);
+
+        // Remove from requests_by_tid using binary search for each request
+        // This is O(k log n) where k is the number of requests to remove
+        for request in &requests_to_remove {
+            if let Ok(tid_index) = self
                 .requests_by_tid
                 .binary_search_by(|r| r.tid.cmp(&request.tid))
             {
-                self.requests_by_tid.remove(index);
+                self.requests_by_tid.remove(tid_index);
             }
         }
     }
@@ -232,6 +219,56 @@ mod tests {
                 println!("Would insert at index {}", insert_index);
                 println!("This demonstrates why we need the double vector approach.");
             }
+        }
+    }
+
+    #[test]
+    fn cleanup_prevents_memory_growth() {
+        use std::thread;
+        use std::time::Duration;
+
+        let mut inflight = InflightRequests::new();
+
+        // Add many requests that will timeout
+        let test_addr = SocketAddrV4::new([127, 0, 0, 1].into(), 1234);
+        let initial_count = 100;
+
+        for _ in 0..initial_count {
+            inflight.add(test_addr);
+        }
+
+        let count_before_cleanup = inflight.requests_by_tid.len();
+        assert_eq!(count_before_cleanup, initial_count);
+
+        // Wait for requests to timeout
+        thread::sleep(Duration::from_millis(600)); // 500ms timeout + buffer
+
+        // Call cleanup to remove timed-out requests
+        inflight.cleanup(Duration::from_millis(500));
+
+        let count_after_cleanup = inflight.requests_by_tid.len();
+
+        // Verify that cleanup removed the timed-out requests
+        assert!(
+            count_after_cleanup < count_before_cleanup,
+            "Cleanup should remove timed-out requests. Before: {}, After: {}",
+            count_before_cleanup,
+            count_after_cleanup
+        );
+
+        // Verify both vectors are in sync
+        assert_eq!(
+            inflight.requests_by_tid.len(),
+            inflight.requests_by_time.len(),
+            "Both vectors should have the same length after cleanup"
+        );
+
+        // Verify that remaining requests are not timed out
+        for request in &inflight.requests_by_tid {
+            assert!(
+                request.sent_at.elapsed() < Duration::from_millis(500),
+                "Remaining requests should not be timed out"
+            );
         }
     }
 }

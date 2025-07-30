@@ -1,6 +1,5 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
-use std::io::ErrorKind;
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::Duration;
 use tracing::{debug, error, trace};
@@ -17,10 +16,7 @@ const MTU: usize = 2048;
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-
-pub const ADAPTIVE_TIMEOUT_MIN: Duration = Duration::from_micros(100);
-pub const RTT_TIMEOUT_MAX: Duration = Duration::from_millis(10);
-pub const POLL_INTERVAL_MAX: Duration = Duration::from_millis(5);
+pub const FAST_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -29,7 +25,7 @@ pub struct KrpcSocket {
     pub(crate) server_mode: bool,
     local_addr: SocketAddrV4,
     inflight_requests: InflightRequests,
-    poll_interval: Duration,
+    current_timeout: Duration,
 }
 
 impl KrpcSocket {
@@ -57,7 +53,7 @@ impl KrpcSocket {
             server_mode: config.server_mode,
             local_addr,
             inflight_requests: InflightRequests::new(),
-            poll_interval: ADAPTIVE_TIMEOUT_MIN,
+            current_timeout: DEFAULT_REQUEST_TIMEOUT,
         })
     }
 
@@ -86,7 +82,9 @@ impl KrpcSocket {
 
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: u32) -> bool {
-        self.inflight_requests.get(transaction_id).is_some()
+        self.inflight_requests
+            .get(transaction_id, self.current_timeout)
+            .is_some()
     }
 
     /// Send a request to the given address and return the transaction_id
@@ -99,6 +97,7 @@ impl KrpcSocket {
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending request message");
         });
+
         tid
     }
 
@@ -111,7 +110,6 @@ impl KrpcSocket {
     ) {
         let message =
             self.response_message(MessageType::Response(response), address, transaction_id);
-        trace!(context = "socket_message_sending", message = ?message);
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending response message");
         });
@@ -129,81 +127,44 @@ impl KrpcSocket {
     /// On success, returns the dht message and the origin.
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
-        self.inflight_requests.cleanup();
 
-        // Attempt immediate non-blocking read.
-        match self.socket.recv_from(&mut buf) {
-            Ok((amt, SocketAddr::V4(from))) => {
-                self.handle_adaptive_poll_interval();
-                return self.process_packet(&mut buf, amt, from);
-            }
-            Ok((_, SocketAddr::V6(_))) => return None, // ignore IPv6
-            Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
-                    trace!(context = "socket_error", ?e, "recv_from failed");
-                    return None;
+        // Update timeout based on activity
+        let has_inflight = !self.inflight_requests.is_empty();
+        self.current_timeout = if has_inflight {
+            FAST_REQUEST_TIMEOUT
+        } else {
+            DEFAULT_REQUEST_TIMEOUT
+        };
+
+        // Cleanup inflight requests with current timeout
+        self.inflight_requests.cleanup(self.current_timeout);
+
+        // Try multiple non-blocking reads with small delays before falling back
+        for attempt in 0..3 {
+            match self.socket.recv_from(&mut buf) {
+                Ok((amt, SocketAddr::V4(from))) => {
+                    return self.process_packet(&mut buf, amt, from);
                 }
-                // If read fails continue to read_timeout mode below.
+                Ok((_, SocketAddr::V6(_))) => return None,
+                Err(_) => {
+                    if attempt < 2 {
+                        // Small delay before next attempt (10ms)
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                }
             }
         }
 
-        // If non-blocking read fails, temporarily switch to read_timeout mode for precision kernel-based waiting
-        // instead of using thread sleep (which can cause missed packets due to scheduling delays)
-        let has_inflight = !self.inflight_requests.is_empty();
-
-        let timeout_duration = if has_inflight {
-            // Use RTT-aware timeout when we have inflight requests
-            let rtt_based_timeout = (self.inflight_requests.estimated_rtt() / 20) // 5% of estimated RTT
-                .clamp(ADAPTIVE_TIMEOUT_MIN, RTT_TIMEOUT_MAX);
-
-            // Adaptive scaling for repeated timeouts
-            let adaptive_timeout = if self.poll_interval < POLL_INTERVAL_MAX {
-                self.poll_interval = (self.poll_interval.mul_f32(1.1)).min(POLL_INTERVAL_MAX);
-                self.poll_interval
-            } else {
-                POLL_INTERVAL_MAX
-            };
-
-            // Use the smaller of RTT-based or adaptive timeout
-            rtt_based_timeout.min(adaptive_timeout)
-        } else {
-            // Use minimal timeout when idle, reset adaptive interval for next burst
-            self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
-            ADAPTIVE_TIMEOUT_MIN
-        };
-
-        let _ = self.socket.set_read_timeout(Some(timeout_duration));
-
+        // All non-blocking attempts failed, fall back to blocking timeout
+        let _ = self.socket.set_read_timeout(Some(self.current_timeout));
         let result = match self.socket.recv_from(&mut buf) {
-            Ok((amt, SocketAddr::V4(from))) => {
-                self.handle_adaptive_poll_interval();
-                Some(self.process_packet(&mut buf, amt, from))
-            }
+            Ok((amt, SocketAddr::V4(from))) => self.process_packet(&mut buf, amt, from),
             Ok((_, SocketAddr::V6(_))) => None,
             Err(_) => None,
         };
-
-        // Restore non-blocking mode, for next recv_from call.
         let _ = self.socket.set_nonblocking(true);
-
-        result.flatten()
-    }
-
-    fn handle_adaptive_poll_interval(&mut self) {
-        if self.poll_interval > ADAPTIVE_TIMEOUT_MIN {
-            if !self.inflight_requests.is_empty() {
-                // If there are pending requests be maximally responsive
-                self.poll_interval = ADAPTIVE_TIMEOUT_MIN;
-            } else if self.server_mode {
-                // If idle and running in server mode, halve the poll_interval, but never below the minimum
-                self.poll_interval = (self.poll_interval / 2).max(ADAPTIVE_TIMEOUT_MIN);
-                trace!(
-                    context = "adaptive_poll",
-                    "Server mode idle scale down: {:?}",
-                    self.poll_interval
-                );
-            }
-        }
+        result
     }
 
     fn process_packet(
@@ -460,7 +421,7 @@ mod test {
                 sent_at,
             });
 
-        std::thread::sleep(server.inflight_requests.request_timeout());
+        std::thread::sleep(FAST_REQUEST_TIMEOUT);
 
         assert!(!server.inflight(tid));
     }
