@@ -1,6 +1,5 @@
 //! Kademlia node Id or a lookup target
 use crc::{Crc, CRC_32_ISCSI};
-use getrandom::getrandom;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::{
@@ -24,8 +23,7 @@ impl Id {
     /// Generate a random Id
     pub fn random() -> Id {
         let mut bytes: [u8; 20] = [0; 20];
-        getrandom::getrandom(&mut bytes).expect("getrandom");
-
+        getrandom::fill(&mut bytes).expect("getrandom");
         Id(bytes)
     }
 
@@ -99,7 +97,7 @@ impl Id {
     /// Create a new Id from an Ipv4 address according to [BEP_0042](http://bittorrent.org/beps/bep_0042.html).
     pub fn from_ipv4(ipv4: Ipv4Addr) -> Id {
         let mut bytes = [0_u8; 21];
-        getrandom(&mut bytes).expect("getrandom");
+        getrandom::fill(&mut bytes).expect("getrandom");
 
         from_ipv4_and_r(bytes[1..].try_into().expect("infallible"), ipv4, bytes[0])
     }
