@@ -3,7 +3,7 @@
 mod inflight_requests;
 
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
 
 use inflight_requests::InflightRequests;
@@ -18,6 +18,8 @@ const MTU: usize = 8192; // Increased buffer for better throughput
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000); // 1 second for faster retries
+/// Cleanup interval for expired inflight requests to avoid overhead on every recv
+const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -27,6 +29,7 @@ pub struct KrpcSocket {
     pub(crate) server_mode: bool,
     request_timeout: Duration,
     inflight_requests: InflightRequests,
+    last_cleanup: Instant,
 
     local_addr: SocketAddrV4,
 }
@@ -59,6 +62,7 @@ impl KrpcSocket {
             server_mode: config.server_mode,
             request_timeout,
             inflight_requests: InflightRequests::new(),
+            last_cleanup: Instant::now(),
 
             local_addr,
         })
@@ -133,8 +137,12 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        // Lazy cleanup of expired requests
-        self.inflight_requests.cleanup(self.request_timeout);
+        // Lazy cleanup of expired requests - only occasionally for performance
+        let now = Instant::now();
+        if now.duration_since(self.last_cleanup) > INFLIGHT_CLEANUP_INTERVAL {
+            self.last_cleanup = now;
+            self.inflight_requests.cleanup(self.request_timeout);
+        }
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
