@@ -25,11 +25,11 @@ pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
-    next_tid: u16,
+    next_tid: u32,
     socket: UdpSocket,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
-    inflight_requests: BTreeMap<u16, InflightRequest>,
+    inflight_requests: BTreeMap<u32, InflightRequest>,
 
     local_addr: SocketAddrV4,
 }
@@ -96,12 +96,12 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Returns true if this message's transaction_id is still inflight
-    pub fn inflight(&self, transaction_id: &u16) -> bool {
-        self.inflight_requests.contains_key(transaction_id)
+    pub fn inflight(&self, transaction_id: u32) -> bool {
+        self.inflight_requests.contains_key(&transaction_id)
     }
 
     /// Send a request to the given address and return the transaction_id
-    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
+    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u32 {
         let message = self.request_message(request);
         trace!(context = "socket_message_sending", message = ?message);
 
@@ -123,7 +123,7 @@ impl KrpcSocket {
     pub fn response(
         &mut self,
         address: SocketAddrV4,
-        transaction_id: u16,
+        transaction_id: u32,
         response: ResponseSpecific,
     ) {
         let message =
@@ -135,7 +135,7 @@ impl KrpcSocket {
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u16, error: ErrorSpecific) {
+    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u32, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending error message");
@@ -254,10 +254,10 @@ impl KrpcSocket {
     }
 
     /// Increments self.next_tid and returns the previous value.
-    fn tid(&mut self) -> u16 {
+    fn tid(&mut self) -> u32 {
         // We don't bother much with reusing freed transaction ids,
         // since the timeout is so short we are unlikely to run out
-        // of 65535 ids in 2 seconds.
+        // of 4 billion ids in 1 second.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
@@ -281,7 +281,7 @@ impl KrpcSocket {
         &mut self,
         message: MessageType,
         requester_ip: SocketAddrV4,
-        request_tid: u16,
+        request_tid: u32,
     ) -> Message {
         Message {
             transaction_id: request_tid,
@@ -342,9 +342,9 @@ mod test {
         assert_eq!(socket.tid(), 1);
         assert_eq!(socket.tid(), 2);
 
-        socket.next_tid = u16::MAX;
+        socket.next_tid = u32::MAX;
 
-        assert_eq!(socket.tid(), 65535);
+        assert_eq!(socket.tid(), 4294967295);
         assert_eq!(socket.tid(), 0);
     }
 
