@@ -26,6 +26,10 @@ use crate::{
 
 use crate::rpc::config::Config;
 
+/// Brief sleep duration when there is no network activity to prevent CPU spinning
+/// 500µs seems to be a good balance between CPU usage and responsiveness
+pub const IDLE_POLL_INTERVAL: Duration = Duration::from_micros(500);
+
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
@@ -497,8 +501,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
             loop {
                 match receiver.try_recv() {
-                    Ok(actor_message) => {
-                        match actor_message {
+                    Ok(actor_message) => match actor_message {
                         ActorMessage::Check(sender) => {
                             let _ = sender.send(Ok(()));
                         }
@@ -535,7 +538,6 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                         ActorMessage::ToBootstrap(sender) => {
                             let _ = sender.send(rpc.routing_table().to_bootstrap());
                         }
-                        }
                     },
                     Err(TryRecvError::Disconnected) => {
                         // Node was dropped, kill this thread.
@@ -548,15 +550,15 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 }
 
                 let report = rpc.tick();
-                
+
                 // Check if we processed any network activity
-                let network_activity = report.new_query_response.is_some() 
-                    || !report.done_get_queries.is_empty() 
+                let network_activity = report.new_query_response.is_some()
+                    || !report.done_get_queries.is_empty()
                     || !report.done_put_queries.is_empty();
 
-                // Smart sleep: only when no network activity, brief but CPU-friendly
+                // Only when no network activity, brief but CPU-friendly
                 if !network_activity {
-                    std::thread::sleep(std::time::Duration::from_micros(500)); // 0.5ms - balance CPU vs responsiveness
+                    std::thread::sleep(IDLE_POLL_INTERVAL);
                 }
 
                 // Response for an ongoing GET query

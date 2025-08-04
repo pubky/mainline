@@ -46,9 +46,9 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "relay.pkarr.org:6881",
 ];
 
-const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(30 * 60); // Reduced maintenance frequency
-const PING_TABLE_INTERVAL: Duration = Duration::from_secs(10 * 60); // Reduced ping frequency
-
+const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const MAX_MESSAGES_PER_TICK: usize = 5; // How many messages to process per tick
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
 #[derive(Debug)]
@@ -287,13 +287,12 @@ impl Rpc {
             self.put_queries.remove(id);
         }
 
-        // === Periodic node maintaenance ===
-        self.periodic_node_maintaenance();
+        // === Periodic node maintenance ===
+        self.periodic_node_maintenance();
 
-        // Handle new incoming messages - batch process for better throughput
+        // Handle new incoming messages, batch process for better throughput
         let mut new_query_response = None;
-        const MAX_MESSAGES_PER_TICK: usize = 6; // Conservative for CPU efficiency while maintaining good throughput
-        
+
         for _ in 0..MAX_MESSAGES_PER_TICK {
             if let Some((message, from)) = self.socket.recv_from() {
                 match message.message_type {
@@ -758,7 +757,7 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
+    fn periodic_node_maintenance(&mut self) {
         // Bootstrap if necessary
         if self.routing_table.is_empty() {
             self.populate();

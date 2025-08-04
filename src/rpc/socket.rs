@@ -34,7 +34,6 @@ pub struct KrpcSocket {
     local_addr: SocketAddrV4,
 }
 
-
 impl KrpcSocket {
     pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
         let request_timeout = config.request_timeout;
@@ -137,7 +136,7 @@ impl KrpcSocket {
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        // Lazy cleanup of expired requests - only occasionally for performance
+        // Only clean up occasionally for performance
         let now = Instant::now();
         if now.duration_since(self.last_cleanup) > INFLIGHT_CLEANUP_INTERVAL {
             self.last_cleanup = now;
@@ -210,7 +209,7 @@ impl KrpcSocket {
                 );
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // Don't sleep here - let the actor loop control timing
+                // Don't sleep here, let the actor loop control timing
             }
             Err(e) => {
                 trace!(
@@ -243,7 +242,7 @@ impl KrpcSocket {
     fn tid(&mut self) -> u32 {
         // We don't bother much with reusing freed transaction ids,
         // since the timeout is so short we are unlikely to run out
-        // of 4 billion ids in 1 second.
+        // of ~4 billion ids in 1 second.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
@@ -298,7 +297,6 @@ pub enum SendMessageError {
     /// Transparent [std::io::Error]
     IO(#[from] std::io::Error),
 }
-
 
 #[cfg(test)]
 mod test {
