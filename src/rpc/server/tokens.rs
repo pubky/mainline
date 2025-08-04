@@ -1,7 +1,6 @@
 //! Manage tokens for remote client IPs.
 
 use crc::{Crc, CRC_32_ISCSI};
-use getrandom::getrandom;
 use std::{
     fmt::{self, Debug, Formatter},
     net::SocketAddrV4,
@@ -98,7 +97,7 @@ impl Default for Tokens {
 
 fn random() -> [u8; SECRET_SIZE] {
     let mut bytes = [0_u8; SECRET_SIZE];
-    getrandom(&mut bytes).expect("getrandom");
+    getrandom::fill(&mut bytes).expect("getrandom");
 
     bytes
 }

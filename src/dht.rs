@@ -656,6 +656,7 @@ impl Testnet {
         Ok(testnet)
     }
 
+    #[cfg(feature = "async")]
     /// Similar to [Self::new] but awaits all nodes to bootstrap instead of blocking.
     pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
         let testnet = Testnet::new_inner(count)?;
