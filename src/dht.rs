@@ -497,7 +497,8 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
             loop {
                 match receiver.try_recv() {
-                    Ok(actor_message) => match actor_message {
+                    Ok(actor_message) => {
+                        match actor_message {
                         ActorMessage::Check(sender) => {
                             let _ = sender.send(Ok(()));
                         }
@@ -534,6 +535,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                         ActorMessage::ToBootstrap(sender) => {
                             let _ = sender.send(rpc.routing_table().to_bootstrap());
                         }
+                        }
                     },
                     Err(TryRecvError::Disconnected) => {
                         // Node was dropped, kill this thread.
@@ -546,6 +548,16 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 }
 
                 let report = rpc.tick();
+                
+                // Check if we processed any network activity
+                let network_activity = report.new_query_response.is_some() 
+                    || !report.done_get_queries.is_empty() 
+                    || !report.done_put_queries.is_empty();
+
+                // Smart sleep: only when no network activity, brief but CPU-friendly
+                if !network_activity {
+                    std::thread::sleep(std::time::Duration::from_micros(500)); // 0.5ms - balance CPU vs responsiveness
+                }
 
                 // Response for an ongoing GET query
                 if let Some((target, response)) = report.new_query_response {

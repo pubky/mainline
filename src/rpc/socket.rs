@@ -13,17 +13,11 @@ use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, Respon
 use super::config::Config;
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
-const MTU: usize = 2048;
+const MTU: usize = 8192; // Increased buffer for better throughput
 
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-/// The maximum duration to backoff checking the [UdpSocket] buffer after it is empty.
-/// Lower values increases CPU usage, but reduces latency, and drains the buffer faster,
-/// reducing the risk of packet loss.
-// TODO: Either add as an option to [Config] and [DhtBuilder],
-//       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
-pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000); // 1 second for faster retries
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
@@ -134,7 +128,7 @@ impl KrpcSocket {
         });
     }
 
-    /// Receives a single krpc message on the socket.
+    /// Receives krpc messages from the socket.
     /// On success, returns the dht message and the origin.
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
@@ -208,7 +202,7 @@ impl KrpcSocket {
                 );
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(MAX_THREAD_BLOCK_DURATION);
+                // Don't sleep here - let the actor loop control timing
             }
             Err(e) => {
                 trace!(

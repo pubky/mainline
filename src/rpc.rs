@@ -46,8 +46,8 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "relay.pkarr.org:6881",
 ];
 
-const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
-const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(30 * 60); // Reduced maintenance frequency
+const PING_TABLE_INTERVAL: Duration = Duration::from_secs(10 * 60); // Reduced ping frequency
 
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
@@ -290,18 +290,29 @@ impl Rpc {
         // === Periodic node maintaenance ===
         self.periodic_node_maintaenance();
 
-        // Handle new incoming message
-        let new_query_response = self
-            .socket
-            .recv_from()
-            .and_then(|(message, from)| match message.message_type {
-                MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
-
-                    None
+        // Handle new incoming messages - batch process for better throughput
+        let mut new_query_response = None;
+        const MAX_MESSAGES_PER_TICK: usize = 6; // Conservative for CPU efficiency while maintaining good throughput
+        
+        for _ in 0..MAX_MESSAGES_PER_TICK {
+            if let Some((message, from)) = self.socket.recv_from() {
+                match message.message_type {
+                    MessageType::Request(request_specific) => {
+                        self.handle_request(from, message.transaction_id, request_specific);
+                    }
+                    _ => {
+                        if new_query_response.is_none() {
+                            new_query_response = self.handle_response(from, message);
+                        } else {
+                            // Process additional responses but don't return multiple
+                            self.handle_response(from, message);
+                        }
+                    }
                 }
-                _ => self.handle_response(from, message),
-            });
+            } else {
+                break;
+            }
+        }
 
         RpcTickReport {
             done_get_queries,
