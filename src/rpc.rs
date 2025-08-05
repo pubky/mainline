@@ -48,7 +48,7 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
-
+const MAX_MESSAGES_PER_TICK: usize = 5; // How many messages to process per tick
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
 #[derive(Debug)]
@@ -287,21 +287,31 @@ impl Rpc {
             self.put_queries.remove(id);
         }
 
-        // === Periodic node maintaenance ===
-        self.periodic_node_maintaenance();
+        // === Periodic node maintenance ===
+        self.periodic_node_maintenance();
 
-        // Handle new incoming message
-        let new_query_response = self
-            .socket
-            .recv_from()
-            .and_then(|(message, from)| match message.message_type {
-                MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
+        // Handle new incoming messages, batch process for better throughput
+        let mut new_query_response = None;
 
-                    None
+        for _ in 0..MAX_MESSAGES_PER_TICK {
+            if let Some((message, from)) = self.socket.recv_from() {
+                match message.message_type {
+                    MessageType::Request(request_specific) => {
+                        self.handle_request(from, message.transaction_id, request_specific);
+                    }
+                    _ => {
+                        if new_query_response.is_none() {
+                            new_query_response = self.handle_response(from, message);
+                        } else {
+                            // Process additional responses but don't return multiple
+                            self.handle_response(from, message);
+                        }
+                    }
                 }
-                _ => self.handle_response(from, message),
-            });
+            } else {
+                break;
+            }
+        }
 
         RpcTickReport {
             done_get_queries,
@@ -311,7 +321,7 @@ impl Rpc {
     }
 
     /// Send a request to the given address and return the transaction_id
-    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
+    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u32 {
         self.socket.request(address, request)
     }
 
@@ -319,14 +329,14 @@ impl Rpc {
     pub fn response(
         &mut self,
         address: SocketAddrV4,
-        transaction_id: u16,
+        transaction_id: u32,
         response: ResponseSpecific,
     ) {
         self.socket.response(address, transaction_id, response)
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u16, error: ErrorSpecific) {
+    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u32, error: ErrorSpecific) {
         self.socket.error(address, transaction_id, error)
     }
 
@@ -513,7 +523,7 @@ impl Rpc {
     fn handle_request(
         &mut self,
         from: SocketAddrV4,
-        transaction_id: u16,
+        transaction_id: u32,
         request_specific: RequestSpecific,
     ) {
         // By default we only add nodes that responds to our requests.
@@ -747,7 +757,7 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
+    fn periodic_node_maintenance(&mut self) {
         // Bootstrap if necessary
         if self.routing_table.is_empty() {
             self.populate();

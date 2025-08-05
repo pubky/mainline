@@ -26,6 +26,10 @@ use crate::{
 
 use crate::rpc::config::Config;
 
+/// Brief sleep duration when there is no network activity to prevent CPU spinning
+/// 500µs seems to be a good balance between CPU usage and responsiveness
+pub const IDLE_POLL_INTERVAL: Duration = Duration::from_micros(500);
+
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
@@ -546,6 +550,16 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 }
 
                 let report = rpc.tick();
+
+                // Check if we processed any network activity
+                let network_activity = report.new_query_response.is_some()
+                    || !report.done_get_queries.is_empty()
+                    || !report.done_put_queries.is_empty();
+
+                // Only when there is no network activity, do brief CPU-friendly sleep
+                if !network_activity {
+                    std::thread::sleep(IDLE_POLL_INTERVAL);
+                }
 
                 // Response for an ongoing GET query
                 if let Some((target, response)) = report.new_query_response {

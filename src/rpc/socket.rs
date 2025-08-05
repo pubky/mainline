@@ -1,43 +1,37 @@
 //! UDP socket layer managing incoming/outgoing requests and responses.
 
-use std::collections::BTreeMap;
+mod inflight_requests;
+
 use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
+
+use inflight_requests::InflightRequests;
 
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 
 use super::config::Config;
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
-const MTU: usize = 2048;
+const MTU: usize = 8192; // Increased buffer for better throughput
 
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-/// The maximum duration to backoff checking the [UdpSocket] buffer after it is empty.
-/// Lower values increases CPU usage, but reduces latency, and drains the buffer faster,
-/// reducing the risk of packet loss.
-// TODO: Either add as an option to [Config] and [DhtBuilder],
-//       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
-pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000); // 1 second for faster retries
+/// Cleanup interval for expired inflight requests to avoid overhead on every recv
+const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
-    next_tid: u16,
+    next_tid: u32,
     socket: UdpSocket,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
-    inflight_requests: BTreeMap<u16, InflightRequest>,
+    inflight_requests: InflightRequests,
+    last_cleanup: Instant,
 
     local_addr: SocketAddrV4,
-}
-
-#[derive(Debug)]
-pub struct InflightRequest {
-    to: SocketAddrV4,
-    sent_at: Instant,
 }
 
 impl KrpcSocket {
@@ -66,7 +60,8 @@ impl KrpcSocket {
             next_tid: 0,
             server_mode: config.server_mode,
             request_timeout,
-            inflight_requests: BTreeMap::new(),
+            inflight_requests: InflightRequests::new(),
+            last_cleanup: Instant::now(),
 
             local_addr,
         })
@@ -96,23 +91,17 @@ impl KrpcSocket {
     // === Public Methods ===
 
     /// Returns true if this message's transaction_id is still inflight
-    pub fn inflight(&self, transaction_id: &u16) -> bool {
-        self.inflight_requests.contains_key(transaction_id)
+    pub fn inflight(&self, transaction_id: u32) -> bool {
+        self.inflight_requests.contains(transaction_id)
     }
 
     /// Send a request to the given address and return the transaction_id
-    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
+    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u32 {
         let message = self.request_message(request);
         trace!(context = "socket_message_sending", message = ?message);
 
         let tid = message.transaction_id;
-        self.inflight_requests.insert(
-            tid,
-            InflightRequest {
-                to: address,
-                sent_at: Instant::now(),
-            },
-        );
+        self.inflight_requests.add(tid, address);
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending request message");
         });
@@ -123,7 +112,7 @@ impl KrpcSocket {
     pub fn response(
         &mut self,
         address: SocketAddrV4,
-        transaction_id: u16,
+        transaction_id: u32,
         response: ResponseSpecific,
     ) {
         let message =
@@ -135,21 +124,24 @@ impl KrpcSocket {
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u16, error: ErrorSpecific) {
+    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u32, error: ErrorSpecific) {
         let message = self.response_message(MessageType::Error(error), address, transaction_id);
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending error message");
         });
     }
 
-    /// Receives a single krpc message on the socket.
+    /// Receives krpc messages from the socket.
     /// On success, returns the dht message and the origin.
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
-        let timeout = self.request_timeout;
-        self.inflight_requests
-            .retain(|_, req| req.sent_at.elapsed() <= timeout);
+        // Only clean up occasionally for performance
+        let now = Instant::now();
+        if now.duration_since(self.last_cleanup) > INFLIGHT_CLEANUP_INTERVAL {
+            self.last_cleanup = now;
+            self.inflight_requests.cleanup(self.request_timeout);
+        }
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
@@ -217,7 +209,7 @@ impl KrpcSocket {
                 );
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(MAX_THREAD_BLOCK_DURATION);
+                // Don't sleep here, let the actor loop control timing
             }
             Err(e) => {
                 trace!(
@@ -234,30 +226,23 @@ impl KrpcSocket {
     // === Private Methods ===
 
     fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
-        // Positive or an error response or to an inflight request.
-        if let Some(request) = self.inflight_requests.remove(&message.transaction_id) {
-            if compare_socket_addr(&request.to, from) {
-                return true;
-            } else {
-                trace!(
-                    context = "socket_validation",
-                    message = "Response from wrong address"
-                );
-            }
+        // Find and remove the matching inflight request
+        if let Some(_request) = self.inflight_requests.remove(message.transaction_id, from) {
+            return true;
         } else {
             trace!(
                 context = "socket_validation",
-                message = "Unexpected response id"
+                message = "Unexpected response id or wrong address"
             );
         }
         false
     }
 
     /// Increments self.next_tid and returns the previous value.
-    fn tid(&mut self) -> u16 {
+    fn tid(&mut self) -> u32 {
         // We don't bother much with reusing freed transaction ids,
         // since the timeout is so short we are unlikely to run out
-        // of 65535 ids in 2 seconds.
+        // of ~4 billion ids in 1 second.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
@@ -281,7 +266,7 @@ impl KrpcSocket {
         &mut self,
         message: MessageType,
         requester_ip: SocketAddrV4,
-        request_tid: u16,
+        request_tid: u32,
     ) -> Message {
         Message {
             transaction_id: request_tid,
@@ -313,19 +298,6 @@ pub enum SendMessageError {
     IO(#[from] std::io::Error),
 }
 
-// Same as SocketAddr::eq but ignores the ip if it is unspecified for testing reasons.
-fn compare_socket_addr(a: &SocketAddrV4, b: &SocketAddrV4) -> bool {
-    if a.port() != b.port() {
-        return false;
-    }
-
-    if a.ip().is_unspecified() {
-        return true;
-    }
-
-    a.ip() == b.ip()
-}
-
 #[cfg(test)]
 mod test {
     use std::thread;
@@ -342,9 +314,9 @@ mod test {
         assert_eq!(socket.tid(), 1);
         assert_eq!(socket.tid(), 2);
 
-        socket.next_tid = u16::MAX;
+        socket.next_tid = u32::MAX;
 
-        assert_eq!(socket.tid(), 65535);
+        assert_eq!(socket.tid(), 4294967295);
         assert_eq!(socket.tid(), 0);
     }
 
@@ -396,13 +368,7 @@ mod test {
             tx.send(server_address).unwrap();
 
             loop {
-                server.inflight_requests.insert(
-                    8,
-                    InflightRequest {
-                        to: client_address,
-                        sent_at: Instant::now(),
-                    },
-                );
+                server.inflight_requests.add(8, client_address);
 
                 if let Some((message, from)) = server.recv_from() {
                     assert_eq!(from.port(), client_address.port());
@@ -436,12 +402,9 @@ mod test {
 
         let client_address = client.local_addr();
 
-        server.inflight_requests.insert(
+        server.inflight_requests.add(
             8,
-            InflightRequest {
-                to: SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
-                sent_at: Instant::now(),
-            },
+            SocketAddrV4::new([127, 0, 0, 1].into(), client_address.port() + 1),
         );
 
         let response = ResponseSpecific::Ping(PingResponseArguments {
