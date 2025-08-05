@@ -11,7 +11,13 @@ pub struct InflightRequest {
 
 #[derive(Debug)]
 pub struct InflightRequests {
+    // Vec stores the actual request data in insertion order, allowing efficient
+    // iteration during cleanup operations. The Vec maintains the original order
+    // which is useful for time-based operations and memory locality.
     requests: Vec<InflightRequest>,
+    // HashMap provides O(1) lookup by transaction_id for contains() and remove()
+    // operations. The usize value is the index into the Vec, enabling fast
+    // random access to specific requests without scanning the entire Vec.
     index: HashMap<u32, usize>,
 }
 

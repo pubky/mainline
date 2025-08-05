@@ -556,7 +556,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     || !report.done_get_queries.is_empty()
                     || !report.done_put_queries.is_empty();
 
-                // Only when no network activity, brief but CPU-friendly
+                // Only when there is no network activity, do brief CPU-friendly sleep
                 if !network_activity {
                     std::thread::sleep(IDLE_POLL_INTERVAL);
                 }
