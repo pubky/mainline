@@ -26,9 +26,8 @@ use crate::{
 
 use crate::rpc::config::Config;
 
-/// Brief sleep duration when there is no network activity to prevent CPU spinning
-/// 500µs seems to be a good balance between CPU usage and responsiveness
-pub const IDLE_POLL_INTERVAL: Duration = Duration::from_micros(500);
+const MAX_BACKOFF_TIMEOUT_MS: u64 = 200;
+const MAX_BACKOFF_MAX_EXP: u32 = 8;
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
@@ -498,6 +497,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
             let mut put_senders = HashMap::new();
             let mut get_senders = HashMap::new();
+            let mut idle_streak: u32 = 0;
 
             loop {
                 match receiver.try_recv() {
@@ -549,17 +549,17 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                let report = rpc.tick();
+                // Calculate the timeout based on activity and idle streak.
+                let has_pending_work =
+                    rpc.has_active_queries() || !get_senders.is_empty() || !put_senders.is_empty();
+                let timeout = calculate_poll_timeout(has_pending_work, &mut idle_streak);
 
-                // Check if we processed any network activity
-                let network_activity = report.new_query_response.is_some()
-                    || !report.done_get_queries.is_empty()
-                    || !report.done_put_queries.is_empty();
+                // Check whether socket has data we can read.
+                let is_socket_readable = rpc.poll_ready(timeout).unwrap_or(false);
 
-                // Only when there is no network activity, do brief CPU-friendly sleep
-                if !network_activity {
-                    std::thread::sleep(IDLE_POLL_INTERVAL);
-                }
+                // If we have pending work or the socket is readable, process events.
+                let should_process = is_socket_readable || has_pending_work;
+                let report = rpc.process_events(should_process);
 
                 // Response for an ongoing GET query
                 if let Some((target, response)) = report.new_query_response {
@@ -619,6 +619,27 @@ fn send(sender: &ResponseSender, response: Response) {
         }
         _ => {}
     }
+}
+
+/// Compute poll timeout based on current activity and idle streak.
+/// When active it resets streak, and returns 1ms
+/// When idle we exponentially backoff, capped at MAX_BACKOFF_TIMEOUT_MS
+fn calculate_poll_timeout(has_active_work: bool, idle_streak: &mut u32) -> Option<Duration> {
+    if has_active_work {
+        // When active, reset idle streak and return 1ms
+        *idle_streak = 0;
+        return Some(Duration::from_millis(1));
+    }
+
+    // Increment idle streak, capped at MAX_BACKOFF_MAX_EXP
+    let current_idle = *idle_streak;
+    *idle_streak = (current_idle + 1).min(MAX_BACKOFF_MAX_EXP);
+
+    // Calculate timeout ms, increments 1, 2, 4, 8, 16, 32, 64, 128, capped at MAX_BACKOFF_TIMEOUT_MS
+    let exp = current_idle.min(MAX_BACKOFF_MAX_EXP);
+    let ms = 1u64 << exp;
+    let timeout = ms.min(MAX_BACKOFF_TIMEOUT_MS);
+    Some(Duration::from_millis(timeout))
 }
 
 #[derive(Debug)]

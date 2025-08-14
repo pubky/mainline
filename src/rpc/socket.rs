@@ -2,9 +2,12 @@
 
 mod inflight_requests;
 
-use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace};
+
+use mio::net::UdpSocket;
+use mio::{Events, Interest, Poll, Token};
 
 use inflight_requests::InflightRequests;
 
@@ -17,15 +20,20 @@ const MTU: usize = 8192; // Increased buffer for better throughput
 
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000); // 1 second for faster retries
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000);
 /// Cleanup interval for expired inflight requests to avoid overhead on every recv
 const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Unique identifier assigned to the UDP socket, so we can identify it when we poll.
+const UDP_SOCKET_TOKEN: Token = Token(0);
 
 /// A UdpSocket wrapper that formats and correlates DHT requests and responses.
 #[derive(Debug)]
 pub struct KrpcSocket {
     next_tid: u32,
     socket: UdpSocket,
+    poll: Poll,
+    events: Events,
     pub(crate) server_mode: bool,
     request_timeout: Duration,
     inflight_requests: InflightRequests,
@@ -39,7 +47,7 @@ impl KrpcSocket {
         let request_timeout = config.request_timeout;
         let port = config.port;
 
-        let socket = if let Some(port) = port {
+        let mut socket = if let Some(port) = port {
             UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
         } else {
             match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
@@ -53,10 +61,18 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_nonblocking(true)?;
+        // Create mio poll and register socket
+        let poll = Poll::new()?;
+        let events = Events::with_capacity(1024);
+
+        // Register socket with poll for read events
+        poll.registry()
+            .register(&mut socket, UDP_SOCKET_TOKEN, Interest::READABLE)?;
 
         Ok(Self {
             socket,
+            poll,
+            events,
             next_tid: 0,
             server_mode: config.server_mode,
             request_timeout,
@@ -131,8 +147,22 @@ impl KrpcSocket {
         });
     }
 
+    /// Wait for socket readiness using mio poll with timeout.
+    /// Returns true if socket is ready for reading.
+    pub fn poll_ready(&mut self, timeout: Option<Duration>) -> std::io::Result<bool> {
+        self.poll.poll(&mut self.events, timeout)?;
+
+        for event in self.events.iter() {
+            if event.token() == UDP_SOCKET_TOKEN && event.is_readable() {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
     /// Receives krpc messages from the socket.
-    /// On success, returns the dht message and the origin.
+    /// Should only be called after poll_ready() returns true to avoid blocking.
     pub fn recv_from(&mut self) -> Option<(Message, SocketAddrV4)> {
         let mut buf = [0u8; MTU];
 
@@ -280,7 +310,8 @@ impl KrpcSocket {
 
     /// Send a raw dht message
     fn send(&mut self, address: SocketAddrV4, message: Message) -> Result<(), SendMessageError> {
-        self.socket.send_to(&message.to_bytes()?, address)?;
+        self.socket
+            .send_to(&message.to_bytes()?, SocketAddr::V4(address))?;
         trace!(context = "socket_message_sending", message = ?message);
         Ok(())
     }

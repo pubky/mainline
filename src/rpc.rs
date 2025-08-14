@@ -203,10 +203,20 @@ impl Rpc {
 
     // === Public Methods ===
 
-    /// Advance the inflight queries, receive incoming requests,
-    /// maintain the routing table, and everything else that needs
-    /// to happen at every tick.
-    pub fn tick(&mut self) -> RpcTickReport {
+    /// Wait for socket readiness with optional timeout.
+    /// Returns true if socket is ready for reading.
+    pub fn poll_ready(&mut self, timeout: Option<Duration>) -> std::io::Result<bool> {
+        self.socket.poll_ready(timeout)
+    }
+
+    /// Returns true if there are active queries that need processing
+    pub fn has_active_queries(&self) -> bool {
+        !self.iterative_queries.is_empty() || !self.put_queries.is_empty()
+    }
+
+    /// Process DHT events. When is_socket_ready is true, processes incoming messages.
+    /// When false, only updates query states and periodic maintenance.
+    pub fn process_events(&mut self, is_socket_ready: bool) -> RpcTickReport {
         let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
@@ -291,25 +301,28 @@ impl Rpc {
         self.periodic_node_maintenance();
 
         // Handle new incoming messages, batch process for better throughput
+        // Only check socket if it's ready to avoid busy-waiting
         let mut new_query_response = None;
 
-        for _ in 0..MAX_MESSAGES_PER_TICK {
-            if let Some((message, from)) = self.socket.recv_from() {
-                match message.message_type {
-                    MessageType::Request(request_specific) => {
-                        self.handle_request(from, message.transaction_id, request_specific);
-                    }
-                    _ => {
-                        if new_query_response.is_none() {
-                            new_query_response = self.handle_response(from, message);
-                        } else {
-                            // Process additional responses but don't return multiple
-                            self.handle_response(from, message);
+        if is_socket_ready {
+            for _ in 0..MAX_MESSAGES_PER_TICK {
+                if let Some((message, from)) = self.socket.recv_from() {
+                    match message.message_type {
+                        MessageType::Request(request_specific) => {
+                            self.handle_request(from, message.transaction_id, request_specific);
+                        }
+                        _ => {
+                            if new_query_response.is_none() {
+                                new_query_response = self.handle_response(from, message);
+                            } else {
+                                // Process additional responses but don't return multiple
+                                self.handle_response(from, message);
+                            }
                         }
                     }
+                } else {
+                    break;
                 }
-            } else {
-                break;
             }
         }
 
