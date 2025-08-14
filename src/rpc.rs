@@ -48,7 +48,7 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
-
+const MAX_MESSAGES_PER_TICK: usize = 5; // How many messages to process per tick
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
 #[derive(Debug)]
@@ -203,10 +203,20 @@ impl Rpc {
 
     // === Public Methods ===
 
-    /// Advance the inflight queries, receive incoming requests,
-    /// maintain the routing table, and everything else that needs
-    /// to happen at every tick.
-    pub fn tick(&mut self) -> RpcTickReport {
+    /// Wait for socket readiness with optional timeout.
+    /// Returns true if socket is ready for reading.
+    pub fn poll_ready(&mut self, timeout: Option<Duration>) -> std::io::Result<bool> {
+        self.socket.poll_ready(timeout)
+    }
+
+    /// Returns true if there are active queries that need processing
+    pub fn has_active_queries(&self) -> bool {
+        !self.iterative_queries.is_empty() || !self.put_queries.is_empty()
+    }
+
+    /// Process DHT events. When is_socket_ready is true, processes incoming messages.
+    /// When false, only updates query states and periodic maintenance.
+    pub fn tick(&mut self, is_socket_ready: bool) -> RpcTickReport {
         let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
@@ -287,21 +297,11 @@ impl Rpc {
             self.put_queries.remove(id);
         }
 
-        // === Periodic node maintaenance ===
-        self.periodic_node_maintaenance();
+        // === Periodic node maintenance ===
+        self.periodic_node_maintenance();
 
-        // Handle new incoming message
-        let new_query_response = self
-            .socket
-            .recv_from()
-            .and_then(|(message, from)| match message.message_type {
-                MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
-
-                    None
-                }
-                _ => self.handle_response(from, message),
-            });
+        // Attempt to drain a message from the socket.
+        let new_query_response = self.drain_socket(is_socket_ready);
 
         RpcTickReport {
             done_get_queries,
@@ -310,8 +310,38 @@ impl Rpc {
         }
     }
 
+    /// Attempt to drain up to MAX_MESSAGES_PER_TICK messages from the socket.
+    /// When message is found return it, otherwise return None.
+    fn drain_socket(&mut self, is_socket_ready: bool) -> Option<(Id, Response)> {
+        // Only check socket if it's ready to avoid busy-waiting
+        if !is_socket_ready {
+            return None;
+        }
+
+        let mut new_query_response = None;
+        for _ in 0..MAX_MESSAGES_PER_TICK {
+            let Some((message, from)) = self.socket.recv_from() else {
+                break;
+            };
+
+            let response_from_message = match message.message_type {
+                MessageType::Request(request_specific) => {
+                    self.handle_request(from, message.transaction_id, request_specific);
+                    None
+                }
+                _ => self.handle_response(from, message),
+            };
+
+            if new_query_response.is_none() {
+                new_query_response = response_from_message;
+            }
+        }
+
+        new_query_response
+    }
+
     /// Send a request to the given address and return the transaction_id
-    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u16 {
+    pub fn request(&mut self, address: SocketAddrV4, request: RequestSpecific) -> u32 {
         self.socket.request(address, request)
     }
 
@@ -319,14 +349,14 @@ impl Rpc {
     pub fn response(
         &mut self,
         address: SocketAddrV4,
-        transaction_id: u16,
+        transaction_id: u32,
         response: ResponseSpecific,
     ) {
         self.socket.response(address, transaction_id, response)
     }
 
     /// Send an error to the given address.
-    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u16, error: ErrorSpecific) {
+    pub fn error(&mut self, address: SocketAddrV4, transaction_id: u32, error: ErrorSpecific) {
         self.socket.error(address, transaction_id, error)
     }
 
@@ -513,7 +543,7 @@ impl Rpc {
     fn handle_request(
         &mut self,
         from: SocketAddrV4,
-        transaction_id: u16,
+        transaction_id: u32,
         request_specific: RequestSpecific,
     ) {
         // By default we only add nodes that responds to our requests.
@@ -747,7 +777,7 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
+    fn periodic_node_maintenance(&mut self) {
         // Bootstrap if necessary
         if self.routing_table.is_empty() {
             self.populate();

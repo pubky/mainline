@@ -17,7 +17,7 @@ pub struct PutQuery {
     pub target: Id,
     /// Nodes that confirmed success
     stored_at: u8,
-    inflight_requests: Vec<u16>,
+    inflight_requests: Vec<u32>,
     pub request: PutRequestSpecific,
     errors: Vec<(u8, ErrorSpecific)>,
     extra_nodes: Box<[Node]>,
@@ -80,7 +80,7 @@ impl PutQuery {
         !self.inflight_requests.is_empty()
     }
 
-    pub fn inflight(&self, tid: u16) -> bool {
+    pub fn inflight(&self, tid: u32) -> bool {
         self.inflight_requests.contains(&tid)
     }
 
@@ -161,27 +161,32 @@ impl PutQuery {
         !self
             .inflight_requests
             .iter()
-            .any(|&tid| socket.inflight(&tid))
+            .any(|&tid| socket.inflight(tid))
     }
 
     fn majority_nodes_rejected_put_mutable(&self) -> Option<ConcurrencyError> {
-        let half = ((self.inflight_requests.len() / 2) + 1) as u8;
+        // 1. Guard against non-mutable requests
+        if !matches!(self.request, PutRequestSpecific::PutMutable(_)) {
+            return None;
+        }
 
-        if matches!(self.request, PutRequestSpecific::PutMutable(_)) {
-            return self.most_common_error().and_then(|(count, error)| {
-                if count >= half {
-                    if let PutError::Concurrency(err) = error {
-                        Some(err)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            });
+        // 2. Guard against having no common error
+        let Some((count, error)) = self.most_common_error() else {
+            return None;
         };
 
-        None
+        // 3. Guard against the error count being less than the majority
+        let half = (self.inflight_requests.len() / 2 + 1) as u8;
+        if count < half {
+            return None;
+        }
+
+        // 4. Finally, return the error only if it's a ConcurrencyError
+        if let PutError::Concurrency(err) = error {
+            Some(err)
+        } else {
+            None
+        }
     }
 
     fn most_common_error(&self) -> Option<(u8, PutError)> {
