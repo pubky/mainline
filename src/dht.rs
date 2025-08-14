@@ -26,8 +26,8 @@ use crate::{
 
 use crate::rpc::config::Config;
 
-const MAX_BACKOFF_TIMEOUT_MS: u64 = 200;
-const MAX_BACKOFF_MAX_EXP: u32 = 8;
+const MAX_BACKOFF_TIMEOUT_MS: u64 = 200; // Max sleep when idle, upper bound for poll backoff (ms).
+const MAX_BACKOFF_MAX_EXP: u32 = 8; // Cap for exponential backoff step.
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
