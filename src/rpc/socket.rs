@@ -16,7 +16,7 @@ use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, Respon
 use super::config::Config;
 
 const VERSION: [u8; 4] = [82, 83, 0, 5]; // "RS" version 05
-const MTU: usize = 8192; // Increased buffer for better throughput
+const MTU: usize = 2048; // Max. DHT packet size is ~1500 bytes, so 2048 is a good buffer.
 
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.

@@ -300,37 +300,44 @@ impl Rpc {
         // === Periodic node maintenance ===
         self.periodic_node_maintenance();
 
-        // Handle new incoming messages, batch process for better throughput
-        // Only check socket if it's ready to avoid busy-waiting
-        let mut new_query_response = None;
-
-        if is_socket_ready {
-            for _ in 0..MAX_MESSAGES_PER_TICK {
-                if let Some((message, from)) = self.socket.recv_from() {
-                    match message.message_type {
-                        MessageType::Request(request_specific) => {
-                            self.handle_request(from, message.transaction_id, request_specific);
-                        }
-                        _ => {
-                            if new_query_response.is_none() {
-                                new_query_response = self.handle_response(from, message);
-                            } else {
-                                // Process additional responses but don't return multiple
-                                self.handle_response(from, message);
-                            }
-                        }
-                    }
-                } else {
-                    break;
-                }
-            }
-        }
+        // Attempt to drain a message from the socket.
+        let new_query_response = self.drain_socket(is_socket_ready);
 
         RpcTickReport {
             done_get_queries,
             done_put_queries,
             new_query_response,
         }
+    }
+
+    /// Attempt to drain up to MAX_MESSAGES_PER_TICK messages from the socket.
+    /// When message is found return it, otherwise return None.
+    fn drain_socket(&mut self, is_socket_ready: bool) -> Option<(Id, Response)> {
+        // Only check socket if it's ready to avoid busy-waiting
+        if !is_socket_ready {
+            return None;
+        }
+
+        let mut new_query_response = None;
+        for _ in 0..MAX_MESSAGES_PER_TICK {
+            let Some((message, from)) = self.socket.recv_from() else {
+                break;
+            };
+
+            let response_from_message = match message.message_type {
+                MessageType::Request(request_specific) => {
+                    self.handle_request(from, message.transaction_id, request_specific);
+                    None
+                }
+                _ => self.handle_response(from, message),
+            };
+
+            if new_query_response.is_none() {
+                new_query_response = response_from_message;
+            }
+        }
+
+        new_query_response
     }
 
     /// Send a request to the given address and return the transaction_id
