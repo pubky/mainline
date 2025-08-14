@@ -216,7 +216,7 @@ impl Rpc {
 
     /// Process DHT events. When is_socket_ready is true, processes incoming messages.
     /// When false, only updates query states and periodic maintenance.
-    pub fn process_events(&mut self, is_socket_ready: bool) -> RpcTickReport {
+    pub fn tick(&mut self, is_socket_ready: bool) -> RpcTickReport {
         let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 

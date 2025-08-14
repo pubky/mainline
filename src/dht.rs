@@ -559,7 +559,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
                 // If we have pending work or the socket is readable, process events.
                 let should_process = is_socket_readable || has_pending_work;
-                let report = rpc.process_events(should_process);
+                let report = rpc.tick(should_process);
 
                 // Response for an ongoing GET query
                 if let Some((target, response)) = report.new_query_response {
