@@ -44,11 +44,14 @@ impl InflightRequests {
 
     /// Add a new inflight request O(log n)
     pub fn add(&mut self, transaction_id: u32, to: SocketAddrV4) {
-        self.requests.insert(transaction_id, InflightRequest {
+        self.requests.insert(
             transaction_id,
-            to,
-            sent_at: Instant::now(),
-        });
+            InflightRequest {
+                transaction_id,
+                to,
+                sent_at: Instant::now(),
+            },
+        );
     }
 
     /// Check if a transaction_id is still inflight O(log n)
@@ -60,7 +63,7 @@ impl InflightRequests {
     /// O(log n)
     pub fn remove(&mut self, transaction_id: u32, from: &SocketAddrV4) -> Option<InflightRequest> {
         let request = self.requests.get(&transaction_id)?;
-        
+
         if !request.does_match(from, transaction_id) {
             // Early return if the source address doesn't match
             return None;
