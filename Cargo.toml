@@ -23,12 +23,12 @@ ed25519-dalek = "2.1.1"
 tracing = "0.1"
 lru = { version = "0.16.0", default-features = false }
 dyn-clone = "1.0.18"
-mio = { version = "0.8", features = ["net", "os-poll"] }
+mio = { version = "1.0", features = ["net", "os-poll"] }
 
 document-features = "0.2.10"
 
 # `node` dependencies
-flume = { version = "0.11.1", features = [], default-features = false, optional = true }
+flume = { version = "0.11.1", features = [], default-features = false, optional = true }}
 
 # `async` dependencies
 futures-lite = { version = "2.6.0", default-features = false, optional = true }

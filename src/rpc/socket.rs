@@ -20,7 +20,7 @@ const MTU: usize = 2048; // Max. DHT packet size is ~1500 bytes, so 2048 is a go
 
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
-pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(1000);
+pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000);
 /// Cleanup interval for expired inflight requests to avoid overhead on every recv
 const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
 
