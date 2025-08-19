@@ -21,7 +21,7 @@ pub(crate) struct IterativeQuery {
     pub request: RequestSpecific,
     closest: ClosestNodes,
     responders: ClosestNodes,
-    inflight_requests: Vec<u16>,
+    inflight_requests: Vec<u32>,
     visited: HashSet<SocketAddrV4>,
     responses: Vec<Response>,
     public_address_votes: HashMap<SocketAddrV4, u16>,
@@ -146,7 +146,7 @@ impl IterativeQuery {
     }
 
     /// Return true if a response (by transaction_id) is expected by this query.
-    pub fn inflight(&self, tid: u16) -> bool {
+    pub fn inflight(&self, tid: u32) -> bool {
         self.inflight_requests.contains(&tid)
     }
 

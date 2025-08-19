@@ -17,7 +17,7 @@ pub struct PutQuery {
     pub target: Id,
     /// Nodes that confirmed success
     stored_at: u8,
-    inflight_requests: Vec<u16>,
+    inflight_requests: Vec<u32>,
     pub request: PutRequestSpecific,
     errors: Vec<(u8, ErrorSpecific)>,
     extra_nodes: Box<[Node]>,
@@ -80,7 +80,7 @@ impl PutQuery {
         !self.inflight_requests.is_empty()
     }
 
-    pub fn inflight(&self, tid: u16) -> bool {
+    pub fn inflight(&self, tid: u32) -> bool {
         self.inflight_requests.contains(&tid)
     }
 

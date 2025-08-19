@@ -6,7 +6,7 @@ pub struct DHTMessage {
     #[serde(rename = "t", with = "serde_bytes")]
     // Only few messages received seems to not use exactly 2 bytes,
     // and they don't seem to have a version.
-    pub transaction_id: [u8; 2],
+    pub transaction_id: [u8; 4],
 
     #[serde(default)]
     #[serde(rename = "v", with = "serde_bytes")]
