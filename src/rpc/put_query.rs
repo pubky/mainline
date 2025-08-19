@@ -161,7 +161,7 @@ impl PutQuery {
         !self
             .inflight_requests
             .iter()
-            .any(|&tid| socket.inflight(&tid))
+            .any(|&tid| socket.inflight(tid))
     }
 
     fn majority_nodes_rejected_put_mutable(&self) -> Option<ConcurrencyError> {
