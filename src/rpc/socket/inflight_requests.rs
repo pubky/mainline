@@ -24,15 +24,16 @@ impl InflightRequest {
 
 #[derive(Debug)]
 pub struct InflightRequests {
-    // BTreeMap provides O(log n) lookup, insertion, and deletion keyed by transaction_id,
-    // this enables efficient range operations.
+    // BTreeMap provides O(log n) lookup, insertion, and deletion keyed by transaction_id.
     requests: BTreeMap<u32, InflightRequest>,
+    timeout: Duration,
 }
 
 impl InflightRequests {
-    pub fn new() -> Self {
+    pub fn new(timeout: Duration) -> Self {
         Self {
             requests: BTreeMap::new(),
+            timeout,
         }
     }
 
@@ -48,25 +49,20 @@ impl InflightRequests {
     }
 
     /// Check if a transaction_id is still inflight and not expired O(log n)
-    pub fn contains(&self, transaction_id: u32, timeout: Duration) -> bool {
+    pub fn contains(&self, transaction_id: u32) -> bool {
         if let Some(request) = self.requests.get(&transaction_id) {
-            return request.sent_at.elapsed() < timeout;
+            return request.sent_at.elapsed() < self.timeout;
         }
         false
     }
 
     /// Remove inflight request by transaction_id if it exists and matches the address
     /// O(log n)
-    pub fn remove(
-        &mut self,
-        transaction_id: u32,
-        from: &SocketAddrV4,
-        timeout: Duration,
-    ) -> Option<InflightRequest> {
+    pub fn remove(&mut self, transaction_id: u32, from: &SocketAddrV4) -> Option<InflightRequest> {
         let request = self.requests.get(&transaction_id)?;
 
         // Drop immediately if expired; avoid accepting late responses
-        if request.sent_at.elapsed() >= timeout {
+        if request.sent_at.elapsed() >= self.timeout {
             self.requests.remove(&transaction_id);
             return None;
         }
@@ -80,9 +76,9 @@ impl InflightRequests {
 
     /// Cleanup expired requests based on timeout
     /// O(n) scans all requests to remove expired ones
-    pub fn cleanup(&mut self, timeout: Duration) {
+    pub fn cleanup(&mut self) {
         let now = Instant::now();
-        let cutoff = now - timeout;
+        let cutoff = now - self.timeout;
 
         // Remove expired requests in a single pass using retain
         self.requests.retain(|_, request| request.sent_at > cutoff);

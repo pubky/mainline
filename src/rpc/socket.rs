@@ -30,7 +30,6 @@ pub struct KrpcSocket {
     next_tid: u32,
     socket: UdpSocket,
     pub(crate) server_mode: bool,
-    request_timeout: Duration,
     inflight_requests: InflightRequests,
     last_cleanup: Instant,
     local_addr: SocketAddrV4,
@@ -61,8 +60,7 @@ impl KrpcSocket {
             socket,
             next_tid: 0,
             server_mode: config.server_mode,
-            request_timeout,
-            inflight_requests: InflightRequests::new(),
+            inflight_requests: InflightRequests::new(request_timeout),
             last_cleanup: Instant::now(),
             local_addr,
         })
@@ -93,8 +91,7 @@ impl KrpcSocket {
 
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: u32) -> bool {
-        self.inflight_requests
-            .contains(transaction_id, self.request_timeout)
+        self.inflight_requests.contains(transaction_id)
     }
 
     /// Send a request to the given address and return the transaction_id
@@ -141,7 +138,7 @@ impl KrpcSocket {
         let now = Instant::now();
         if now.duration_since(self.last_cleanup) > INFLIGHT_CLEANUP_INTERVAL {
             self.last_cleanup = now;
-            self.inflight_requests.cleanup(self.request_timeout);
+            self.inflight_requests.cleanup();
         }
 
         match self.socket.recv_from(&mut buf) {
@@ -228,10 +225,7 @@ impl KrpcSocket {
 
     fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
         // Find and remove the matching inflight request
-        if let Some(_request) =
-            self.inflight_requests
-                .remove(message.transaction_id, from, self.request_timeout)
-        {
+        if let Some(_request) = self.inflight_requests.remove(message.transaction_id, from) {
             return true;
         } else {
             trace!(
