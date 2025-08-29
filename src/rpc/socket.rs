@@ -93,7 +93,8 @@ impl KrpcSocket {
 
     /// Returns true if this message's transaction_id is still inflight
     pub fn inflight(&self, transaction_id: u32) -> bool {
-        self.inflight_requests.contains(transaction_id)
+        self.inflight_requests
+            .contains(transaction_id, self.request_timeout)
     }
 
     /// Send a request to the given address and return the transaction_id
@@ -227,7 +228,10 @@ impl KrpcSocket {
 
     fn is_expected_response(&mut self, message: &Message, from: &SocketAddrV4) -> bool {
         // Find and remove the matching inflight request
-        if let Some(_request) = self.inflight_requests.remove(message.transaction_id, from) {
+        if let Some(_request) =
+            self.inflight_requests
+                .remove(message.transaction_id, from, self.request_timeout)
+        {
             return true;
         } else {
             trace!(

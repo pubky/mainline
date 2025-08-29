@@ -24,9 +24,8 @@ impl InflightRequest {
 
 #[derive(Debug)]
 pub struct InflightRequests {
-    // BTreeMap provides O(log n) lookup, insertion, and deletion by transaction_id
-    // while maintaining sorted order which enables efficient range operations
-    // and deterministic iteration order.
+    // BTreeMap provides O(log n) lookup, insertion, and deletion keyed by transaction_id,
+    // this enables efficient range operations.
     requests: BTreeMap<u32, InflightRequest>,
 }
 
@@ -48,15 +47,30 @@ impl InflightRequests {
         );
     }
 
-    /// Check if a transaction_id is still inflight O(log n)
-    pub fn contains(&self, transaction_id: u32) -> bool {
-        self.requests.contains_key(&transaction_id)
+    /// Check if a transaction_id is still inflight and not expired O(log n)
+    pub fn contains(&self, transaction_id: u32, timeout: Duration) -> bool {
+        if let Some(request) = self.requests.get(&transaction_id) {
+            return request.sent_at.elapsed() < timeout;
+        }
+        false
     }
 
     /// Remove inflight request by transaction_id if it exists and matches the address
     /// O(log n)
-    pub fn remove(&mut self, transaction_id: u32, from: &SocketAddrV4) -> Option<InflightRequest> {
+    pub fn remove(
+        &mut self,
+        transaction_id: u32,
+        from: &SocketAddrV4,
+        timeout: Duration,
+    ) -> Option<InflightRequest> {
         let request = self.requests.get(&transaction_id)?;
+
+        // Drop immediately if expired; avoid accepting late responses
+        if request.sent_at.elapsed() >= timeout {
+            self.requests.remove(&transaction_id);
+            return None;
+        }
+
         if !request.does_match(from) {
             return None;
         }
