@@ -15,12 +15,13 @@ const MTU: usize = 2048;
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-/// The maximum duration to backoff checking the [UdpSocket] buffer after it is empty.
-/// Lower values increases CPU usage, but reduces latency, and drains the buffer faster,
-/// reducing the risk of packet loss.
-// TODO: Either add as an option to [Config] and [DhtBuilder],
-//       Or see if refactoring [Rpc::tick] makes cpu usage nigligble for very low values.
-pub const MAX_THREAD_BLOCK_DURATION: Duration = Duration::from_millis(10);
+
+/// Minimum interval between polling udp socket, lower latency, higher cpu usage.
+/// Useful for checking for expected responses.
+pub const MIN_POLL_INTERVAL: Duration = Duration::from_micros(100);
+/// Maximum interval between polling udp socket, higher latency, lower cpu usage.
+/// Useful for waiting for incoming requests, and periodic node maintenance.
+pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Cleanup interval for expired inflight requests to avoid overhead on every recv
 const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -33,11 +34,11 @@ pub struct KrpcSocket {
     inflight_requests: InflightRequests,
     last_cleanup: Instant,
     local_addr: SocketAddrV4,
+    poll_interval: Duration,
 }
 
 impl KrpcSocket {
     pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
-        let request_timeout = config.request_timeout;
         let port = config.port;
 
         let socket = if let Some(port) = port {
@@ -54,15 +55,16 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_nonblocking(true)?;
+        socket.set_read_timeout(Some(MIN_POLL_INTERVAL))?;
 
         Ok(Self {
             socket,
             next_tid: 0,
             server_mode: config.server_mode,
-            inflight_requests: InflightRequests::new(request_timeout),
+            inflight_requests: InflightRequests::new(),
             last_cleanup: Instant::now(),
             local_addr,
+            poll_interval: MIN_POLL_INTERVAL,
         })
     }
 
@@ -143,6 +145,16 @@ impl KrpcSocket {
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
+                if self.poll_interval > MIN_POLL_INTERVAL {
+                    // More eagerness if we are expecting responses than requests;
+                    if !self.inflight_requests.is_empty() {
+                        self.poll_interval = MIN_POLL_INTERVAL;
+                    } else if self.server_mode {
+                        self.poll_interval = (self.poll_interval / 2).max(MIN_POLL_INTERVAL);
+                    }
+                    let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                }
+
                 let bytes = &buf[..amt];
 
                 if from.port() == 0 {
@@ -206,8 +218,11 @@ impl KrpcSocket {
                     message = "Received IPv6 packet"
                 );
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(MAX_THREAD_BLOCK_DURATION);
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                if self.poll_interval < MAX_POLL_INTERVAL {
+                    self.poll_interval = (self.poll_interval * 2).min(MAX_POLL_INTERVAL);
+                    let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                }
             }
             Err(e) => {
                 trace!(
@@ -237,10 +252,10 @@ impl KrpcSocket {
     }
 
     /// Increments self.next_tid and returns the previous value.
+    /// TIDs are generated in order to preserve sortability for efficient lookups.
     fn tid(&mut self) -> u32 {
-        // We don't bother much with reusing freed transaction ids,
-        // since the timeout is so short we are unlikely to run out
-        // of 4294967295 ids in 2 seconds.
+        // We don't reuse freed transaction ids to preserve the sortability
+        // of both `tid`s and `sent_at` timestamps.
         let tid = self.next_tid;
         self.next_tid = self.next_tid.wrapping_add(1);
         tid
