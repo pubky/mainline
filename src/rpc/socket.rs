@@ -40,7 +40,6 @@ pub struct KrpcSocket {
 
 impl KrpcSocket {
     pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
-        let request_timeout = config.request_timeout;
         let port = config.port;
 
         let socket = if let Some(port) = port {
@@ -63,7 +62,7 @@ impl KrpcSocket {
             socket,
             next_tid: 0,
             server_mode: config.server_mode,
-            inflight_requests: InflightRequests::new(request_timeout),
+            inflight_requests: InflightRequests::new(),
             last_cleanup: Instant::now(),
             local_addr,
             poll_interval: MIN_POLL_INTERVAL,
