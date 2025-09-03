@@ -83,4 +83,8 @@ impl InflightRequests {
         // Remove expired requests in a single pass using retain
         self.requests.retain(|_, request| request.sent_at > cutoff);
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.requests.is_empty()
+    }
 }
