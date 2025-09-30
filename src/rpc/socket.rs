@@ -17,12 +17,15 @@ pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
 
-/// Minimum interval between polling udp socket, lower latency, higher cpu usage.
-/// Useful for checking for expected responses.
-pub const MIN_POLL_INTERVAL: Duration = Duration::from_micros(100);
-/// Maximum interval between polling udp socket, higher latency, lower cpu usage.
-/// Useful for waiting for incoming requests, and periodic node maintenance.
-pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(1);
+pub const READ_TIMEOUT: Duration = Duration::from_millis(50);
+
+// /// Minimum interval between polling udp socket, lower latency, higher cpu usage.
+// /// Useful for checking for expected responses.
+// pub const MIN_POLL_INTERVAL: Duration = Duration::from_micros(100);
+// /// Maximum interval between polling udp socket, higher latency, lower cpu usage.
+// /// Useful for waiting for incoming requests, and periodic node maintenance.
+// pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Cleanup interval for expired inflight requests to avoid overhead on every recv
 const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -35,7 +38,7 @@ pub struct KrpcSocket {
     inflight_requests: InflightRequests,
     last_cleanup: Instant,
     local_addr: SocketAddrV4,
-    poll_interval: Duration,
+    // poll_interval: Duration,
 }
 
 impl KrpcSocket {
@@ -57,7 +60,7 @@ impl KrpcSocket {
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_read_timeout(Some(MIN_POLL_INTERVAL))?;
+        socket.set_read_timeout(Some(READ_TIMEOUT))?;
 
         Ok(Self {
             socket,
@@ -66,7 +69,6 @@ impl KrpcSocket {
             inflight_requests: InflightRequests::new(request_timeout),
             last_cleanup: Instant::now(),
             local_addr,
-            poll_interval: MIN_POLL_INTERVAL,
         })
     }
 
@@ -147,14 +149,14 @@ impl KrpcSocket {
 
         match self.socket.recv_from(&mut buf) {
             Ok((amt, SocketAddr::V4(from))) => {
-                if self.poll_interval > MIN_POLL_INTERVAL {
-                    if !self.inflight_requests.is_empty() {
-                        self.poll_interval = MIN_POLL_INTERVAL;
-                    } else if self.server_mode {
-                        self.poll_interval = (self.poll_interval / 2).max(MIN_POLL_INTERVAL);
-                    }
-                    let _ = self.socket.set_read_timeout(Some(self.poll_interval));
-                }
+                // if self.poll_interval > MIN_POLL_INTERVAL {
+                //     if !self.inflight_requests.is_empty() {
+                //         self.poll_interval = MIN_POLL_INTERVAL;
+                //     } else if self.server_mode {
+                //         self.poll_interval = (self.poll_interval / 2).max(MIN_POLL_INTERVAL);
+                //     }
+                //     let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                // }
 
                 let bytes = &buf[..amt];
 
@@ -221,10 +223,10 @@ impl KrpcSocket {
             }
             Err(error) => match error.kind() {
                 ErrorKind::WouldBlock => {
-                    if self.poll_interval < MAX_POLL_INTERVAL {
-                        self.poll_interval = (self.poll_interval * 2).min(MAX_POLL_INTERVAL);
-                        let _ = self.socket.set_read_timeout(Some(self.poll_interval));
-                    }
+                    // if self.poll_interval < MAX_POLL_INTERVAL {
+                    //     self.poll_interval = (self.poll_interval * 2).min(MAX_POLL_INTERVAL);
+                    //     let _ = self.socket.set_read_timeout(Some(self.poll_interval));
+                    // }
                 }
                 _ => {
                     warn!("IO error {error}")
