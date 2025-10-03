@@ -1,7 +1,11 @@
 [package]
 name = "mainline"
-version = "5.4.0"
-authors = ["nuh.dev"]
+version = "6.0.0"
+authors = [
+    "nuh.dev",
+    "SeverinAlexB <severin@synonym.to>",
+    "SHAcollision <shacollision@synonym.to>",
+]
 edition = "2021"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
 homepage = "https://github.com/pubky/mainline"
@@ -27,7 +31,8 @@ dyn-clone = "1.0.18"
 document-features = "0.2.10"
 
 # `node` dependencies
-flume = { version = "0.11.1", features = [], default-features = false, optional = true }
+flume = { version = "0.11.1", features = [
+], default-features = false, optional = true }
 
 # `async` dependencies
 futures-lite = { version = "2.6.0", default-features = false, optional = true }
