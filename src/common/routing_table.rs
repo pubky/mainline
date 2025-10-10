@@ -112,7 +112,7 @@ impl RoutingTable {
     }
 
     /// Returns an iterator over the nodes in this routing table.
-    pub fn nodes(&self) -> RoutingTableIterator {
+    pub fn nodes(&'_ self) -> RoutingTableIterator<'_> {
         RoutingTableIterator {
             bucket_index: 1,
             node_index: 0,
@@ -305,10 +305,10 @@ mod test {
 
         let node = Node::random();
 
-        assert!(!table.contains(&node.id()));
+        assert!(!table.contains(node.id()));
 
         table.add(node.clone());
-        assert!(table.contains(&node.id()));
+        assert!(table.contains(node.id()));
     }
 
     #[test]
@@ -318,10 +318,10 @@ mod test {
         let node = Node::random();
 
         table.add(node.clone());
-        assert!(table.contains(&node.id()));
+        assert!(table.contains(node.id()));
 
         table.remove(node.id());
-        assert!(!table.contains(&node.id()));
+        assert!(!table.contains(node.id()));
     }
 
     #[test]
