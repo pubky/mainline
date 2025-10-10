@@ -48,6 +48,7 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
@@ -223,9 +224,6 @@ impl Rpc {
             };
         }
 
-        let self_id = *self.id();
-        let table_size = self.routing_table.size();
-
         let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
         let average_subnets = self.average_subnets();
 
@@ -235,14 +233,6 @@ impl Rpc {
             if is_done {
                 let closest_nodes =
                     if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
-                        if *id == self_id {
-                            if table_size == 0 {
-                                error!("Could not bootstrap the routing table");
-                            } else {
-                                debug!(?self_id, table_size, "Populated the routing table");
-                            }
-                        };
-
                         query
                             .closest()
                             .nodes()
@@ -288,7 +278,7 @@ impl Rpc {
         }
 
         // === Periodic node maintaenance ===
-        self.periodic_node_maintaenance();
+        self.periodic_node_maintenance();
 
         // Handle new incoming message
         let new_query_response = self
@@ -747,46 +737,75 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
-        // Bootstrap if necessary
-        if self.routing_table.is_empty() {
-            self.populate();
-        }
+    fn periodic_node_maintenance(&mut self) {
+        self.handle_empty_routing_table();
 
         // Every 15 minutes refresh the routing table.
         if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
-            self.last_table_refresh = Instant::now();
-
-            if !self.server_mode() && !self.firewalled() {
-                info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
-
-                self.socket.server_mode = true;
-            }
-
-            self.populate();
+            self.switch_to_server_mode();
+            self.refresh_table();
         }
 
+        // Every 5 minutes check nodes in routing table
         if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
-            self.last_table_ping = Instant::now();
+            self.ping_nodes_in_table();
+        }
+    }
 
-            let mut to_remove = Vec::with_capacity(self.routing_table.size());
-            let mut to_ping = Vec::with_capacity(self.routing_table.size());
+    fn handle_empty_routing_table(&mut self) {
+        if self.bootstrap.is_empty() {
+            // nothing to be done
+            return;
+        }
 
-            for node in self.routing_table.nodes() {
-                if node.is_stale() {
-                    to_remove.push(*node.id())
-                } else if node.should_ping() {
-                    to_ping.push(node.address())
-                }
+        if self.routing_table.is_empty() {
+            if self.last_table_refresh.elapsed() > BOOTSTRAP_TIMEOUT {
+                error!("Could not bootstrap the routing table. Retrying...");
             }
 
-            for id in to_remove {
-                self.routing_table.remove(&id);
-            }
+            self.refresh_table();
+        }
+    }
 
-            for address in to_ping {
-                self.ping(address);
+    /// handle periodic table refresh
+    fn refresh_table(&mut self) {
+        self.last_table_refresh = Instant::now();
+        self.populate();
+    }
+
+    /// switch to server mode
+    fn switch_to_server_mode(&mut self) {
+        if !self.server_mode() && !self.firewalled() {
+            info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
+            self.socket.server_mode = true;
+        }
+    }
+
+    /// handle periodic ping
+    fn ping_nodes_in_table(&mut self) {
+        if self.routing_table.is_empty() {
+            return;
+        }
+
+        self.last_table_ping = Instant::now();
+
+        let mut to_remove = Vec::with_capacity(self.routing_table.size());
+        let mut to_ping = Vec::with_capacity(self.routing_table.size());
+
+        for node in self.routing_table.nodes() {
+            if node.is_stale() {
+                to_remove.push(*node.id())
+            } else if node.should_ping() {
+                to_ping.push(node.address())
             }
+        }
+
+        for id in to_remove {
+            self.routing_table.remove(&id);
+        }
+
+        for address in to_ping {
+            self.ping(address);
         }
     }
 
