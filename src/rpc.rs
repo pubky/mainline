@@ -227,7 +227,7 @@ impl Rpc {
         let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
         let average_subnets = self.average_subnets();
 
-        for (id, query) in self.iterative_queries.iter_mut() {
+        for (target_id, query) in self.iterative_queries.iter_mut() {
             let is_done = query.tick(&mut self.socket);
 
             if is_done {
@@ -248,7 +248,7 @@ impl Rpc {
                             .into_boxed_slice()
                     };
 
-                done_get_queries.push((*id, closest_nodes));
+                done_get_queries.push((*target_id, closest_nodes));
             };
         }
 
@@ -793,10 +793,10 @@ impl Rpc {
         let mut to_ping = Vec::with_capacity(self.routing_table.size());
 
         for node in self.routing_table.nodes() {
-            if node.is_stale() {
-                to_remove.push(*node.id())
-            } else if node.should_ping() {
+            if node.should_ping() {
                 to_ping.push(node.address())
+            } else if node.is_stale() {
+                to_remove.push(*node.id())
             }
         }
 
