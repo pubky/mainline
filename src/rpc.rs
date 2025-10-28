@@ -207,106 +207,23 @@ impl Rpc {
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
     pub fn tick(&mut self) -> RpcTickReport {
-        let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
-        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+        // 1) Tick PUT queries
+        let mut done_put_queries = self.tick_put_queries();
 
-        // === Tick Queries ===
+        // 2) Tick GET/FIND_NODE queries
+        let (done_get_queries, finished_self_findnode) = self.tick_get_queries();
 
-        for (id, query) in self.put_queries.iter_mut() {
-            match query.tick(&self.socket) {
-                Ok(done) => {
-                    if done {
-                        done_put_queries.push((*id, None));
-                    }
-                }
-                Err(error) => done_put_queries.push((*id, Some(error))),
-            };
-        }
+        // 3) Cleanup done queries (must happen before recv_from)
+        self.cleanup_done_queries(&done_get_queries, &mut done_put_queries);
 
-        let self_id = *self.id();
-        let mut finished_self_findnode = false;
-
-        let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
-        let average_subnets = self.average_subnets();
-
-        for (id, query) in self.iterative_queries.iter_mut() {
-            let is_done = query.tick(&mut self.socket);
-
-            if is_done {
-                let closest_nodes =
-                    if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
-                        if *id == self_id {
-                            finished_self_findnode = true;
-                        };
-
-                        query
-                            .closest()
-                            .nodes()
-                            .iter()
-                            .take(MAX_BUCKET_SIZE_K)
-                            .cloned()
-                            .collect::<Box<[_]>>()
-                    } else {
-                        query
-                            .responders()
-                            .take_until_secure(responders_based_dht_size_estimate, average_subnets)
-                            .to_vec()
-                            .into_boxed_slice()
-                    };
-
-                done_get_queries.push((*id, closest_nodes));
-            };
-        }
-
-        // === Cleanup done queries ===
-
-        // Has to happen _before_ `self.socket.recv_from()`.
-        for (id, closest_nodes) in &done_get_queries {
-            if let Some(query) = self.iterative_queries.remove(id) {
-                self.update_address_votes_from_iterative_query(&query);
-                self.cache_iterative_query(&query, closest_nodes);
-
-                // Only for get queries, not find node.
-                if !matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
-                    if let Some(put_query) = self.put_queries.get_mut(id) {
-                        if !put_query.started() {
-                            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
-                                done_put_queries.push((*id, Some(error)))
-                            }
-                        }
-                    }
-                }
-            };
-        }
-
-        for (id, _) in &done_put_queries {
-            self.put_queries.remove(id);
-        }
-
-        // === Periodic node maintaenance ===
+        // 4) Periodic node maintenance
         self.periodic_node_maintaenance();
 
-        // Handle new incoming message
-        let new_query_response = self
-            .socket
-            .recv_from()
-            .and_then(|(message, from)| match message.message_type {
-                MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
+        // 5) Handle a single incoming message
+        let new_query_response = self.handle_one_incoming();
 
-                    None
-                }
-                _ => self.handle_response(from, message),
-            });
-
-        if finished_self_findnode {
-            let table_size = self.routing_table.size();
-            if table_size == 0 {
-                error!("Could not bootstrap the routing table");
-            } else {
-                debug!(?self_id, table_size, "Populated the routing table");
-            }
-        }
+        // 6) Recompute size and log bootstrap result (if just finished)
+        self.maybe_log_bootstrap(finished_self_findnode, *self.id());
 
         RpcTickReport {
             done_get_queries,
@@ -905,6 +822,116 @@ impl Rpc {
                 self.responders_based_dht_size_estimates_count -= 1;
             }
         };
+    }
+    // === tick() helpers ===
+
+    fn tick_put_queries(&mut self) -> Vec<(Id, Option<PutError>)> {
+        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+
+        for (id, query) in self.put_queries.iter_mut() {
+            match query.tick(&self.socket) {
+                Ok(done) => {
+                    if done {
+                        done_put_queries.push((*id, None));
+                    }
+                }
+                Err(error) => done_put_queries.push((*id, Some(error))),
+            };
+        }
+
+        done_put_queries
+    }
+
+    fn tick_get_queries(&mut self) -> (Vec<(Id, Box<[Node]>)>, bool) {
+        let self_id = *self.id();
+        let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
+        let average_subnets = self.average_subnets();
+
+        let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
+        let mut finished_self_findnode = false;
+
+        for (id, query) in self.iterative_queries.iter_mut() {
+            let is_done = query.tick(&mut self.socket);
+
+            if is_done {
+                let closest_nodes =
+                    if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
+                        if *id == self_id {
+                            finished_self_findnode = true;
+                        };
+
+                        query
+                            .closest()
+                            .nodes()
+                            .iter()
+                            .take(MAX_BUCKET_SIZE_K)
+                            .cloned()
+                            .collect::<Box<[_]>>()
+                    } else {
+                        query
+                            .responders()
+                            .take_until_secure(responders_based_dht_size_estimate, average_subnets)
+                            .to_vec()
+                            .into_boxed_slice()
+                    };
+
+                done_get_queries.push((*id, closest_nodes));
+            };
+        }
+
+        (done_get_queries, finished_self_findnode)
+    }
+
+    fn cleanup_done_queries(
+        &mut self,
+        done_get: &[(Id, Box<[Node]>)],
+        done_put: &mut Vec<(Id, Option<PutError>)>,
+    ) {
+        // Has to happen _before_ `self.socket.recv_from()`.
+        for (id, closest_nodes) in done_get {
+            if let Some(query) = self.iterative_queries.remove(id) {
+                self.update_address_votes_from_iterative_query(&query);
+                self.cache_iterative_query(&query, closest_nodes);
+
+                // Only for get queries, not find node.
+                if !matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
+                    if let Some(put_query) = self.put_queries.get_mut(id) {
+                        if !put_query.started() {
+                            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
+                                done_put.push((*id, Some(error)))
+                            }
+                        }
+                    }
+                }
+            };
+        }
+
+        for (id, _) in done_put.iter() {
+            self.put_queries.remove(id);
+        }
+    }
+
+    fn handle_one_incoming(&mut self) -> Option<(Id, Response)> {
+        self.socket
+            .recv_from()
+            .and_then(|(message, from)| match message.message_type {
+                MessageType::Request(request_specific) => {
+                    self.handle_request(from, message.transaction_id, request_specific);
+                    None
+                }
+                _ => self.handle_response(from, message),
+            })
+    }
+
+    fn maybe_log_bootstrap(&self, finished_self_findnode: bool, self_id: Id) {
+        if finished_self_findnode {
+            let table_size = self.routing_table.size();
+            if table_size == 0 {
+                error!("Could not bootstrap the routing table");
+            } else {
+                debug!(?self_id, table_size, "Populated the routing table");
+            }
+        }
     }
 }
 
