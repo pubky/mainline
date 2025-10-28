@@ -217,7 +217,7 @@ impl Rpc {
         self.cleanup_done_queries(&done_get_queries, &mut done_put_queries);
 
         // 4) Periodic node maintenance
-        self.periodic_node_maintaenance();
+        self.periodic_node_maintenance();
 
         // 5) Handle a single incoming message
         let new_query_response = self.handle_one_incoming();
@@ -669,49 +669,92 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
-        // Bootstrap if necessary
+    // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon recieving ping response
+    fn periodic_node_maintenance(&mut self) {
+        // Decide first, act once: avoid double populate in the same tick.
+        let mut should_populate = false;
+
         if self.routing_table.is_empty() {
-            self.populate();
+            should_populate = true;
         }
 
-        // Every 15 minutes refresh the routing table.
-        if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
-            self.last_table_refresh = Instant::now();
-
-            if !self.server_mode() && !self.firewalled() {
-                info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
-
-                self.socket.server_mode = true;
-            }
-
-            self.populate();
+        if self.refresh_routing_table_if_due() {
+            should_populate = true;
         }
 
-        if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
-            self.last_table_ping = Instant::now();
+        self.ping_and_pruge_if_due();
 
-            let mut to_remove = Vec::with_capacity(self.routing_table.size());
-            let mut to_ping = Vec::with_capacity(self.routing_table.size());
-
-            for node in self.routing_table.nodes() {
-                if node.is_stale() {
-                    to_remove.push(*node.id())
-                } else if node.should_ping() {
-                    to_ping.push(node.address())
-                }
-            }
-
-            for id in to_remove {
-                self.routing_table.remove(&id);
-            }
-
-            for address in to_ping {
-                self.ping(address);
-            }
+        if should_populate {
+            self.populate();
         }
     }
 
+    /// Refresh table if due; also handles adaptive server-mode switch.
+    /// Returns true if a refresh was due (so caller may call populate()).
+    fn refresh_routing_table_if_due(&mut self) -> bool {
+        if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
+            self.last_table_refresh = Instant::now();
+            self.maybe_switch_to_server_mode_on_refresh();
+            return true;
+        }
+        false
+    }
+
+    fn maybe_switch_to_server_mode_on_refresh(&mut self) {
+        if !self.server_mode() && !self.firewalled() {
+            info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
+            self.socket.server_mode = true;
+        }
+    }
+
+    /// Prune stale nodes and ping nodes that need probing when due.
+    fn ping_and_pruge_if_due(&mut self) {
+        if self.last_table_ping.elapsed() <= PING_TABLE_INTERVAL {
+            return;
+        }
+        self.last_table_ping = Instant::now();
+
+        let (to_purge, to_ping) = self.purge_and_ping_candidates();
+
+        self.purge_nodes(&to_purge);
+        self.ping_nodes(&to_ping);
+
+        if !to_purge.is_empty() || !to_ping.is_empty() {
+            debug!(
+                removed = to_purge.len(),
+                pinged = to_ping.len(),
+                "Node maintenance executed"
+            );
+        }
+    }
+
+    /// Pure decision function: compute which nodes to remove and which to ping.
+    fn purge_and_ping_candidates(&self) -> (Vec<Id>, Vec<SocketAddrV4>) {
+        let mut to_purge = Vec::with_capacity(self.routing_table.size());
+        let mut to_ping = Vec::with_capacity(self.routing_table.size());
+
+        for node in self.routing_table.nodes() {
+            if node.is_stale() {
+                to_purge.push(*node.id())
+            } else if node.should_ping() {
+                to_ping.push(node.address())
+            }
+        }
+
+        (to_purge, to_ping)
+    }
+
+    fn purge_nodes(&mut self, ids: &[Id]) {
+        for id in ids {
+            self.routing_table.remove(id);
+        }
+    }
+
+    fn ping_nodes(&mut self, addrs: &[SocketAddrV4]) {
+        for address in addrs {
+            self.ping(*address);
+        }
+    }
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
         if self.bootstrap.is_empty() {
