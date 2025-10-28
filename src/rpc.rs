@@ -224,7 +224,7 @@ impl Rpc {
         }
 
         let self_id = *self.id();
-        let table_size = self.routing_table.size();
+        let mut finished_self_findnode = false;
 
         let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
         let average_subnets = self.average_subnets();
@@ -236,11 +236,7 @@ impl Rpc {
                 let closest_nodes =
                     if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
                         if *id == self_id {
-                            if table_size == 0 {
-                                error!("Could not bootstrap the routing table");
-                            } else {
-                                debug!(?self_id, table_size, "Populated the routing table");
-                            }
+                            finished_self_findnode = true;
                         };
 
                         query
@@ -302,6 +298,15 @@ impl Rpc {
                 }
                 _ => self.handle_response(from, message),
             });
+
+        if finished_self_findnode {
+            let table_size = self.routing_table.size();
+            if table_size == 0 {
+                error!("Could not bootstrap the routing table");
+            } else {
+                debug!(?self_id, table_size, "Populated the routing table");
+            }
+        }
 
         RpcTickReport {
             done_get_queries,
