@@ -669,18 +669,10 @@ impl Rpc {
         None
     }
 
-    // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receiving ping response
+    // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receIving ping response
     fn periodic_node_maintenance(&mut self) {
         // Decide first, act once: avoid double populate in the same tick.
-        let mut should_populate = false;
-
-        if self.routing_table.is_empty() {
-            should_populate = true;
-        }
-
-        if self.refresh_routing_table_if_due() {
-            should_populate = true;
-        }
+        let should_populate = self.routing_table.is_empty() || self.refresh_routing_table_if_due();
 
         self.ping_and_purge_if_due();
 
@@ -692,19 +684,21 @@ impl Rpc {
     /// Refresh table if due; also handles adaptive server-mode switch.
     /// Returns true if a refresh was due (so caller may call populate()).
     fn refresh_routing_table_if_due(&mut self) -> bool {
-        if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
-            self.last_table_refresh = Instant::now();
-            self.maybe_switch_to_server_mode_on_refresh();
-            return true;
+        if self.last_table_refresh.elapsed() <= REFRESH_TABLE_INTERVAL {
+            return false;
         }
-        false
+        self.last_table_refresh = Instant::now();
+        self.maybe_switch_to_server_mode_on_refresh();
+        true
     }
 
     fn maybe_switch_to_server_mode_on_refresh(&mut self) {
-        if !self.server_mode() && !self.firewalled() {
-            info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
-            self.socket.server_mode = true;
+        if self.server_mode() || self.firewalled() {
+            return;
         }
+
+        info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
+        self.socket.server_mode = true;
     }
 
     /// Purge stale nodes and ping nodes that need probing when due.
@@ -719,13 +713,15 @@ impl Rpc {
         self.purge_nodes(&to_purge);
         self.ping_nodes(&to_ping);
 
-        if !to_purge.is_empty() || !to_ping.is_empty() {
-            debug!(
-                removed = to_purge.len(),
-                pinged = to_ping.len(),
-                "Node maintenance executed"
-            );
+        if to_purge.is_empty() && to_ping.is_empty() {
+            return;
         }
+
+        debug!(
+            removed = to_purge.len(),
+            pinged = to_ping.len(),
+            "Node maintenance executed"
+        );
     }
 
     /// Pure decision function: compute which nodes to remove and which to ping.
@@ -755,6 +751,7 @@ impl Rpc {
             self.ping(*address);
         }
     }
+
     /// Ping bootstrap nodes, add them to the routing table with closest query.
     fn populate(&mut self) {
         if self.bootstrap.is_empty() {
@@ -778,24 +775,26 @@ impl Rpc {
     }
 
     fn update_address_votes_from_iterative_query(&mut self, query: &IterativeQuery) {
-        if let Some(new_address) = query.best_address() {
-            if self.public_address.is_none()
-                || new_address
-                    != self
-                        .public_address
-                        .expect("self.public_address is not None")
-            {
-                debug!(
-                    ?new_address,
-                    "Query responses suggest a different public_address, trying to confirm.."
-                );
+        let Some(new_address) = query.best_address() else {
+            return;
+        };
 
-                self.firewalled = true;
-                self.ping(new_address);
-            }
+        let needs_confirm = match self.public_address {
+            None => true,
+            Some(current) => current != new_address,
+        };
 
-            self.public_address = Some(new_address)
+        if needs_confirm {
+            debug!(
+                ?new_address,
+                "Query responses suggest a different public_address, trying to confirm.."
+            );
+
+            self.firewalled = true;
+            self.ping(new_address);
         }
+
+        self.public_address = Some(new_address);
     }
 
     fn cache_iterative_query(&mut self, query: &IterativeQuery, closest_responding_nodes: &[Node]) {
@@ -894,32 +893,30 @@ impl Rpc {
         let mut finished_self_findnode = false;
 
         for (id, query) in self.iterative_queries.iter_mut() {
-            let is_done = query.tick(&mut self.socket);
+            if !query.tick(&mut self.socket) {
+                continue;
+            }
 
-            if is_done {
-                let closest_nodes =
-                    if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
-                        if *id == self_id {
-                            finished_self_findnode = true;
-                        };
+            let closest_nodes = if let RequestTypeSpecific::FindNode(_) = query.request.request_type
+            {
+                finished_self_findnode = *id == self_id;
 
-                        query
-                            .closest()
-                            .nodes()
-                            .iter()
-                            .take(MAX_BUCKET_SIZE_K)
-                            .cloned()
-                            .collect::<Box<[_]>>()
-                    } else {
-                        query
-                            .responders()
-                            .take_until_secure(responders_based_dht_size_estimate, average_subnets)
-                            .to_vec()
-                            .into_boxed_slice()
-                    };
-
-                done_get_queries.push((*id, closest_nodes));
+                query
+                    .closest()
+                    .nodes()
+                    .iter()
+                    .take(MAX_BUCKET_SIZE_K)
+                    .cloned()
+                    .collect::<Box<[_]>>()
+            } else {
+                query
+                    .responders()
+                    .take_until_secure(responders_based_dht_size_estimate, average_subnets)
+                    .to_vec()
+                    .into_boxed_slice()
             };
+
+            done_get_queries.push((*id, closest_nodes));
         }
 
         (done_get_queries, finished_self_findnode)
@@ -967,13 +964,15 @@ impl Rpc {
     }
 
     fn maybe_log_bootstrap(&self, finished_self_findnode: bool, self_id: Id) {
-        if finished_self_findnode {
-            let table_size = self.routing_table.size();
-            if table_size == 0 {
-                error!("Could not bootstrap the routing table");
-            } else {
-                debug!(?self_id, table_size, "Populated the routing table");
-            }
+        if !finished_self_findnode {
+            return;
+        }
+
+        let table_size = self.routing_table.size();
+        if table_size == 0 {
+            error!("Could not bootstrap the routing table");
+        } else {
+            debug!(?self_id, table_size, "Populated the routing table");
         }
     }
 }
