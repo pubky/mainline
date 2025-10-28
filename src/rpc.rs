@@ -669,7 +669,7 @@ impl Rpc {
         None
     }
 
-    // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon recieving ping response
+    // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receiving ping response
     fn periodic_node_maintenance(&mut self) {
         // Decide first, act once: avoid double populate in the same tick.
         let mut should_populate = false;
@@ -682,7 +682,7 @@ impl Rpc {
             should_populate = true;
         }
 
-        self.ping_and_pruge_if_due();
+        self.ping_and_purge_if_due();
 
         if should_populate {
             self.populate();
@@ -707,8 +707,8 @@ impl Rpc {
         }
     }
 
-    /// Prune stale nodes and ping nodes that need probing when due.
-    fn ping_and_pruge_if_due(&mut self) {
+    /// Purge stale nodes and ping nodes that need probing when due.
+    fn ping_and_purge_if_due(&mut self) {
         if self.last_table_ping.elapsed() <= PING_TABLE_INTERVAL {
             return;
         }
