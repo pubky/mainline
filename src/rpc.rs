@@ -442,6 +442,32 @@ impl Rpc {
 
     // === Private Methods ===
 
+    /// Handles a single inbound KRPC request.
+    ///
+    /// Responsibilities:
+    /// - During initial bootstrap (no known bootstrap nodes), adds the requester of
+    ///   a `FindNode` to the routing table to seed it.
+    /// - If running in server mode, forwards the request to the embedded server and
+    ///   emits a response or error using the provided `transaction_id`.
+    /// - Detects successful NAT traversal: when a `Ping` arrives from our own public
+    ///   address, clears `firewalled`.
+    /// - Ensures node ID/IP consistency: if our ID is invalid for the observed
+    ///   public IPv4, generates a new secure ID, resets the routing table, and
+    ///   initiates a `FindNode` to repopulate it.
+    ///
+    /// Parameters:
+    /// - `from`: Source socket address of the requester.
+    /// - `transaction_id`: Transaction ID to echo in any response/error.
+    /// - `request_specific`: Parsed request payload and type.
+    ///
+    /// Side effects:
+    /// - May add `from` to the routing table (bootstrap exception).
+    /// - May send a protocol response or error.
+    /// - May set `firewalled = false` on self-`Ping`.
+    /// - May rotate this node’s ID, reset the routing table, and trigger a
+    ///   rebootstrap query.
+    ///
+    /// Returns: Nothing.
     fn handle_request(
         &mut self,
         from: SocketAddrV4,
@@ -503,6 +529,30 @@ impl Rpc {
         }
     }
 
+    /// Handles an inbound KRPC response for RPC, updating in-flight queries and optionally
+    /// returning a final value for the associated target.
+    ///
+    /// Behavior:
+    /// - Ignores responses from read-only nodes.
+    /// - If it matches an in-flight PutQuery, treats `Ping` as a storage ACK (success/error)
+    ///   and stops further handling.
+    /// - If it matches an in-flight iterative query:
+    ///   - Incorporates network info: adds closer candidates, records responder token,
+    ///     and votes on the observed requester IP.
+    ///   - On value responses:
+    ///     - `GetPeers` → returns `(target, Response::Peers)`
+    ///     - `GetImmutable` → validates content; on success returns `(target, Response::Immutable)`
+    ///     - `GetMutable` → verifies record (sig/seq/salt); on success returns `(target, Response::Mutable)`
+    ///   - Logs and continues on `NoValues` / `NoMoreRecentValue` / `Error`.
+    /// - On any expected response, adds the responder (by author ID) to the routing table.
+    ///
+    /// Parameters:
+    /// - `from`: Responder socket address.
+    /// - `message`: Decoded KRPC message.
+    ///
+    /// Returns:
+    /// - `Some((target, Response))` when a terminal value is obtained for the query.
+    /// - `None` otherwise.
     fn handle_response(&mut self, from: SocketAddrV4, message: Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
         if message.read_only {
