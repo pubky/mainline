@@ -665,7 +665,10 @@ impl Rpc {
         None
     }
 
-    /// The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receIving ping response
+    /// Periodically maintain the routing table:
+    /// - Switches to server mode if eligible (and refresh is due)
+    /// - Pings nodes and purges stale entries when needed
+    /// - Repopulates via bootstrap if table is empty or refresh is due
     fn periodic_node_maintenance(&mut self) {
         let refresh_is_due = self.last_table_refresh.elapsed() >= REFRESH_TABLE_INTERVAL;
         let ping_is_due = self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL;
@@ -688,7 +691,15 @@ impl Rpc {
         }
     }
 
-    /// Refresh table
+    /// Attempts to switch this node into server mode if eligible.
+    ///
+    /// This method should be called periodically. If the node is not currently operating
+    /// in server mode and is not detected as being behind a firewall, it will promote the
+    /// node into server mode (by setting the server_mode field to `true`).
+    /// 
+    /// Server mode enables the node to answer unsolicited requests and fulfill a key
+    /// responsibility in the DHT. Nodes that are firewalled, or behind NAT, should not
+    /// enable server mode unless explicitly configured to do so.
     fn try_switching_to_server_mode(&mut self) {
         if !self.server_mode() && !self.firewalled() {
             info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
@@ -696,7 +707,9 @@ impl Rpc {
         }
     }
 
-    /// Purge stale nodes and ping nodes that need probing when due.
+    /// Purge stale nodes and ping nodes that need probing when due is reached.
+    ///
+    /// This method should be called periodically every tick. It will purge stale nodes from the routing table and periodcially ping nodes.
     fn ping_and_purge(&mut self) {
         self.last_table_ping = Instant::now();
 
@@ -732,12 +745,14 @@ impl Rpc {
         (to_purge, to_ping)
     }
 
+    /// Remove nodes from the routing table.
     fn purge_nodes(&mut self, ids: &[Id]) {
         for id in ids {
             self.routing_table.remove(id);
         }
     }
 
+    /// Ping nodes.
     fn ping_nodes(&mut self, addrs: &[SocketAddrV4]) {
         for address in addrs {
             self.ping(*address);
@@ -756,6 +771,7 @@ impl Rpc {
         );
     }
 
+    /// Send a ping request to a node.
     fn ping(&mut self, address: SocketAddrV4) {
         self.socket.request(
             address,
