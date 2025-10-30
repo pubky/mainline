@@ -97,7 +97,13 @@ pub struct Rpc {
 }
 
 impl Rpc {
-    /// Create a new Rpc
+    /// Creates a new RPC instance and prepares the routing table and socket.
+    ///
+    /// This does not perform network IO by itself. Call [`Rpc::tick`] to bootstrap
+    /// and perform scheduled maintenance.
+    ///
+    /// Returns an instance ready to accept `get`/`put` requests and handle incoming
+    /// messages via [`Rpc::handle_message`] if you integrate it with your socket loop.
     pub fn new(config: config::Config) -> Result<Self, std::io::Error> {
         let id = if let Some(ip) = config.public_ip {
             Id::from_ip(ip.into())
@@ -203,9 +209,17 @@ impl Rpc {
 
     // === Public Methods ===
 
-    /// Advance the inflight queries, receive incoming requests,
-    /// maintain the routing table, and everything else that needs
-    /// to happen at every tick.
+    /// Advances maintenance and in-flight queries by one step.
+    ///
+    /// - Performs routing-table refreshes and liveness checks on schedule.
+    /// - Progresses outstanding `get`/`put` queries and evicts completed ones.
+    /// - May emit newly-available query responses.
+    ///
+    /// Returns a [`RpcTickReport`] summarizing work done during this call.
+    ///
+    /// Call this periodically; typical intervals are tied to IO loop cadence
+    /// or a fixed timer. Missing calls will delay query completion and degrade
+    /// the routing table quality.
     pub fn tick(&mut self) -> RpcTickReport {
         let mut done_put_queries = self.tick_put_queries();
 
