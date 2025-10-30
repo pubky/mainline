@@ -667,36 +667,33 @@ impl Rpc {
 
     // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receIving ping response
     fn periodic_node_maintenance(&mut self) {
-        // Decide first, act once: avoid double populate in the same tick.
-        let should_populate = self.routing_table.is_empty() || self.refresh_routing_table_if_due();
+        let refresh_is_due = self.last_table_refresh.elapsed() >= REFRESH_TABLE_INTERVAL;
+        let ping_is_due = self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL;
 
-        if self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL {
+        // Decide first, act once: avoid double populate in the same tick.
+        let should_populate = self.routing_table.is_empty() || refresh_is_due;
+
+        if refresh_is_due {
+            self.try_switching_to_server_mode();
+        }
+
+        if ping_is_due {
             self.ping_and_purge();
         }
 
         if should_populate {
+            self.last_table_refresh = Instant::now();
+
             self.populate();
         }
     }
 
-    /// Refresh table if due; also handles adaptive server-mode switch.
-    /// Returns true if a refresh was due (so caller may call populate()).
-    fn refresh_routing_table_if_due(&mut self) -> bool {
-        if self.last_table_refresh.elapsed() <= REFRESH_TABLE_INTERVAL {
-            return false;
+    /// Refresh table
+    fn try_switching_to_server_mode(&mut self) {
+        if !self.server_mode() && !self.firewalled() {
+            info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
+            self.socket.server_mode = true;
         }
-        self.last_table_refresh = Instant::now();
-        self.maybe_switch_to_server_mode_on_refresh();
-        true
-    }
-
-    fn maybe_switch_to_server_mode_on_refresh(&mut self) {
-        if self.server_mode() || self.firewalled() {
-            return;
-        }
-
-        info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
-        self.socket.server_mode = true;
     }
 
     /// Purge stale nodes and ping nodes that need probing when due.
