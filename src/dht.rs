@@ -109,6 +109,20 @@ impl DhtBuilder {
         self
     }
 
+    /// Set the protocol ID for network isolation
+    ///
+    /// When set, this node will only communicate with other nodes using the same protocol ID.
+    /// Messages from nodes with different or no protocol IDs will be rejected.
+    ///
+    /// Format: "/prefix/mainline/version" (e.g., "/pubky/mainline/1.0.0")
+    ///
+    /// When None (default), accepts all messages for backward compatiblility.
+    pub fn protocol_id(&mut self, protocol_id: impl Into<String>) -> &mut Self {
+        self.0.protocol_id = Some(protocol_id.into());
+
+        self
+    }
+
     /// Create a Dht node.
     pub fn build(&self) -> Result<Dht, std::io::Error> {
         Dht::new(self.0.clone())
@@ -1102,5 +1116,132 @@ mod test {
             .nodes
             .iter()
             .all(|n| n.to_bootstrap().len() == size - 1));
+    }
+
+    #[test]
+    fn protocol_id_isolation_different_networks_cannot_communicate() {
+        let testnet = Testnet::new(5).unwrap();
+
+        // Create node A with protocol ID "/network_a/mainline/1.0.0"
+        let node_a = Dht::builder()
+            .protocol_id("/network_a/mainline/1.0.0")
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        // Create node B with different protocol ID "/network_b/mainline/1.0.0"
+        let node_b = Dht::builder()
+            .protocol_id("/network_b/mainline/1.0.0")
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        // Wait for nodes to attempt bootstrapping
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Node A puts immutable data
+        let value = b"Hello from Network A";
+        let target = node_a.put_immutable(value).unwrap();
+
+        // Node B (on different network) should NOT be able to get the data
+        // Because they have different protocol IDs, B's requests are ignored by A's network
+        let result = node_b.get_immutable(target);
+        assert!(
+            result.is_none(),
+            "Node B should not be able to retrieve data from Network A"
+        );
+    }
+
+    #[test]
+    fn protocol_id_isolation_same_network_can_communicate() {
+        let mut nodes: Vec<Dht> = vec![];
+        let mut bootstrap = vec![];
+
+        // Create first node with protocol ID
+        let node = Dht::builder()
+            .protocol_id("/test_network/mainline/1.0.0")
+            .server_mode()
+            .no_bootstrap()
+            .build()
+            .unwrap();
+
+        let info = node.info();
+        bootstrap.push(format!("127.0.0.1:{}", info.local_addr().port()));
+        nodes.push(node);
+
+        // Create more nodes with SAME protocol ID
+        for _ in 1..5 {
+            let node = Dht::builder()
+                .protocol_id("/test_network/mainline/1.0.0")
+                .server_mode()
+                .bootstrap(&bootstrap)
+                .build()
+                .unwrap();
+            nodes.push(node);
+        }
+
+        for node in &nodes {
+            node.bootstrapped();
+        }
+
+        // Create two client nodes with the SAME protocol ID
+        let node_a = Dht::builder()
+            .protocol_id("/test_network/mainline/1.0.0")
+            .bootstrap(&bootstrap)
+            .build()
+            .unwrap();
+        let node_b = Dht::builder()
+            .protocol_id("/test_network/mainline/1.0.0")
+            .bootstrap(&bootstrap)
+            .build()
+            .unwrap();
+
+        // Node A puts immutable data
+        let value = b"Hello from same network";
+        let target = node_a.put_immutable(value).unwrap();
+
+        // Node B (on same network) SHOULD be able to get the data
+        let result = node_b.get_immutable(target);
+        assert!(
+            result.is_some(),
+            "Node B should be able to retrieve data from Node A (same network)"
+        );
+        assert_eq!(result.unwrap().as_ref(), value);
+    }
+
+    #[test]
+    fn protocol_id_node_rejects_messages_without_protocol_id() {
+        let testnet = Testnet::new(5).unwrap();
+
+        // Create node with protocol ID
+        let node_with_protocol = Dht::builder()
+            .protocol_id("/custom_network/mainline/1.0.0")
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        // Create node WITHOUT protocol ID (default)
+        let node_without_protocol = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+
+        // Wait for bootstrapping
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        // Node without protocol ID puts data
+        let value = b"Hello from default network";
+        let target = node_without_protocol.put_immutable(value).unwrap();
+
+        // Node with protocol ID will NOT be able to read from default network nodes
+        // because nodes with protocol IDs reject messages without protocol IDs
+        let result = node_with_protocol.get_immutable(target);
+
+        // The node with protocol ID cannot retrieve data from nodes without protocol IDs
+        // because it rejects their responses (no protocol ID = rejected)
+        assert!(
+            result.is_none(),
+            "Node with protocol ID should not retrieve data from nodes without protocol ID"
+        );
     }
 }

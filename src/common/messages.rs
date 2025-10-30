@@ -29,6 +29,9 @@ pub(crate) struct Message {
     /// For bep0043. When set true on a request, indicates that the requester can't reply to requests and that responders should not add requester to their routing tables.
     /// Should only be set on requests - undefined behavior when set on a response.
     pub read_only: bool,
+
+    /// Optional protocol ID for network isolation
+    pub protocol_id: Option<Box<[u8]>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -220,6 +223,7 @@ impl Message {
                 .requester_ip
                 .map(|sockaddr| sockaddr_to_bytes(&sockaddr)),
             read_only: if self.read_only { Some(1) } else { Some(0) },
+            protocol_id: self.protocol_id,
             variant: match self.message_type {
                 MessageType::Request(RequestSpecific {
                     requester_id,
@@ -412,6 +416,7 @@ impl Message {
             } else {
                 false
             },
+            protocol_id: msg.protocol_id,
             message_type: match msg.variant {
                 internal::DHTMessageVariant::Request(req_variant) => {
                     MessageType::Request(match req_variant {
@@ -664,6 +669,10 @@ impl Message {
             _ => None,
         }
     }
+
+    pub fn protocol_id(&self) -> Option<&[u8]> {
+        self.protocol_id.as_deref()
+    }
 }
 
 fn bytes_to_sockaddr<T: AsRef<[u8]>>(bytes: T) -> Result<SocketAddrV4, DecodeMessageError> {
@@ -781,6 +790,7 @@ mod tests {
             version: None,
             requester_ip: None,
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Ping,
@@ -801,6 +811,7 @@ mod tests {
             version: Some([0xde, 0xad, 0, 1]),
             requester_ip: Some("99.100.101.102:1030".parse().unwrap()),
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
                 responder_id: Id::random(),
             })),
@@ -820,6 +831,7 @@ mod tests {
             version: Some([0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::FindNode(FindNodeRequestArguments {
@@ -842,6 +854,7 @@ mod tests {
             version: Some([0x62, 0x61, 0x72, 0x66]),
             requester_ip: None,
             read_only: true,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::FindNode(FindNodeRequestArguments {
@@ -864,6 +877,7 @@ mod tests {
             version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Response(ResponseSpecific::FindNode(
                 FindNodeResponseArguments {
                     responder_id: Id::random(),
@@ -897,6 +911,7 @@ mod tests {
             version: Some([72, 73, 0, 1]),
             requester_ip: None,
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::GetPeers(GetPeersRequestArguments {
@@ -919,6 +934,7 @@ mod tests {
             version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: true,
+            protocol_id: None,
             message_type: MessageType::Response(ResponseSpecific::NoValues(
                 NoValuesResponseArguments {
                     responder_id: Id::random(),
@@ -959,6 +975,7 @@ mod tests {
             version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Response(ResponseSpecific::GetPeers(
                 GetPeersResponseArguments {
                     responder_id: Id::random(),
@@ -983,6 +1000,7 @@ mod tests {
             read_only: None,
             transaction_id: [1, 2, 3, 4],
             version: None,
+            protocol_id: None,
             variant: internal::DHTMessageVariant::Response(
                 internal::DHTResponseSpecific::NoValues {
                     arguments: internal::DHTNoValuesResponseArguments {
@@ -1007,6 +1025,7 @@ mod tests {
             version: Some([72, 73, 0, 1]),
             requester_ip: None,
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::GetValue(GetValueRequestArguments {
@@ -1031,6 +1050,7 @@ mod tests {
             version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Response(ResponseSpecific::GetImmutable(
                 GetImmutableResponseArguments {
                     responder_id: Id::random(),
@@ -1055,6 +1075,7 @@ mod tests {
             version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Put(PutRequest {
@@ -1083,6 +1104,7 @@ mod tests {
             version: Some([1, 2, 3, 4]),
             requester_ip: Some("50.51.52.53:5455".parse().unwrap()),
             read_only: false,
+            protocol_id: None,
             message_type: MessageType::Request(RequestSpecific {
                 requester_id: Id::random(),
                 request_type: RequestTypeSpecific::Put(PutRequest {
@@ -1105,5 +1127,26 @@ mod tests {
         let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_protocol_id_request() {
+        // Old nodes (without protocol_id field) should be able to parse messages with protocol_id
+        // because bencode ignores unknown fields
+        let protocol_id = b"/pubky/mainline/1.0.0";
+        let msg_with_protocol = Message {
+            transaction_id: 258,
+            version: Some([0x62, 0x61, 0x72, 0x66]),
+            requester_ip: None,
+            read_only: false,
+            protocol_id: Some(protocol_id.to_vec().into_boxed_slice()),
+            message_type: MessageType::Request(RequestSpecific {
+                requester_id: Id::random(),
+                request_type: RequestTypeSpecific::Ping,
+            }),
+        };
+        let bytes = msg_with_protocol.to_bytes().unwrap();
+        let parsed = Message::from_bytes(&bytes).unwrap();
+        assert_eq!(parsed.protocol_id(), Some(protocol_id.as_ref()));
     }
 }

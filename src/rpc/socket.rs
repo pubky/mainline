@@ -31,6 +31,7 @@ pub struct KrpcSocket {
     inflight_requests: InflightRequests,
     last_cleanup: Instant,
     local_addr: SocketAddrV4,
+    protocol_id: Option<Vec<u8>>,
     // poll_interval: Duration,
 }
 
@@ -62,6 +63,7 @@ impl KrpcSocket {
             inflight_requests: InflightRequests::new(request_timeout),
             last_cleanup: Instant::now(),
             local_addr,
+            protocol_id: config.protocol_id.as_ref().map(|s| s.as_bytes().to_vec()),
         })
     }
 
@@ -154,6 +156,10 @@ impl KrpcSocket {
 
                 match Message::from_bytes(bytes) {
                     Ok(message) => {
+                        if !self.validate_protocol_id(&message) {
+                            return None;
+                        }
+
                         let should_return = match message.message_type {
                             MessageType::Request(_) => {
                                 trace!(
@@ -231,6 +237,34 @@ impl KrpcSocket {
         false
     }
 
+    /// Returns true if message should be accepted:
+    /// - If we have no protocol_id set (None), accept all messages (backward compatible)
+    /// - If we have protocol_id set and message has matching protocol_id, accept
+    /// - Otherwise, reject
+    fn validate_protocol_id(&self, message: &Message) -> bool {
+        match &self.protocol_id {
+            None => true, // No validation - accept all (default)
+            Some(local_id) => {
+                match message.protocol_id() {
+                    Some(msg_id) => {
+                        if msg_id == local_id.as_slice() {
+                            true
+                        } else {
+                            trace!(
+                                context = "socket_validation",
+                                local_protocol = ?String::from_utf8_lossy(local_id),
+                                message_protocol = ?String::from_utf8_lossy(msg_id),
+                                "Protocol ID mismatch"
+                            );
+                            false
+                        }
+                    }
+                    None => false, // Reject non-matching or no protocol ID
+                }
+            }
+        }
+    }
+
     /// Increments self.next_tid and returns the previous value.
     fn tid(&mut self) -> u32 {
         // We don't bother much with reusing freed transaction ids,
@@ -251,6 +285,10 @@ impl KrpcSocket {
             version: Some(VERSION),
             read_only: !self.server_mode,
             requester_ip: None,
+            protocol_id: self
+                .protocol_id
+                .as_ref()
+                .map(|v| v.clone().into_boxed_slice()),
         }
     }
 
@@ -268,6 +306,10 @@ impl KrpcSocket {
             read_only: !self.server_mode,
             // BEP_0042 Only relevant in responses.
             requester_ip: Some(requester_ip),
+            protocol_id: self
+                .protocol_id
+                .as_ref()
+                .map(|v| v.clone().into_boxed_slice()),
         }
     }
 
