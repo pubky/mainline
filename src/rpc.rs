@@ -665,7 +665,7 @@ impl Rpc {
         None
     }
 
-    // The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receIving ping response
+    /// The update of nodes in a routing table happens by removing node periodically and inserting them into the table upon receIving ping response
     fn periodic_node_maintenance(&mut self) {
         let refresh_is_due = self.last_table_refresh.elapsed() >= REFRESH_TABLE_INTERVAL;
         let ping_is_due = self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL;
