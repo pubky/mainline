@@ -696,7 +696,7 @@ impl Rpc {
     /// This method should be called periodically. If the node is not currently operating
     /// in server mode and is not detected as being behind a firewall, it will promote the
     /// node into server mode (by setting the server_mode field to `true`).
-    /// 
+    ///
     /// Server mode enables the node to answer unsolicited requests and fulfill a key
     /// responsibility in the DHT. Nodes that are firewalled, or behind NAT, should not
     /// enable server mode unless explicitly configured to do so.
@@ -759,7 +759,8 @@ impl Rpc {
         }
     }
 
-    /// Ping bootstrap nodes, add them to the routing table with closest query.
+    /// Populate routing table by asking bootstrap nodes to find ourselves,
+    /// Response will allow to add closest nodes candidates to routing table.
     fn populate(&mut self) {
         if self.bootstrap.is_empty() {
             return;
@@ -873,6 +874,7 @@ impl Rpc {
             }
         };
     }
+
     // === tick() helpers ===
 
     /// Advance all PUT queries, return done ones.
