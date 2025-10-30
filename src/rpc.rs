@@ -207,23 +207,19 @@ impl Rpc {
     /// maintain the routing table, and everything else that needs
     /// to happen at every tick.
     pub fn tick(&mut self) -> RpcTickReport {
-        // 1) Tick PUT queries
         let mut done_put_queries = self.tick_put_queries();
 
-        // 2) Tick GET/FIND_NODE queries
         let (done_get_queries, finished_self_findnode) = self.tick_get_queries();
 
-        // 3) Cleanup done queries (must happen before recv_from)
         self.cleanup_done_queries(&done_get_queries, &mut done_put_queries);
 
-        // 4) Periodic node maintenance
         self.periodic_node_maintenance();
 
-        // 5) Handle a single incoming message
-        let new_query_response = self.handle_one_incoming();
+        let new_query_response = self.handle_message();
 
-        // 6) Recompute size and log bootstrap result (if just finished)
-        self.maybe_log_bootstrap(finished_self_findnode, *self.id());
+        if finished_self_findnode {
+            self.log_bootstrap(self.id());
+        }
 
         RpcTickReport {
             done_get_queries,
@@ -867,6 +863,7 @@ impl Rpc {
     }
     // === tick() helpers ===
 
+    /// Advance all PUT queries, return done ones.
     fn tick_put_queries(&mut self) -> Vec<(Id, Option<PutError>)> {
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
@@ -884,6 +881,7 @@ impl Rpc {
         done_put_queries
     }
 
+    /// Advance all GET/FIND_NODE queries, return done ones and whether table refresh/find_node to self is finished.
     fn tick_get_queries(&mut self) -> (Vec<(Id, Box<[Node]>)>, bool) {
         let self_id = *self.id();
         let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
@@ -922,6 +920,7 @@ impl Rpc {
         (done_get_queries, finished_self_findnode)
     }
 
+    /// Remove completed GET and PUT queries from internal state.
     fn cleanup_done_queries(
         &mut self,
         done_get: &[(Id, Box<[Node]>)],
@@ -929,21 +928,31 @@ impl Rpc {
     ) {
         // Has to happen _before_ `self.socket.recv_from()`.
         for (id, closest_nodes) in done_get {
-            if let Some(query) = self.iterative_queries.remove(id) {
-                self.update_address_votes_from_iterative_query(&query);
-                self.cache_iterative_query(&query, closest_nodes);
-
-                // Only for get queries, not find node.
-                if !matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
-                    if let Some(put_query) = self.put_queries.get_mut(id) {
-                        if !put_query.started() {
-                            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
-                                done_put.push((*id, Some(error)))
-                            }
-                        }
-                    }
-                }
+            let query = match self.iterative_queries.remove(id) {
+                Some(query) => query,
+                None => continue,
             };
+
+            self.update_address_votes_from_iterative_query(&query);
+            self.cache_iterative_query(&query, closest_nodes);
+
+            // Only for get queries, not find node.
+            if matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
+                continue;
+            }
+
+            let put_query = match self.put_queries.get_mut(id) {
+                Some(put_query) => put_query,
+                None => continue,
+            };
+
+            if put_query.started() {
+                continue;
+            }
+
+            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
+                done_put.push((*id, Some(error)))
+            }
         }
 
         for (id, _) in done_put.iter() {
@@ -951,7 +960,8 @@ impl Rpc {
         }
     }
 
-    fn handle_one_incoming(&mut self) -> Option<(Id, Response)> {
+    /// Handle one incoming message, either a request or a response message. One message per tick.
+    fn handle_message(&mut self) -> Option<(Id, Response)> {
         self.socket
             .recv_from()
             .and_then(|(message, from)| match message.message_type {
@@ -963,11 +973,8 @@ impl Rpc {
             })
     }
 
-    fn maybe_log_bootstrap(&self, finished_self_findnode: bool, self_id: Id) {
-        if !finished_self_findnode {
-            return;
-        }
-
+    /// Check if routing table is empty and log an error if so.
+    fn log_bootstrap(&self, self_id: &Id) {
         let table_size = self.routing_table.size();
         if table_size == 0 {
             error!("Could not bootstrap the routing table");
