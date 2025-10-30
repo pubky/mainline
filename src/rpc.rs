@@ -670,7 +670,9 @@ impl Rpc {
         // Decide first, act once: avoid double populate in the same tick.
         let should_populate = self.routing_table.is_empty() || self.refresh_routing_table_if_due();
 
-        self.ping_and_purge_if_due();
+        if self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL {
+            self.ping_and_purge();
+        }
 
         if should_populate {
             self.populate();
@@ -698,10 +700,7 @@ impl Rpc {
     }
 
     /// Purge stale nodes and ping nodes that need probing when due.
-    fn ping_and_purge_if_due(&mut self) {
-        if self.last_table_ping.elapsed() <= PING_TABLE_INTERVAL {
-            return;
-        }
+    fn ping_and_purge(&mut self) {
         self.last_table_ping = Instant::now();
 
         let (to_purge, to_ping) = self.purge_and_ping_candidates();
