@@ -733,6 +733,7 @@ impl Rpc {
     /// - Switches to server mode if eligible (and refresh is due)
     /// - Pings nodes and purges stale entries when needed
     /// - Repopulates via bootstrap if table is empty or refresh is due
+    /// - Updates last_table_refresh and last_table_ping timers as needed
     fn periodic_node_maintenance(&mut self) {
         let refresh_is_due = self.last_table_refresh.elapsed() >= REFRESH_TABLE_INTERVAL;
         let ping_is_due = self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL;
@@ -749,15 +750,13 @@ impl Rpc {
         }
 
         if should_populate {
-            self.last_table_refresh = Instant::now();
-
             self.populate();
         }
     }
 
     /// Attempts to switch this node into server mode if eligible.
     ///
-    /// This method should be called periodically. If the node is not currently operating
+    /// If the node is not currently operating
     /// in server mode and is not detected as being behind a firewall, it will promote the
     /// node into server mode (by setting the server_mode field to `true`).
     ///
@@ -773,7 +772,8 @@ impl Rpc {
 
     /// Purge stale nodes and ping nodes that need probing when due is reached.
     ///
-    /// This method should be called periodically every tick. It will purge stale nodes from the routing table and periodcially ping nodes.
+    /// It will purge stale nodes from the routing table and periodcially ping nodes.
+    /// It will reset the last_table_ping timer.
     fn ping_and_purge(&mut self) {
         self.last_table_ping = Instant::now();
 
@@ -825,7 +825,11 @@ impl Rpc {
 
     /// Populate routing table by asking bootstrap nodes to find ourselves,
     /// Response will allow to add closest nodes candidates to routing table.
+    ///
+    /// Reset the last_table_refresh timer.
     fn populate(&mut self) {
+        self.last_table_refresh = Instant::now();
+
         if self.bootstrap.is_empty() {
             return;
         }
