@@ -112,7 +112,7 @@ impl RoutingTable {
     }
 
     /// Returns an iterator over the nodes in this routing table.
-    pub fn nodes(&self) -> RoutingTableIterator {
+    pub fn nodes(&self) -> RoutingTableIterator<'_> {
         RoutingTableIterator {
             bucket_index: 1,
             node_index: 0,
@@ -125,7 +125,7 @@ impl RoutingTable {
         self.nodes().collect()
     }
 
-    /// Turn this routing table to a list of bootstrapping nodes.   
+    /// Turn this routing table to a list of bootstrapping nodes.
     pub fn to_bootstrap(&self) -> Vec<String> {
         self.nodes()
             .filter(|n| !n.is_stale())

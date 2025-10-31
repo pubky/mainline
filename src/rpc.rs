@@ -97,7 +97,13 @@ pub struct Rpc {
 }
 
 impl Rpc {
-    /// Create a new Rpc
+    /// Creates a new RPC instance and prepares the routing table and socket.
+    ///
+    /// This does not perform network IO by itself. Call [`Rpc::tick`] to bootstrap
+    /// and perform scheduled maintenance.
+    ///
+    /// Returns an instance ready to accept `get`/`put` requests and handle incoming
+    /// messages via [`Rpc::handle_message`] if you integrate it with your socket loop.
     pub fn new(config: config::Config) -> Result<Self, std::io::Error> {
         let id = if let Some(ip) = config.public_ip {
             Id::from_ip(ip.into())
@@ -203,105 +209,31 @@ impl Rpc {
 
     // === Public Methods ===
 
-    /// Advance the inflight queries, receive incoming requests,
-    /// maintain the routing table, and everything else that needs
-    /// to happen at every tick.
+    /// Advances maintenance and in-flight queries by one step.
+    ///
+    /// - Performs routing-table refreshes and liveness checks on schedule.
+    /// - Progresses outstanding `get`/`put` queries and evicts completed ones.
+    /// - May emit newly-available query responses.
+    ///
+    /// Returns a [`RpcTickReport`] summarizing work done during this call.
+    ///
+    /// Call this periodically; typical intervals are tied to IO loop cadence
+    /// or a fixed timer. Missing calls will delay query completion and degrade
+    /// the routing table quality.
     pub fn tick(&mut self) -> RpcTickReport {
-        let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
-        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+        let mut done_put_queries = self.tick_put_queries();
 
-        // === Tick Queries ===
+        let (done_get_queries, finished_self_findnode) = self.tick_get_queries();
 
-        for (id, query) in self.put_queries.iter_mut() {
-            match query.tick(&self.socket) {
-                Ok(done) => {
-                    if done {
-                        done_put_queries.push((*id, None));
-                    }
-                }
-                Err(error) => done_put_queries.push((*id, Some(error))),
-            };
+        self.cleanup_done_queries(&done_get_queries, &mut done_put_queries);
+
+        self.periodic_node_maintenance();
+
+        let new_query_response = self.handle_message();
+
+        if finished_self_findnode {
+            self.log_bootstrap(self.id());
         }
-
-        let self_id = *self.id();
-        let table_size = self.routing_table.size();
-
-        let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
-        let average_subnets = self.average_subnets();
-
-        for (id, query) in self.iterative_queries.iter_mut() {
-            let is_done = query.tick(&mut self.socket);
-
-            if is_done {
-                let closest_nodes =
-                    if let RequestTypeSpecific::FindNode(_) = query.request.request_type {
-                        if *id == self_id {
-                            if table_size == 0 {
-                                error!("Could not bootstrap the routing table");
-                            } else {
-                                debug!(?self_id, table_size, "Populated the routing table");
-                            }
-                        };
-
-                        query
-                            .closest()
-                            .nodes()
-                            .iter()
-                            .take(MAX_BUCKET_SIZE_K)
-                            .cloned()
-                            .collect::<Box<[_]>>()
-                    } else {
-                        query
-                            .responders()
-                            .take_until_secure(responders_based_dht_size_estimate, average_subnets)
-                            .to_vec()
-                            .into_boxed_slice()
-                    };
-
-                done_get_queries.push((*id, closest_nodes));
-            };
-        }
-
-        // === Cleanup done queries ===
-
-        // Has to happen _before_ `self.socket.recv_from()`.
-        for (id, closest_nodes) in &done_get_queries {
-            if let Some(query) = self.iterative_queries.remove(id) {
-                self.update_address_votes_from_iterative_query(&query);
-                self.cache_iterative_query(&query, closest_nodes);
-
-                // Only for get queries, not find node.
-                if !matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
-                    if let Some(put_query) = self.put_queries.get_mut(id) {
-                        if !put_query.started() {
-                            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
-                                done_put_queries.push((*id, Some(error)))
-                            }
-                        }
-                    }
-                }
-            };
-        }
-
-        for (id, _) in &done_put_queries {
-            self.put_queries.remove(id);
-        }
-
-        // === Periodic node maintaenance ===
-        self.periodic_node_maintaenance();
-
-        // Handle new incoming message
-        let new_query_response = self
-            .socket
-            .recv_from()
-            .and_then(|(message, from)| match message.message_type {
-                MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
-
-                    None
-                }
-                _ => self.handle_response(from, message),
-            });
 
         RpcTickReport {
             done_get_queries,
@@ -510,6 +442,32 @@ impl Rpc {
 
     // === Private Methods ===
 
+    /// Handles a single inbound KRPC request.
+    ///
+    /// Responsibilities:
+    /// - During initial bootstrap (no known bootstrap nodes), adds the requester of
+    ///   a `FindNode` to the routing table to seed it.
+    /// - If running in server mode, forwards the request to the embedded server and
+    ///   emits a response or error using the provided `transaction_id`.
+    /// - Detects successful NAT traversal: when a `Ping` arrives from our own public
+    ///   address, clears `firewalled`.
+    /// - Ensures node ID/IP consistency: if our ID is invalid for the observed
+    ///   public IPv4, generates a new secure ID, resets the routing table, and
+    ///   initiates a `FindNode` to repopulate it.
+    ///
+    /// Parameters:
+    /// - `from`: Source socket address of the requester.
+    /// - `transaction_id`: Transaction ID to echo in any response/error.
+    /// - `request_specific`: Parsed request payload and type.
+    ///
+    /// Side effects:
+    /// - May add `from` to the routing table (bootstrap exception).
+    /// - May send a protocol response or error.
+    /// - May set `firewalled = false` on self-`Ping`.
+    /// - May rotate this node’s ID, reset the routing table, and trigger a
+    ///   rebootstrap query.
+    ///
+    /// Returns: Nothing.
     fn handle_request(
         &mut self,
         from: SocketAddrV4,
@@ -571,6 +529,30 @@ impl Rpc {
         }
     }
 
+    /// Handles an inbound KRPC response for RPC, updating in-flight queries and optionally
+    /// returning a final value for the associated target.
+    ///
+    /// Behavior:
+    /// - Ignores responses from read-only nodes.
+    /// - If it matches an in-flight PutQuery, treats `Ping` as a storage ACK (success/error)
+    ///   and stops further handling.
+    /// - If it matches an in-flight iterative query:
+    ///   - Incorporates network info: adds closer candidates, records responder token,
+    ///     and votes on the observed requester IP.
+    ///   - On value responses:
+    ///     - `GetPeers` → returns `(target, Response::Peers)`
+    ///     - `GetImmutable` → validates content; on success returns `(target, Response::Immutable)`
+    ///     - `GetMutable` → verifies record (sig/seq/salt); on success returns `(target, Response::Mutable)`
+    ///   - Logs and continues on `NoValues` / `NoMoreRecentValue` / `Error`.
+    /// - On any expected response, adds the responder (by author ID) to the routing table.
+    ///
+    /// Parameters:
+    /// - `from`: Responder socket address.
+    /// - `message`: Decoded KRPC message.
+    ///
+    /// Returns:
+    /// - `Some((target, Response))` when a terminal value is obtained for the query.
+    /// - `None` otherwise.
     fn handle_response(&mut self, from: SocketAddrV4, message: Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
         if message.read_only {
@@ -747,51 +729,107 @@ impl Rpc {
         None
     }
 
-    fn periodic_node_maintaenance(&mut self) {
-        // Bootstrap if necessary
-        if self.routing_table.is_empty() {
-            self.populate();
+    /// Periodically maintain the routing table:
+    /// - Switches to server mode if eligible (and refresh is due)
+    /// - Pings nodes and purges stale entries when needed
+    /// - Repopulates via bootstrap if table is empty or refresh is due
+    /// - Updates last_table_refresh and last_table_ping timers as needed
+    fn periodic_node_maintenance(&mut self) {
+        let refresh_is_due = self.last_table_refresh.elapsed() >= REFRESH_TABLE_INTERVAL;
+        let ping_is_due = self.last_table_ping.elapsed() >= PING_TABLE_INTERVAL;
+
+        // Decide first, act once: avoid double populate in the same tick.
+        let should_populate = self.routing_table.is_empty() || refresh_is_due;
+
+        if refresh_is_due {
+            self.try_switching_to_server_mode();
         }
 
-        // Every 15 minutes refresh the routing table.
-        if self.last_table_refresh.elapsed() > REFRESH_TABLE_INTERVAL {
-            self.last_table_refresh = Instant::now();
-
-            if !self.server_mode() && !self.firewalled() {
-                info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
-
-                self.socket.server_mode = true;
-            }
-
-            self.populate();
+        if ping_is_due {
+            self.ping_and_purge();
         }
 
-        if self.last_table_ping.elapsed() > PING_TABLE_INTERVAL {
-            self.last_table_ping = Instant::now();
-
-            let mut to_remove = Vec::with_capacity(self.routing_table.size());
-            let mut to_ping = Vec::with_capacity(self.routing_table.size());
-
-            for node in self.routing_table.nodes() {
-                if node.is_stale() {
-                    to_remove.push(*node.id())
-                } else if node.should_ping() {
-                    to_ping.push(node.address())
-                }
-            }
-
-            for id in to_remove {
-                self.routing_table.remove(&id);
-            }
-
-            for address in to_ping {
-                self.ping(address);
-            }
+        if should_populate {
+            self.populate();
         }
     }
 
-    /// Ping bootstrap nodes, add them to the routing table with closest query.
+    /// Attempts to switch this node into server mode if eligible.
+    ///
+    /// If the node is not currently operating
+    /// in server mode and is not detected as being behind a firewall, it will promote the
+    /// node into server mode (by setting the server_mode field to `true`).
+    ///
+    /// Server mode enables the node to answer unsolicited requests and fulfill a key
+    /// responsibility in the DHT. Nodes that are firewalled, or behind NAT, should not
+    /// enable server mode unless explicitly configured to do so.
+    fn try_switching_to_server_mode(&mut self) {
+        if !self.server_mode() && !self.firewalled() {
+            info!("Adaptive mode: have been running long enough (not firewalled), switching to server mode");
+            self.socket.server_mode = true;
+        }
+    }
+
+    /// Purge stale nodes and ping nodes that need probing when due is reached.
+    ///
+    /// It will purge stale nodes from the routing table and periodcially ping nodes.
+    /// It will reset the last_table_ping timer.
+    fn ping_and_purge(&mut self) {
+        self.last_table_ping = Instant::now();
+
+        let (to_purge, to_ping) = self.purge_and_ping_candidates();
+
+        self.purge_nodes(&to_purge);
+        self.ping_nodes(&to_ping);
+
+        if to_purge.is_empty() && to_ping.is_empty() {
+            return;
+        }
+
+        debug!(
+            removed = to_purge.len(),
+            pinged = to_ping.len(),
+            "Node maintenance executed"
+        );
+    }
+
+    /// Pure decision function: compute which nodes to remove and which to ping.
+    fn purge_and_ping_candidates(&self) -> (Vec<Id>, Vec<SocketAddrV4>) {
+        let mut to_purge = Vec::with_capacity(self.routing_table.size());
+        let mut to_ping = Vec::with_capacity(self.routing_table.size());
+
+        for node in self.routing_table.nodes() {
+            if node.is_stale() {
+                to_purge.push(*node.id())
+            } else if node.should_ping() {
+                to_ping.push(node.address())
+            }
+        }
+
+        (to_purge, to_ping)
+    }
+
+    /// Remove nodes from the routing table.
+    fn purge_nodes(&mut self, ids: &[Id]) {
+        for id in ids {
+            self.routing_table.remove(id);
+        }
+    }
+
+    /// Ping nodes.
+    fn ping_nodes(&mut self, addrs: &[SocketAddrV4]) {
+        for address in addrs {
+            self.ping(*address);
+        }
+    }
+
+    /// Populate routing table by asking bootstrap nodes to find ourselves,
+    /// Response will allow to add closest nodes candidates to routing table.
+    ///
+    /// Reset the last_table_refresh timer.
     fn populate(&mut self) {
+        self.last_table_refresh = Instant::now();
+
         if self.bootstrap.is_empty() {
             return;
         }
@@ -802,6 +840,7 @@ impl Rpc {
         );
     }
 
+    /// Send a ping request to a node.
     fn ping(&mut self, address: SocketAddrV4) {
         self.socket.request(
             address,
@@ -813,24 +852,26 @@ impl Rpc {
     }
 
     fn update_address_votes_from_iterative_query(&mut self, query: &IterativeQuery) {
-        if let Some(new_address) = query.best_address() {
-            if self.public_address.is_none()
-                || new_address
-                    != self
-                        .public_address
-                        .expect("self.public_address is not None")
-            {
-                debug!(
-                    ?new_address,
-                    "Query responses suggest a different public_address, trying to confirm.."
-                );
+        let Some(new_address) = query.best_address() else {
+            return;
+        };
 
-                self.firewalled = true;
-                self.ping(new_address);
-            }
+        let needs_confirm = match self.public_address {
+            None => true,
+            Some(current) => current != new_address,
+        };
 
-            self.public_address = Some(new_address)
+        if needs_confirm {
+            debug!(
+                ?new_address,
+                "Query responses suggest a different public_address, trying to confirm.."
+            );
+
+            self.firewalled = true;
+            self.ping(new_address);
         }
+
+        self.public_address = Some(new_address);
     }
 
     fn cache_iterative_query(&mut self, query: &IterativeQuery, closest_responding_nodes: &[Node]) {
@@ -900,6 +941,128 @@ impl Rpc {
                 self.responders_based_dht_size_estimates_count -= 1;
             }
         };
+    }
+
+    // === tick() helpers ===
+
+    /// Advance all PUT queries, return done ones.
+    fn tick_put_queries(&mut self) -> Vec<(Id, Option<PutError>)> {
+        let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
+
+        for (id, query) in self.put_queries.iter_mut() {
+            match query.tick(&self.socket) {
+                Ok(done) => {
+                    if done {
+                        done_put_queries.push((*id, None));
+                    }
+                }
+                Err(error) => done_put_queries.push((*id, Some(error))),
+            };
+        }
+
+        done_put_queries
+    }
+
+    /// Advance all GET/FIND_NODE queries, return done ones and whether table refresh/find_node to self is finished.
+    fn tick_get_queries(&mut self) -> (Vec<(Id, Box<[Node]>)>, bool) {
+        let self_id = *self.id();
+        let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
+        let average_subnets = self.average_subnets();
+
+        let mut done_get_queries = Vec::with_capacity(self.iterative_queries.len());
+        let mut finished_self_findnode = false;
+
+        for (id, query) in self.iterative_queries.iter_mut() {
+            if !query.tick(&mut self.socket) {
+                continue;
+            }
+
+            let closest_nodes = if let RequestTypeSpecific::FindNode(_) = query.request.request_type
+            {
+                finished_self_findnode = *id == self_id;
+
+                query
+                    .closest()
+                    .nodes()
+                    .iter()
+                    .take(MAX_BUCKET_SIZE_K)
+                    .cloned()
+                    .collect::<Box<[_]>>()
+            } else {
+                query
+                    .responders()
+                    .take_until_secure(responders_based_dht_size_estimate, average_subnets)
+                    .to_vec()
+                    .into_boxed_slice()
+            };
+
+            done_get_queries.push((*id, closest_nodes));
+        }
+
+        (done_get_queries, finished_self_findnode)
+    }
+
+    /// Remove completed GET and PUT queries from internal state.
+    fn cleanup_done_queries(
+        &mut self,
+        done_get: &[(Id, Box<[Node]>)],
+        done_put: &mut Vec<(Id, Option<PutError>)>,
+    ) {
+        // Has to happen _before_ `self.socket.recv_from()`.
+        for (id, closest_nodes) in done_get {
+            let query = match self.iterative_queries.remove(id) {
+                Some(query) => query,
+                None => continue,
+            };
+
+            self.update_address_votes_from_iterative_query(&query);
+            self.cache_iterative_query(&query, closest_nodes);
+
+            // Only for get queries, not find node.
+            if matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
+                continue;
+            }
+
+            let put_query = match self.put_queries.get_mut(id) {
+                Some(put_query) => put_query,
+                None => continue,
+            };
+
+            if put_query.started() {
+                continue;
+            }
+
+            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
+                done_put.push((*id, Some(error)))
+            }
+        }
+
+        for (id, _) in done_put.iter() {
+            self.put_queries.remove(id);
+        }
+    }
+
+    /// Handle one incoming message, either a request or a response message. One message per tick.
+    fn handle_message(&mut self) -> Option<(Id, Response)> {
+        self.socket
+            .recv_from()
+            .and_then(|(message, from)| match message.message_type {
+                MessageType::Request(request_specific) => {
+                    self.handle_request(from, message.transaction_id, request_specific);
+                    None
+                }
+                _ => self.handle_response(from, message),
+            })
+    }
+
+    /// Check if routing table is empty and log an error if so.
+    fn log_bootstrap(&self, self_id: &Id) {
+        let table_size = self.routing_table.size();
+        if table_size == 0 {
+            error!("Could not bootstrap the routing table");
+        } else {
+            debug!(?self_id, table_size, "Populated the routing table");
+        }
     }
 }
 
