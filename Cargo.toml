@@ -1,10 +1,11 @@
 [package]
 name = "mainline"
-version = "6.0.0"
+version = "6.0.1"
 authors = [
     "nuh.dev",
     "SeverinAlexB <severin@synonym.to>",
     "SHAcollision <shacollision@synonym.to>",
+    "dzdidi <denys@synonym.to>"
 ]
 edition = "2021"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
