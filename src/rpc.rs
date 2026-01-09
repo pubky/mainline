@@ -116,7 +116,7 @@ impl Rpc {
         Ok(Rpc {
             bootstrap: config
                 .bootstrap
-                .unwrap_or(to_socket_address(&DEFAULT_BOOTSTRAP_NODES))
+                .unwrap_or_else(|| to_socket_address(&DEFAULT_BOOTSTRAP_NODES))
                 .into(),
             socket,
 
