@@ -534,6 +534,12 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                         ActorMessage::ToBootstrap(sender) => {
                             let _ = sender.send(rpc.routing_table().to_bootstrap());
                         }
+                        ActorMessage::SeedRouting(nodes, sender) => {
+                            for node in nodes {
+                                rpc.routing_table_mut().add(node);
+                            }
+                            let _ = sender.send(());
+                        }
                     },
                     Err(TryRecvError::Disconnected) => {
                         // Node was dropped, kill this thread.
@@ -618,6 +624,7 @@ pub(crate) enum ActorMessage {
     Get(GetRequestSpecific, ResponseSender),
     Check(Sender<Result<(), std::io::Error>>),
     ToBootstrap(Sender<Vec<String>>),
+    SeedRouting(Vec<Node>, Sender<()>),
 }
 
 #[derive(Debug, Clone)]
@@ -644,53 +651,51 @@ impl Testnet {
     /// gets dropped, if you want the network to be `'static`, then
     /// you should call [Self::leak].
     ///
-    /// This will block until all nodes are [bootstrapped][Dht::bootstrapped],
+    /// This will block until all nodes are seeded with local peers.
     /// if you are using an async runtime, consider using [Self::new_async].
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
-        let testnet = Testnet::new_inner(count)?;
-
-        for node in &testnet.nodes {
-            node.bootstrapped();
-        }
-
-        Ok(testnet)
+        Testnet::new_inner(count)
     }
 
     #[cfg(feature = "async")]
-    /// Similar to [Self::new] but awaits all nodes to bootstrap instead of blocking.
+    /// Similar to [Self::new], but available for async contexts.
     pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
-        let testnet = Testnet::new_inner(count)?;
-
-        for node in testnet.nodes.clone() {
-            node.as_async().bootstrapped().await;
-        }
-
-        Ok(testnet)
+        Testnet::new_inner(count)
     }
 
     fn new_inner(count: usize) -> Result<Testnet, std::io::Error> {
-        let mut nodes: Vec<Dht> = vec![];
-        let mut bootstrap = vec![];
+        let mut nodes = Vec::with_capacity(count);
 
-        for i in 0..count {
-            if i == 0 {
-                let node = Dht::builder().server_mode().no_bootstrap().build()?;
-
-                let info = node.info();
-                let addr = info.local_addr();
-
-                bootstrap.push(format!("127.0.0.1:{}", addr.port()));
-
-                nodes.push(node)
-            } else {
-                let node = Dht::builder().server_mode().bootstrap(&bootstrap).build()?;
-                nodes.push(node)
-            }
+        for _ in 0..count {
+            let node = Dht::builder().server_mode().no_bootstrap().build()?;
+            nodes.push(node);
         }
 
-        let testnet = Self { bootstrap, nodes };
+        let infos: Vec<_> = nodes.iter().map(|node| node.info()).collect();
+        let bootstrap = infos
+            .iter()
+            .map(|info| format!("127.0.0.1:{}", info.local_addr().port()))
+            .collect::<Vec<_>>();
+        let seeded_nodes: Vec<_> = infos
+            .iter()
+            .map(|info| {
+                let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, info.local_addr().port());
+                Node::new(*info.id(), addr)
+            })
+            .collect();
 
-        Ok(testnet)
+        for (node, info) in nodes.iter().zip(infos.iter()) {
+            let peers = seeded_nodes
+                .iter()
+                .filter(|peer| peer.id() != info.id())
+                .cloned()
+                .collect::<Vec<_>>();
+            let (tx, rx) = flume::bounded(1);
+            node.send(ActorMessage::SeedRouting(peers, tx));
+            let _ = rx.recv();
+        }
+
+        Ok(Self { bootstrap, nodes })
     }
 
     /// By default as soon as this testnet gets dropped,

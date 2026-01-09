@@ -186,6 +186,10 @@ impl Rpc {
         &self.routing_table
     }
 
+    pub fn routing_table_mut(&mut self) -> &mut RoutingTable {
+        &mut self.routing_table
+    }
+
     /// Returns:
     ///  1. Normal Dht size estimate based on all closer `nodes` in query responses.
     ///  2. Standard deviaiton as a function of the number of samples used in this estimate.
