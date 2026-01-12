@@ -657,10 +657,24 @@ impl Testnet {
         Testnet::new_inner(count)
     }
 
+    /// Create a new testnet without pre-seeding routing tables.
+    ///
+    /// This is faster at startup, but nodes will not start with fully populated routing tables.
+    /// Use this when your tests do not require immediate full connectivity.
+    pub fn new_unseeded(count: usize) -> Result<Testnet, std::io::Error> {
+        Testnet::new_unseeded_inner(count)
+    }
+
     #[cfg(feature = "async")]
     /// Similar to [Self::new], but available for async contexts.
     pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
         Testnet::new_inner(count)
+    }
+
+    #[cfg(feature = "async")]
+    /// Similar to [Self::new_unseeded], but available for async contexts.
+    pub async fn new_unseeded_async(count: usize) -> Result<Testnet, std::io::Error> {
+        Testnet::new_unseeded_inner(count)
     }
 
     fn new_inner(count: usize) -> Result<Testnet, std::io::Error> {
@@ -693,6 +707,29 @@ impl Testnet {
             let (tx, rx) = flume::bounded(1);
             node.send(ActorMessage::SeedRouting(peers, tx));
             let _ = rx.recv();
+        }
+
+        Ok(Self { bootstrap, nodes })
+    }
+
+    fn new_unseeded_inner(count: usize) -> Result<Testnet, std::io::Error> {
+        let mut nodes = Vec::with_capacity(count);
+        let mut bootstrap = Vec::new();
+
+        for i in 0..count {
+            if i == 0 {
+                let node = Dht::builder().server_mode().no_bootstrap().build()?;
+
+                let info = node.info();
+                let addr = info.local_addr();
+
+                bootstrap.push(format!("127.0.0.1:{}", addr.port()));
+
+                nodes.push(node);
+            } else {
+                let node = Dht::builder().server_mode().bootstrap(&bootstrap).build()?;
+                nodes.push(node);
+            }
         }
 
         Ok(Self { bootstrap, nodes })
