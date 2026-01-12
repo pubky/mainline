@@ -116,7 +116,7 @@ impl Rpc {
         Ok(Rpc {
             bootstrap: config
                 .bootstrap
-                .unwrap_or(to_socket_address(&DEFAULT_BOOTSTRAP_NODES))
+                .unwrap_or_else(|| to_socket_address(&DEFAULT_BOOTSTRAP_NODES))
                 .into(),
             socket,
 
@@ -184,6 +184,10 @@ impl Rpc {
 
     pub fn routing_table(&self) -> &RoutingTable {
         &self.routing_table
+    }
+
+    pub fn routing_table_mut(&mut self) -> &mut RoutingTable {
+        &mut self.routing_table
     }
 
     /// Returns:
