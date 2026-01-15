@@ -35,6 +35,13 @@ pub struct Config {
     ///
     /// Defaults to None, where we depend on suggestions from responding nodes.
     pub public_ip: Option<Ipv4Addr>,
+    /// Optional protocol ID for network isolation
+    ///
+    /// When Some(id) only accepts messages with matching protocol ID.
+    /// When None, accepts all messages.
+    ///
+    /// Defaults to None
+    pub protocol_id: Option<String>,
 }
 
 impl Default for Config {
@@ -46,6 +53,7 @@ impl Default for Config {
             server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
+            protocol_id: None,
         }
     }
 }

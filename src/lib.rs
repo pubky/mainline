@@ -29,6 +29,9 @@ pub use rpc::{
 
 pub use ed25519_dalek::SigningKey;
 
+/// Default protocol ID for staging isolated network
+pub const DEFAULT_STAGING_PROTOCOL_ID: &str = "/pubky_staging/mainline/1.0.0";
+
 pub mod errors {
     //! Exported errors
     #[cfg(feature = "node")]
