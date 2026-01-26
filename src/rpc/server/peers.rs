@@ -41,7 +41,7 @@ impl PeersStore {
     pub fn get_random_peers(&mut self, info_hash: &Id) -> Option<Vec<SocketAddrV4>> {
         if let Some(info_hash_lru) = self.info_hashes.get(info_hash) {
             let size = info_hash_lru.len();
-            let target_size = 20;
+            let target_size = 10;
 
             if size == 0 {
                 return None;
@@ -55,7 +55,7 @@ impl PeersStore {
                 );
             }
 
-            let mut results = Vec::with_capacity(20);
+            let mut results = Vec::with_capacity(10);
 
             let mut chunk = vec![0_u8; info_hash_lru.iter().len() * 4];
             getrandom::fill(chunk.as_mut_slice()).expect("getrandom");
@@ -171,6 +171,6 @@ mod test {
 
         let sample = store.get_random_peers(&info_hash).unwrap();
 
-        assert_eq!(sample.len(), 20);
+        assert_eq!(sample.len(), 10);
     }
 }
