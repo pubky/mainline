@@ -391,7 +391,7 @@ mod test {
     /// Windows has strict UDP loopback handling that often blocks or interferes with
     /// UDP traffic on `127.0.0.1`, causing `NoClosestNodes` errors in tests.
     /// We use `0.0.0.0` on Windows to work around this.
-    /// On the other hand, MacOS firewall blocks 0.0.0.0 by default so we use 
+    /// On the other hand, MacOS firewall blocks 0.0.0.0 by default so we use
     /// `127.0.0.1` there on purpose.
     fn test_bind_address() -> Ipv4Addr {
         #[cfg(target_os = "windows")]
@@ -403,15 +403,20 @@ mod test {
     #[test]
     fn announce_get_peer() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -433,15 +438,20 @@ mod test {
     #[test]
     fn put_get_immutable() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -462,15 +472,20 @@ mod test {
     #[test]
     fn put_get_mutable() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -502,15 +517,20 @@ mod test {
     #[test]
     fn put_get_mutable_no_more_recent_value() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -541,10 +561,14 @@ mod test {
     #[test]
     fn repeated_put_query() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -561,15 +585,20 @@ mod test {
     #[test]
     fn concurrent_get_mutable() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -606,10 +635,14 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_same() {
-        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+        let testnet = Testnet::builder(10)
+            .bind_address(test_bind_address())
+            .build()
+            .unwrap();
 
         let dht = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(test_bind_address())
             .build()
             .unwrap()
             .as_async();
@@ -644,10 +677,14 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different() {
-        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+        let testnet = Testnet::builder(10)
+            .bind_address(test_bind_address())
+            .build()
+            .unwrap();
 
         let dht = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(test_bind_address())
             .build()
             .unwrap()
             .as_async();
@@ -694,10 +731,14 @@ mod test {
     #[test]
     fn concurrent_put_mutable_different_with_cas() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let dht = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
@@ -743,10 +784,14 @@ mod test {
     #[test]
     fn conflict_301_cas() {
         async fn test() {
-            let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
+            let testnet = Testnet::builder(10)
+                .bind_address(test_bind_address())
+                .build()
+                .unwrap();
 
             let dht = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(test_bind_address())
                 .build()
                 .unwrap()
                 .as_async();
