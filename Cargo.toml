@@ -9,6 +9,7 @@ authors = [
     "Kevin Karsopawiro <kevin@synonym.to>"
 ]
 edition = "2021"
+rust-version = "1.85"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
 homepage = "https://github.com/pubky/mainline"
 license = "MIT"

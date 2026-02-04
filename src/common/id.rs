@@ -184,7 +184,7 @@ impl FromStr for Id {
     type Err = DecodeIdError;
 
     fn from_str(s: &str) -> Result<Id, DecodeIdError> {
-        if !s.len().is_multiple_of(2) {
+        if s.len() % 2 != 0 {
             return Err(DecodeIdError::OddNumberOfCharacters);
         }
 
