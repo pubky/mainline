@@ -1318,4 +1318,49 @@ mod test {
             .iter()
             .all(|n| n.to_bootstrap().len() == size - 1));
     }
+
+    /// Diagnostic test to debug Windows UDP issues.
+    /// This test prints detailed information about bind addresses and connectivity.
+    #[test]
+    fn diagnostic_windows_udp() {
+        use std::net::Ipv4Addr;
+
+        // Create testnet - binds to 127.0.0.1 by default
+        let testnet = Testnet::builder(3).build().unwrap();
+
+        println!("=== DIAGNOSTIC: Testnet Info ===");
+        println!("Testnet bootstrap addresses: {:?}", testnet.bootstrap);
+        for (i, node) in testnet.nodes.iter().enumerate() {
+            println!("  Node {}: local_addr={}", i, node.info().local_addr());
+        }
+
+        // Create client with default settings (binds to 0.0.0.0)
+        println!("\n=== DIAGNOSTIC: Client with default bind (0.0.0.0) ===");
+        let client_default = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .build()
+            .unwrap();
+        println!("Client default local_addr: {}", client_default.info().local_addr());
+        println!("Client default routing table size: {}", client_default.info().routing_table_size());
+
+        // Create client explicitly bound to 127.0.0.1
+        println!("\n=== DIAGNOSTIC: Client with localhost bind (127.0.0.1) ===");
+        let client_localhost = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
+            .build()
+            .unwrap();
+        println!("Client localhost local_addr: {}", client_localhost.info().local_addr());
+        println!("Client localhost routing table size: {}", client_localhost.info().routing_table_size());
+
+        // Give some time for bootstrapping
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        println!("\n=== DIAGNOSTIC: After 2 second wait ===");
+        println!("Client default routing table size: {}", client_default.info().routing_table_size());
+        println!("Client localhost routing table size: {}", client_localhost.info().routing_table_size());
+
+        // The test passes regardless - it's just for diagnostics
+        println!("\n=== DIAGNOSTIC: Test complete ===");
+    }
 }
