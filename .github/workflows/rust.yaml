@@ -85,8 +85,22 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # Print network diagnostics on Windows to help debug UDP issues
+      - name: Network diagnostics (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          echo "=== Network Interfaces ==="
+          ipconfig /all
+          echo "=== Firewall Status ==="
+          netsh advfirewall show allprofiles state
+          echo "=== UDP Listening Ports ==="
+          netstat -an | findstr UDP | head -20
+
       - name: Run tests
         run: cargo test --all-features --workspace --verbose
+        env:
+          RUST_BACKTRACE: 1
+          RUST_LOG: debug
 
   docs:
     name: Documentation
