@@ -23,6 +23,11 @@ pub struct DHTMessage {
     #[serde(default)]
     #[serde(rename = "ro")]
     pub read_only: Option<i32>,
+
+    #[serde(default)]
+    #[serde(rename = "p", with = "serde_bytes")]
+    /// protocol ID for network isolation
+    pub protocol_id: Option<Box<[u8]>>,
 }
 
 impl DHTMessage {
