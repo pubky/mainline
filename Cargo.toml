@@ -5,7 +5,8 @@ authors = [
     "nuh.dev",
     "SeverinAlexB <severin@synonym.to>",
     "SHAcollision <shacollision@synonym.to>",
-    "dzdidi <denys@synonym.to>"
+    "dzdidi <denys@synonym.to>",
+    "Kevin Karsopawiro <kevin@synonym.to>"
 ]
 edition = "2021"
 description = "Simple, robust, BitTorrent's Mainline DHT implementation"
@@ -25,6 +26,9 @@ thiserror = "2.0.11"
 crc = "3.2.1"
 sha1_smol = "1.0.1"
 ed25519-dalek = "3.0.0-pre.1"
+# Pinned: digest 0.11.0-rc.11+ removed crypto_common re-export, breaking curve25519-dalek
+# See: https://github.com/pubky/mainline/issues/80
+digest = "=0.11.0-rc.9"
 tracing = "0.1"
 lru = { version = "0.16.0", default-features = false }
 dyn-clone = "1.0.18"
@@ -62,3 +66,4 @@ default = ["full"]
 
 [package.metadata.docs.rs]
 all-features = true
+
