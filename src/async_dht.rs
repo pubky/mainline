@@ -249,8 +249,9 @@ impl AsyncDht {
     ///
     ///```rust
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
+    /// use std::net::Ipv4Addr;
     ///
-    /// let testnet = Testnet::new(3).unwrap();
+    /// let testnet = Testnet::builder(3).build().unwrap();
     /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap().as_async();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
@@ -387,7 +388,7 @@ mod test {
     #[test]
     fn announce_get_peer() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -417,7 +418,7 @@ mod test {
     #[test]
     fn put_get_immutable() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -446,7 +447,7 @@ mod test {
     #[test]
     fn put_get_mutable() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -486,7 +487,7 @@ mod test {
     #[test]
     fn put_get_mutable_no_more_recent_value() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -525,7 +526,7 @@ mod test {
     #[test]
     fn repeated_put_query() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -545,7 +546,7 @@ mod test {
     #[test]
     fn concurrent_get_mutable() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -590,7 +591,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_same() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let dht = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -628,7 +629,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let dht = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -678,7 +679,7 @@ mod test {
     #[test]
     fn concurrent_put_mutable_different_with_cas() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let dht = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
@@ -727,7 +728,7 @@ mod test {
     #[test]
     fn conflict_301_cas() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let dht = Dht::builder()
                 .bootstrap(&testnet.bootstrap)

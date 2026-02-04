@@ -4,7 +4,7 @@ mod inflight_requests;
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 use inflight_requests::InflightRequests;
 use std::io::ErrorKind;
-use std::net::{SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, trace, warn};
 
@@ -38,13 +38,14 @@ impl KrpcSocket {
     pub(crate) fn new(config: &Config) -> Result<Self, std::io::Error> {
         let request_timeout = config.request_timeout;
         let port = config.port;
+        let bind_addr = config.bind_address.unwrap_or(Ipv4Addr::UNSPECIFIED);
 
         let socket = if let Some(port) = port {
-            UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], port)))?
+            UdpSocket::bind(SocketAddr::from((bind_addr, port)))?
         } else {
-            match UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))) {
+            match UdpSocket::bind(SocketAddr::from((bind_addr, DEFAULT_PORT))) {
                 Ok(socket) => Ok(socket),
-                Err(_) => UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))),
+                Err(_) => UdpSocket::bind(SocketAddr::from((bind_addr, 0))),
             }?
         };
 
@@ -69,13 +70,17 @@ impl KrpcSocket {
     pub(crate) fn server() -> Result<Self, std::io::Error> {
         Self::new(&Config {
             server_mode: true,
+            bind_address: Some(Ipv4Addr::LOCALHOST),
             ..Default::default()
         })
     }
 
     #[cfg(test)]
     pub(crate) fn client() -> Result<Self, std::io::Error> {
-        Self::new(&Config::default())
+        Self::new(&Config {
+            bind_address: Some(Ipv4Addr::LOCALHOST),
+            ..Default::default()
+        })
     }
 
     // === Getters ===

@@ -109,6 +109,15 @@ impl DhtBuilder {
         self
     }
 
+    /// Set the address to bind to.
+    ///
+    /// Defaults to 0.0.0.0 (all interfaces).
+    pub fn bind_address(&mut self, bind_address: Ipv4Addr) -> &mut Self {
+        self.0.bind_address = Some(bind_address);
+
+        self
+    }
+
     /// Create a Dht node.
     pub fn build(&self) -> Result<Dht, std::io::Error> {
         Dht::new(self.0.clone())
@@ -370,8 +379,9 @@ impl Dht {
     ///
     ///```rust
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
+    /// use std::net::Ipv4Addr;
     ///
-    /// let testnet = Testnet::new(3).unwrap();
+    /// let testnet = Testnet::builder(3).build().unwrap();
     /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
@@ -635,7 +645,103 @@ pub enum ResponseSender {
     Immutable(Sender<Box<[u8]>>),
 }
 
+/// Builder for creating a [Testnet] with custom configuration.
+///
+/// # Defaults
+///
+/// - `bind_address`: `127.0.0.1` (localhost)
+/// - `seeded`: `true` - nodes start with fully populated routing tables
+///
+/// # Example
+///
+/// ```ignore
+/// use std::net::Ipv4Addr;
+/// use mainline::Testnet;
+///
+/// // Use localhost (default)
+/// let testnet = Testnet::builder(3).build().unwrap();
+///
+/// // Use all interfaces (0.0.0.0)
+/// let testnet = Testnet::builder(3)
+///     .bind_address(Ipv4Addr::UNSPECIFIED)
+///     .build()
+///     .unwrap();
+/// ```
+#[derive(Debug, Clone)]
+pub struct TestnetBuilder {
+    count: usize,
+    bind_address: Ipv4Addr,
+    seeded: bool,
+}
+
+impl TestnetBuilder {
+    /// Create a new builder with the specified number of nodes.
+    ///
+    /// # Defaults
+    ///
+    /// - `bind_address`: `127.0.0.1` (localhost)
+    /// - `seeded`: `true`
+    pub fn new(count: usize) -> Self {
+        Self {
+            count,
+            bind_address: Ipv4Addr::LOCALHOST,
+            seeded: true,
+        }
+    }
+
+    /// Set the address to bind all nodes to.
+    ///
+    /// Defaults to `127.0.0.1` (localhost).
+    /// Use `Ipv4Addr::UNSPECIFIED` (`0.0.0.0`) to bind to all interfaces.
+    pub fn bind_address(&mut self, bind_address: Ipv4Addr) -> &mut Self {
+        self.bind_address = bind_address;
+        self
+    }
+
+    /// Whether to pre-seed routing tables with all nodes.
+    ///
+    /// Defaults to `true`.
+    ///
+    /// When `true`, all nodes start with fully populated routing tables.
+    /// When `false`, nodes bootstrap from each other which is faster at startup
+    /// but may not have immediate full connectivity.
+    pub fn seeded(&mut self, seeded: bool) -> &mut Self {
+        self.seeded = seeded;
+        self
+    }
+
+    /// Build the testnet.
+    ///
+    /// Nodes will be bound to the configured `bind_address` (default: `127.0.0.1`).
+    ///
+    /// This will block until all nodes are created (and seeded if `seeded` is true).
+    pub fn build(&self) -> Result<Testnet, std::io::Error> {
+        if self.seeded {
+            Testnet::build_seeded(self.count, self.bind_address)
+        } else {
+            Testnet::build_unseeded(self.count, self.bind_address)
+        }
+    }
+
+    #[cfg(feature = "async")]
+    /// Build the testnet in an async context.
+    ///
+    /// Nodes will be bound to the configured `bind_address` (default: `127.0.0.1`).
+    ///
+    /// This will block until all nodes are created (and seeded if `seeded` is true).
+    pub async fn build_async(&self) -> Result<Testnet, std::io::Error> {
+        self.build()
+    }
+}
+
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
+///
+/// # Bind Address
+///
+/// The convenience methods ([`Self::new`], [`Self::new_unseeded`], etc.) bind to `0.0.0.0`
+/// for backwards compatibility. Use [`Self::builder`] to bind to a different address.
+// TODO(breaking): In the next major version, change the default bind address from
+// `0.0.0.0` to `127.0.0.1` for better cross-platform compatibility (especially macOS).
 #[derive(Debug)]
 pub struct Testnet {
     /// bootstrapping nodes for this testnet.
@@ -644,7 +750,24 @@ pub struct Testnet {
     pub nodes: Vec<Dht>,
 }
 
+// TODO(breaking): In the next major version, change `new()` and related methods to bind
+// to `127.0.0.1` instead of `0.0.0.0` for better macOS compatibility. The builder already
+// defaults to `127.0.0.1`.
+
 impl Testnet {
+    /// Returns a builder to configure and create a [Testnet].
+    ///
+    /// The builder defaults to binding to `127.0.0.1` (localhost).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let testnet = Testnet::builder(3).build().unwrap();
+    /// ```
+    pub fn builder(count: usize) -> TestnetBuilder {
+        TestnetBuilder::new(count)
+    }
+
     /// Create a new testnet with a certain size.
     ///
     /// Note: this network will be shutdown as soon as this struct
@@ -652,50 +775,71 @@ impl Testnet {
     /// you should call [Self::leak].
     ///
     /// This will block until all nodes are seeded with local peers.
-    /// if you are using an async runtime, consider using [Self::new_async].
+    /// If you are using an async runtime, consider using [Self::new_async].
+    ///
+    /// # Bind Address
+    ///
+    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] to bind to
+    /// a different address.
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::new_inner(count)
+        Testnet::build_seeded(count, Ipv4Addr::UNSPECIFIED)
     }
 
     /// Create a new testnet without pre-seeding routing tables.
     ///
     /// This is faster at startup, but nodes will not start with fully populated routing tables.
     /// Use this when your tests do not require immediate full connectivity.
+    ///
+    /// # Bind Address
+    ///
+    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] with `.seeded(false)`
+    /// to bind to a different address.
     pub fn new_unseeded(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::new_unseeded_inner(count)
+        Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
     }
 
     #[cfg(feature = "async")]
     /// Similar to [Self::new], but available for async contexts.
+    ///
+    /// # Bind Address
+    ///
+    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] to bind to
+    /// a different address.
     pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::new_inner(count)
+        Testnet::build_seeded(count, Ipv4Addr::UNSPECIFIED)
     }
 
     #[cfg(feature = "async")]
     /// Similar to [Self::new_unseeded], but available for async contexts.
+    ///
+    /// # Bind Address
+    ///
+    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] with `.seeded(false)`
+    /// to bind to a different address.
     pub async fn new_unseeded_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::new_unseeded_inner(count)
+        Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
     }
 
-    fn new_inner(count: usize) -> Result<Testnet, std::io::Error> {
+    fn build_seeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
         let mut nodes = Vec::with_capacity(count);
 
         for _ in 0..count {
-            let node = Dht::builder().server_mode().no_bootstrap().build()?;
+            let node = Dht::builder()
+                .server_mode()
+                .no_bootstrap()
+                .bind_address(bind_address)
+                .build()?;
             nodes.push(node);
         }
 
         let infos: Vec<_> = nodes.iter().map(|node| node.info()).collect();
         let bootstrap = infos
             .iter()
-            .map(|info| format!("127.0.0.1:{}", info.local_addr().port()))
+            .map(|info| info.local_addr().to_string())
             .collect::<Vec<_>>();
         let seeded_nodes: Vec<_> = infos
             .iter()
-            .map(|info| {
-                let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, info.local_addr().port());
-                Node::new(*info.id(), addr)
-            })
+            .map(|info| Node::new(*info.id(), info.local_addr()))
             .collect();
 
         for (node, info) in nodes.iter().zip(infos.iter()) {
@@ -712,22 +856,29 @@ impl Testnet {
         Ok(Self { bootstrap, nodes })
     }
 
-    fn new_unseeded_inner(count: usize) -> Result<Testnet, std::io::Error> {
+    fn build_unseeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
         let mut nodes = Vec::with_capacity(count);
         let mut bootstrap = Vec::new();
 
         for i in 0..count {
             if i == 0 {
-                let node = Dht::builder().server_mode().no_bootstrap().build()?;
+                let node = Dht::builder()
+                    .server_mode()
+                    .no_bootstrap()
+                    .bind_address(bind_address)
+                    .build()?;
 
                 let info = node.info();
-                let addr = info.local_addr();
 
-                bootstrap.push(format!("127.0.0.1:{}", addr.port()));
+                bootstrap.push(info.local_addr().to_string());
 
                 nodes.push(node);
             } else {
-                let node = Dht::builder().server_mode().bootstrap(&bootstrap).build()?;
+                let node = Dht::builder()
+                    .server_mode()
+                    .bootstrap(&bootstrap)
+                    .bind_address(bind_address)
+                    .build()?;
                 nodes.push(node);
             }
         }
@@ -783,7 +934,7 @@ mod test {
 
     #[test]
     fn announce_get_peer() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -806,7 +957,7 @@ mod test {
 
     #[test]
     fn put_get_immutable() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -844,7 +995,7 @@ mod test {
 
     #[test]
     fn put_get_mutable() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -877,7 +1028,7 @@ mod test {
 
     #[test]
     fn put_get_mutable_no_more_recent_value() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -909,7 +1060,7 @@ mod test {
 
     #[test]
     fn repeated_put_query() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -923,7 +1074,7 @@ mod test {
 
     #[test]
     fn concurrent_get_mutable() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -962,7 +1113,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_same() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -997,7 +1148,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1043,7 +1194,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different_with_cas() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1086,7 +1237,7 @@ mod test {
 
     #[test]
     fn conflict_302_seq_less_than_current() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1112,7 +1263,7 @@ mod test {
 
     #[test]
     fn conflict_301_cas() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1138,7 +1289,7 @@ mod test {
     fn populate_bootstrapping_node_routing_table() {
         let size = 3;
 
-        let testnet = Testnet::new(size).unwrap();
+        let testnet = Testnet::builder(size).build().unwrap();
 
         assert!(testnet
             .nodes
