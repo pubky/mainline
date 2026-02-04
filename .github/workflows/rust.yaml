@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check licenses and advisories
-        uses: EmbarkStudios/cargo-deny-action@v1
+        uses: EmbarkStudios/cargo-deny-action@v2
 
   build:
     name: Build
