@@ -6,7 +6,7 @@ use inflight_requests::InflightRequests;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, trace, warn};
 
 use super::config::Config;
 
