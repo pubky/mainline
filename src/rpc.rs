@@ -49,6 +49,9 @@ pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
 const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
+/// Result of `tick_get_queries`: completed queries and whether self-findnode finished.
+type GetQueriesResult = (Vec<(Id, Box<[Node]>)>, bool);
+
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
 #[derive(Debug)]
@@ -968,7 +971,7 @@ impl Rpc {
     }
 
     /// Advance all GET/FIND_NODE queries, return done ones and whether table refresh/find_node to self is finished.
-    fn tick_get_queries(&mut self) -> (Vec<(Id, Box<[Node]>)>, bool) {
+    fn tick_get_queries(&mut self) -> GetQueriesResult {
         let self_id = *self.id();
         let responders_based_dht_size_estimate = self.responders_based_dht_size_estimate();
         let average_subnets = self.average_subnets();

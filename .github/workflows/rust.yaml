@@ -2,42 +2,101 @@ name: Rust CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-test:
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        components: rustfmt, clippy
-        override: true
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
-    - name: Install cargo-deny
-      run: cargo install cargo-deny
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
-    - name: Check formatting
-      run: cargo fmt -- --check
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Lint with Clippy
-      run: cargo clippy --workspace --all-features --bins --tests
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-    - name: cargo deny
-      run: cargo deny --workspace check sources licenses advisories
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
 
-    - name: Build
-      run: cargo build --release --workspace --all-features --verbose
+      - name: Lint with Clippy
+        run: cargo clippy --workspace --all-features --bins --tests -- -D warnings
 
-    - name: Run tests
-      run: cargo test --all-features --workspace --verbose
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-    - name: Run docs
-      run: cargo doc --workspace --all-features --no-deps --document-private-items --verbose
+      - name: Check licenses and advisories
+        uses: EmbarkStudios/cargo-deny-action@v1
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --workspace --all-features --verbose
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --all-features --workspace --verbose
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build docs
+        run: cargo doc --workspace --all-features --no-deps --document-private-items --verbose
+        env:
+          RUSTDOCFLAGS: -D warnings
