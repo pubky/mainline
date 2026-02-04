@@ -913,6 +913,7 @@ pub enum PutMutableError {
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     use ed25519_dalek::SigningKey;
@@ -920,6 +921,20 @@ mod test {
     use crate::rpc::ConcurrencyError;
 
     use super::*;
+
+    /// Returns the bind address for tests.
+    ///
+    /// Windows has strict UDP loopback handling that often blocks or interferes with
+    /// UDP traffic on `127.0.0.1`, causing `NoClosestNodes` errors in tests.
+    /// We use `0.0.0.0` on Windows to work around this.
+    /// On the other hand, MacOS firewall blocks 0.0.0.0 by default so we use 
+    /// `127.0.0.1` there on purpose.
+    fn test_bind_address() -> Ipv4Addr {
+        #[cfg(target_os = "windows")]
+        return Ipv4Addr::UNSPECIFIED;
+        #[cfg(not(target_os = "windows"))]
+        return Ipv4Addr::LOCALHOST;
+    }
 
     #[test]
     fn bind_twice() {
@@ -934,7 +949,7 @@ mod test {
 
     #[test]
     fn announce_get_peer() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -957,7 +972,7 @@ mod test {
 
     #[test]
     fn put_get_immutable() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -995,7 +1010,7 @@ mod test {
 
     #[test]
     fn put_get_mutable() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1028,7 +1043,7 @@ mod test {
 
     #[test]
     fn put_get_mutable_no_more_recent_value() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1060,7 +1075,7 @@ mod test {
 
     #[test]
     fn repeated_put_query() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1074,7 +1089,7 @@ mod test {
 
     #[test]
     fn concurrent_get_mutable() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1113,7 +1128,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_same() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1148,7 +1163,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1194,7 +1209,7 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different_with_cas() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1237,7 +1252,7 @@ mod test {
 
     #[test]
     fn conflict_302_seq_less_than_current() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
@@ -1263,7 +1278,7 @@ mod test {
 
     #[test]
     fn conflict_301_cas() {
-        let testnet = Testnet::builder(10).build().unwrap();
+        let testnet = Testnet::builder(10).bind_address(test_bind_address()).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
