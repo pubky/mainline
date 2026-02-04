@@ -913,6 +913,7 @@ pub enum PutMutableError {
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     use ed25519_dalek::SigningKey;
@@ -934,16 +935,16 @@ mod test {
 
     #[test]
     fn announce_get_peer() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
         let b = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -959,16 +960,16 @@ mod test {
 
     #[test]
     fn put_get_immutable() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
         let b = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -999,16 +1000,16 @@ mod test {
 
     #[test]
     fn put_get_mutable() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
         let b = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1034,16 +1035,16 @@ mod test {
 
     #[test]
     fn put_get_mutable_no_more_recent_value() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
         let b = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1068,12 +1069,11 @@ mod test {
 
     #[test]
     fn repeated_put_query() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1084,16 +1084,16 @@ mod test {
 
     #[test]
     fn concurrent_get_mutable() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let a = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
         let b = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1125,12 +1125,11 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_same() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1162,12 +1161,11 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1210,12 +1208,11 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different_with_cas() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1255,12 +1252,11 @@ mod test {
 
     #[test]
     fn conflict_302_seq_less_than_current() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1283,12 +1279,11 @@ mod test {
 
     #[test]
     fn conflict_301_cas() {
-        let testnet = Testnet::builder(10)
-            .build()
-            .unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let client = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap();
 
@@ -1317,56 +1312,5 @@ mod test {
             .nodes
             .iter()
             .all(|n| n.to_bootstrap().len() == size - 1));
-    }
-
-    /// Diagnostic test to debug Windows UDP issues.
-    /// This test prints detailed information about bind addresses and connectivity.
-    #[test]
-    fn diagnostic_windows_udp() {
-        use std::net::Ipv4Addr;
-
-        // Create testnet - binds to 127.0.0.1 by default
-        let testnet = Testnet::builder(3).build().unwrap();
-
-        println!("=== DIAGNOSTIC: Testnet Info ===");
-        println!("Testnet bootstrap addresses: {:?}", testnet.bootstrap);
-        for (i, node) in testnet.nodes.iter().enumerate() {
-            println!("  Node {}: local_addr={}", i, node.info().local_addr());
-        }
-
-        // Create client with default settings (binds to 0.0.0.0)
-        println!("\n=== DIAGNOSTIC: Client with default bind (0.0.0.0) ===");
-        let client_default = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .build()
-            .unwrap();
-        println!("Client default local_addr: {}", client_default.info().local_addr());
-
-        // Create client explicitly bound to 127.0.0.1
-        println!("\n=== DIAGNOSTIC: Client with localhost bind (127.0.0.1) ===");
-        let client_localhost = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        println!("Client localhost local_addr: {}", client_localhost.info().local_addr());
-
-        // Give some time for bootstrapping
-        std::thread::sleep(std::time::Duration::from_secs(2));
-
-        // Try a simple operation to see if bootstrapping worked
-        println!("\n=== DIAGNOSTIC: Testing find_node operations ===");
-
-        let target = Id::random();
-
-        println!("Testing client_default.find_node()...");
-        let result_default = client_default.find_node(target);
-        println!("Client default found {} nodes", result_default.len());
-
-        println!("Testing client_localhost.find_node()...");
-        let result_localhost = client_localhost.find_node(target);
-        println!("Client localhost found {} nodes", result_localhost.len());
-
-        println!("\n=== DIAGNOSTIC: Test complete ===");
     }
 }
