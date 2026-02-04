@@ -1341,7 +1341,6 @@ mod test {
             .build()
             .unwrap();
         println!("Client default local_addr: {}", client_default.info().local_addr());
-        println!("Client default routing table size: {}", client_default.info().routing_table_size());
 
         // Create client explicitly bound to 127.0.0.1
         println!("\n=== DIAGNOSTIC: Client with localhost bind (127.0.0.1) ===");
@@ -1351,16 +1350,23 @@ mod test {
             .build()
             .unwrap();
         println!("Client localhost local_addr: {}", client_localhost.info().local_addr());
-        println!("Client localhost routing table size: {}", client_localhost.info().routing_table_size());
 
         // Give some time for bootstrapping
         std::thread::sleep(std::time::Duration::from_secs(2));
 
-        println!("\n=== DIAGNOSTIC: After 2 second wait ===");
-        println!("Client default routing table size: {}", client_default.info().routing_table_size());
-        println!("Client localhost routing table size: {}", client_localhost.info().routing_table_size());
+        // Try a simple operation to see if bootstrapping worked
+        println!("\n=== DIAGNOSTIC: Testing find_node operations ===");
 
-        // The test passes regardless - it's just for diagnostics
+        let target = Id::random();
+
+        println!("Testing client_default.find_node()...");
+        let result_default = client_default.find_node(target);
+        println!("Client default found {} nodes", result_default.len());
+
+        println!("Testing client_localhost.find_node()...");
+        let result_localhost = client_localhost.find_node(target);
+        println!("Client localhost found {} nodes", result_localhost.len());
+
         println!("\n=== DIAGNOSTIC: Test complete ===");
     }
 }
