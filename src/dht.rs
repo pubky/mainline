@@ -382,7 +382,11 @@ impl Dht {
     /// use std::net::Ipv4Addr;
     ///
     /// let testnet = Testnet::builder(3).build().unwrap();
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap();
+    /// let dht = Dht::builder()
+    ///     .bootstrap(&testnet.bootstrap)
+    ///     .bind_address(Ipv4Addr::LOCALHOST)
+    ///     .build()
+    ///     .unwrap();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
     /// let key = signing_key.verifying_key().to_bytes();
