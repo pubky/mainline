@@ -726,16 +726,6 @@ impl TestnetBuilder {
             Testnet::build_unseeded(self.count, self.bind_address)
         }
     }
-
-    #[cfg(feature = "async")]
-    /// Build the testnet in an async context.
-    ///
-    /// Nodes will be bound to the configured `bind_address` (default: `127.0.0.1`).
-    ///
-    /// This will block until all nodes are created (and seeded if `seeded` is true).
-    pub async fn build_async(&self) -> Result<Testnet, std::io::Error> {
-        self.build()
-    }
 }
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
