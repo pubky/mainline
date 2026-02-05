@@ -2,6 +2,12 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [6.1.1](https://github.com/pubky/mainline/compare/v6.1.0...v6.1.1) - 2026-02-05
+
+### Changed
+
+- Update dependencies (#85).
+
 ## [6.1.0](https://github.com/pubky/mainline/compare/v6.0.1...v6.1.0) - 2026-02-05
 
 ### Added
