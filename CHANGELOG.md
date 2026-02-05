@@ -2,6 +2,79 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [6.1.0](https://github.com/pubky/mainline/compare/v6.0.1...v6.1.0) - 2026-02-05
+
+### Added
+
+- Add configurable bind address via `DhtBuilder::bind_addr()` (#82).
+
+### Fixed
+
+- Pin digest to 0.11.0-rc.9 to fix curve25519-dalek compilation (#81).
+- Reduce peer discovery target_size from 20 to 10 to prevent MTU overflow (#79).
+- Avoid eager DNS resolution of default bootstrap nodes (#78).
+
+## [6.0.1](https://github.com/pubky/mainline/compare/v6.0.0...v6.0.1) - 2025-11-03
+
+### Fixed
+
+- Fix table refill flag - handle empty table after ping response processed (#75).
+
+## [6.0.0](https://github.com/pubky/mainline/compare/v5.4.0...v6.0.0) - 2025-10-03
+
+### Changed
+
+- **BREAKING**: Update ed25519-dalek to 3.0.0-pre.1 (#71).
+- Refactor: use regular blocking socket with `set_read_timeout` instead of non-blocking socket (#68, #72).
+- Refactor: switch `Vec<InflightRequest>` for `BTreeMap` (#66).
+- Expand transaction ID space (#65).
+
+### Added
+
+- Add cargo-deny for dependency auditing (#63).
+
+### Fixed
+
+- Fix feature gate of `Testnet` (#62).
+
+## [5.4.0](https://github.com/pubky/mainline/compare/v5.3.1...v5.4.0) - 2025-04-02
+
+### Added
+
+- Add `Testnet::new_async()`.
+- Populate the bootstrapping node's routing table with requesting nodes.
+- Update client version.
+
+## [5.3.1](https://github.com/pubky/mainline/compare/v5.3.0...v5.3.1) - 2025-02-21
+
+### Fixed
+
+- Delay DNS lookups for default bootstrap to `Rpc::new()`.
+
+## [5.3.0](https://github.com/pubky/mainline/compare/v5.2.1...v5.3.0) - 2025-02-20
+
+### Changed
+
+- Replace `rand` with `getrandom` dependency.
+
+## [5.2.1](https://github.com/pubky/mainline/compare/v5.2.0...v5.2.1) - 2025-02-17
+
+### Fixed
+
+- Fix DHT size estimate from repetitive GET queries.
+
+## [5.2.0](https://github.com/pubky/mainline/compare/v5.1.0...v5.2.0) - 2025-02-12
+
+### Changed
+
+- Update dev-dependencies.
+
+## [5.1.0](https://github.com/pubky/mainline/compare/v5.0.0...v5.1.0) - 2025-02-11
+
+### Changed
+
+- Use Rust 2021 edition.
+
 ## [5.0.0](https://github.com/pubky/mainline/compare/v4.2.1...v5.0.0) - 2025-02-11
 
 ### Added
