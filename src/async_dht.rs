@@ -249,9 +249,15 @@ impl AsyncDht {
     ///
     ///```rust
     /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
+    /// use std::net::Ipv4Addr;
     ///
-    /// let testnet = Testnet::new(3).unwrap();
-    /// let dht = Dht::builder().bootstrap(&testnet.bootstrap).build().unwrap().as_async();
+    /// let testnet = Testnet::builder(3).build().unwrap();
+    /// let dht = Dht::builder()
+    ///     .bootstrap(&testnet.bootstrap)
+    ///     .bind_address(Ipv4Addr::LOCALHOST)
+    ///     .build()
+    ///     .unwrap()
+    ///     .as_async();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
     /// let key = signing_key.verifying_key().to_bytes();
@@ -375,6 +381,7 @@ impl<T> Stream for GetStream<T> {
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv4Addr;
     use std::{str::FromStr, time::Duration};
 
     use ed25519_dalek::SigningKey;
@@ -387,15 +394,17 @@ mod test {
     #[test]
     fn announce_get_peer() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -417,15 +426,17 @@ mod test {
     #[test]
     fn put_get_immutable() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -446,15 +457,17 @@ mod test {
     #[test]
     fn put_get_mutable() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -486,15 +499,17 @@ mod test {
     #[test]
     fn put_get_mutable_no_more_recent_value() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -525,10 +540,11 @@ mod test {
     #[test]
     fn repeated_put_query() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -545,15 +561,17 @@ mod test {
     #[test]
     fn concurrent_get_mutable() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let a = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
             let b = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -590,10 +608,11 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_same() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let dht = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap()
             .as_async();
@@ -628,10 +647,11 @@ mod test {
 
     #[test]
     fn concurrent_put_mutable_different() {
-        let testnet = Testnet::new(10).unwrap();
+        let testnet = Testnet::builder(10).build().unwrap();
 
         let dht = Dht::builder()
             .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
             .build()
             .unwrap()
             .as_async();
@@ -657,7 +677,7 @@ mod test {
                 futures::executor::block_on(async {
                     let result = dht.put_mutable(item, None).await;
                     if i == 0 {
-                        assert!(matches!(result, Ok(_)))
+                        assert!(result.is_ok())
                     } else {
                         assert!(matches!(
                             result,
@@ -678,10 +698,11 @@ mod test {
     #[test]
     fn concurrent_put_mutable_different_with_cas() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let dht = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();
@@ -727,10 +748,11 @@ mod test {
     #[test]
     fn conflict_301_cas() {
         async fn test() {
-            let testnet = Testnet::new(10).unwrap();
+            let testnet = Testnet::builder(10).build().unwrap();
 
             let dht = Dht::builder()
                 .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
                 .build()
                 .unwrap()
                 .as_async();

@@ -281,10 +281,10 @@ mod tests {
                 let mut closest_nodes = ClosestNodes::new(target);
 
                 for (_, node) in nodes.range(target..).take(100) {
-                    closest_nodes.add(node.clone().into())
+                    closest_nodes.add(node.clone())
                 }
                 for (_, node) in nodes.range(..target).rev().take(100) {
-                    closest_nodes.add(node.clone().into())
+                    closest_nodes.add(node.clone())
                 }
 
                 let estimate = closest_nodes.dht_size_estimate();

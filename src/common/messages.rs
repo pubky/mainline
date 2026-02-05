@@ -867,8 +867,7 @@ mod tests {
             message_type: MessageType::Response(ResponseSpecific::FindNode(
                 FindNodeResponseArguments {
                     responder_id: Id::random(),
-                    nodes: [Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap()).into()]
-                        .into(),
+                    nodes: [Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap())].into(),
                 },
             )),
         };
@@ -924,8 +923,7 @@ mod tests {
                     responder_id: Id::random(),
                     token: [99, 100, 101, 102].into(),
                     nodes: Some(
-                        [Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap()).into()]
-                            .into(),
+                        [Node::new(Id::random(), "49.50.52.52:5354".parse().unwrap())].into(),
                     ),
                 },
             )),

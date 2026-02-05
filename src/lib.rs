@@ -19,7 +19,7 @@ pub mod async_dht;
 pub use common::{Id, MutableItem, Node, RoutingTable};
 
 #[cfg(feature = "node")]
-pub use dht::{Dht, DhtBuilder, Testnet};
+pub use dht::{Dht, DhtBuilder, Testnet, TestnetBuilder};
 #[cfg(feature = "node")]
 pub use rpc::{
     messages::{MessageType, PutRequestSpecific, RequestSpecific},

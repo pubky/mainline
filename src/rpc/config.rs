@@ -35,6 +35,10 @@ pub struct Config {
     ///
     /// Defaults to None, where we depend on suggestions from responding nodes.
     pub public_ip: Option<Ipv4Addr>,
+    /// Address to bind to.
+    ///
+    /// Defaults to 0.0.0.0 (all interfaces)
+    pub bind_address: Option<Ipv4Addr>,
 }
 
 impl Default for Config {
@@ -46,6 +50,7 @@ impl Default for Config {
             server_settings: Default::default(),
             server_mode: false,
             public_ip: None,
+            bind_address: None,
         }
     }
 }

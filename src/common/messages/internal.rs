@@ -134,13 +134,6 @@ pub struct DHTErrorSpecific {
     pub error_info: (i32, String),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub enum DHTErrorValue {
-    #[serde(rename = "")]
-    ErrorCode(i32),
-    ErrorDescription(String),
-}
-
 // === PING ===
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
