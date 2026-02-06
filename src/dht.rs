@@ -567,8 +567,8 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
 
                 let report = actor.tick();
 
-                // Response for an ongoing GET query
-                if let Some((target, response)) = report.new_query_response {
+                // Responses for ongoing GET queries
+                for (target, response) in report.new_query_responses {
                     if let Some(senders) = get_senders.get(&target) {
                         for sender in senders {
                             send(sender, response.clone());

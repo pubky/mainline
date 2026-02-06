@@ -21,7 +21,7 @@ pub(crate) struct IterativeQuery {
     pub request: RequestSpecific,
     closest: ClosestNodes,
     responders: ClosestNodes,
-    inflight_requests: Vec<u32>,
+    inflight_requests: HashSet<u32>,
     visited: HashSet<SocketAddrV4>,
     responses: Vec<Response>,
     public_address_votes: HashMap<SocketAddrV4, u16>,
@@ -63,7 +63,7 @@ impl IterativeQuery {
             closest: ClosestNodes::new(target),
             responders: ClosestNodes::new(target),
 
-            inflight_requests: Vec::new(),
+            inflight_requests: HashSet::new(),
             visited: HashSet::new(),
 
             responses: Vec::new(),
@@ -136,7 +136,7 @@ impl IterativeQuery {
     /// only used from the Rpc when calling bootstrapping nodes.
     pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddrV4) {
         let tid = socket.request(address, self.request.clone());
-        self.inflight_requests.push(tid);
+        self.inflight_requests.insert(tid);
 
         let tid = socket.request(
             address,
@@ -145,7 +145,7 @@ impl IterativeQuery {
                 request_type: RequestTypeSpecific::Ping,
             },
         );
-        self.inflight_requests.push(tid);
+        self.inflight_requests.insert(tid);
 
         self.visited.insert(address);
     }

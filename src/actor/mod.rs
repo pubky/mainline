@@ -24,7 +24,7 @@ use crate::core::server::Server;
 use crate::core::statistics::DhtStatistics;
 
 use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments};
-use socket::KrpcSocket;
+use socket::{KrpcSocket, ACTIVE_READ_TIMEOUT, READ_TIMEOUT};
 
 pub use crate::common::messages;
 pub use crate::core::iterative_query::GetRequestSpecific;
@@ -172,6 +172,10 @@ impl Actor {
     ///
     /// Call periodically; delays degrade query completion and routing table quality.
     pub fn tick(&mut self) -> RpcTickReport {
+        // Receive messages FIRST so responses are available for query ticks.
+        // This eliminates a full tick of latency vs. the old order.
+        let new_query_responses = self.handle_messages();
+
         let mut done_put_queries = self.tick_put_queries();
 
         let (done_get_queries, finished_self_findnode) = self.tick_get_queries();
@@ -180,8 +184,6 @@ impl Actor {
 
         self.periodic_node_maintenance();
 
-        let new_query_response = self.handle_message();
-
         if finished_self_findnode {
             self.log_bootstrap(self.id());
         }
@@ -189,7 +191,7 @@ impl Actor {
         RpcTickReport {
             done_get_queries,
             done_put_queries,
-            new_query_response,
+            new_query_responses,
         }
     }
 
@@ -289,7 +291,7 @@ impl Actor {
 
     /// Start an iterative lookup toward `target`. While the query is in flight,
     /// repeated calls return cached responses. New responses arrive via
-    /// [`RpcTickReport::new_query_response`] after [`Actor::tick`].
+    /// [`RpcTickReport::new_query_responses`] after [`Actor::tick`].
     pub fn get(
         &mut self,
         request: GetRequestSpecific,
@@ -340,8 +342,9 @@ impl Actor {
 
         // If we don't have enough or any closest nodes, call the bootstrapping nodes.
         if routing_table_closest.is_empty() || routing_table_closest.len() < self.bootstrap.len() {
-            for bootstrapping_node in self.bootstrap.clone() {
-                query.visit(&mut self.socket, bootstrapping_node);
+            for i in 0..self.bootstrap.len() {
+                let addr = self.bootstrap[i];
+                query.visit(&mut self.socket, addr);
             }
         }
 
@@ -585,17 +588,63 @@ impl Actor {
         }
     }
 
-    /// Handle one incoming message, either a request or a response message. One message per tick.
-    fn handle_message(&mut self) -> Option<(Id, Response)> {
-        self.socket
-            .recv_from()
-            .and_then(|(message, from)| match message.message_type {
-                MessageType::Request(request_specific) => {
-                    self.handle_request(from, message.transaction_id, request_specific);
-                    None
+    /// Returns true if there are any active queries that would benefit from
+    /// low-latency message processing.
+    fn has_active_queries(&self) -> bool {
+        !self.iterative_queries.is_empty() || !self.put_queries.is_empty()
+    }
+
+    /// Drain all available incoming messages from the socket.
+    ///
+    /// When queries are active, uses a short timeout (1ms) to keep latency low.
+    /// When idle, uses the full READ_TIMEOUT (50ms) to save CPU.
+    /// After the first recv, switches to non-blocking to drain queued packets.
+    fn handle_messages(&mut self) -> Vec<(Id, Response)> {
+        let mut responses = Vec::new();
+
+        // Use shorter timeout when queries are active to reduce latency
+        if self.has_active_queries() {
+            self.socket.set_read_timeout(ACTIVE_READ_TIMEOUT);
+        }
+
+        // First recv: blocks up to the configured timeout
+        let Some((message, from)) = self.socket.recv_from() else {
+            // Restore default timeout if we changed it
+            if self.has_active_queries() {
+                self.socket.set_read_timeout(READ_TIMEOUT);
+            }
+            return responses;
+        };
+        self.process_message(message, from, &mut responses);
+
+        // Switch to non-blocking to drain remaining queued packets
+        self.socket.set_nonblocking(true);
+        while let Some((message, from)) = self.socket.recv_from() {
+            self.process_message(message, from, &mut responses);
+        }
+        // Restore blocking mode with default timeout for next tick
+        self.socket.set_nonblocking(false);
+
+        responses
+    }
+
+    /// Process a single received message, dispatching to request or response handler.
+    fn process_message(
+        &mut self,
+        message: crate::common::Message,
+        from: SocketAddrV4,
+        responses: &mut Vec<(Id, Response)>,
+    ) {
+        match message.message_type {
+            MessageType::Request(request_specific) => {
+                self.handle_request(from, message.transaction_id, request_specific);
+            }
+            _ => {
+                if let Some(response) = self.handle_response(from, message) {
+                    responses.push(response);
                 }
-                _ => self.handle_response(from, message),
-            })
+            }
+        }
     }
 
     /// Check if routing table is empty and log an error if so.
@@ -616,8 +665,8 @@ pub struct RpcTickReport {
     pub done_get_queries: Vec<(Id, Box<[Node]>)>,
     /// Completed PUT queries; `Some(err)` on failure.
     pub done_put_queries: Vec<(Id, Option<PutError>)>,
-    /// A value response received for an in-flight GET query.
-    pub new_query_response: Option<(Id, Response)>,
+    /// Value responses received for in-flight GET queries.
+    pub new_query_responses: Vec<(Id, Response)>,
 }
 
 #[derive(Debug, Clone)]

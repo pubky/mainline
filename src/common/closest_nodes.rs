@@ -1,4 +1,8 @@
-use std::{collections::HashSet, convert::TryInto};
+use std::{
+    collections::HashSet,
+    convert::TryInto,
+    net::Ipv4Addr,
+};
 
 use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 
@@ -9,6 +13,8 @@ use crate::{common::MAX_BUCKET_SIZE_K, Id, Node};
 pub struct ClosestNodes {
     target: Id,
     nodes: Vec<Node>,
+    /// Fast lookup for IP-based dedup (tracks non-secure node IPs).
+    ip_set: HashSet<Ipv4Addr>,
 }
 
 impl ClosestNodes {
@@ -17,6 +23,7 @@ impl ClosestNodes {
         Self {
             target,
             nodes: Vec::with_capacity(200),
+            ip_set: HashSet::with_capacity(200),
         }
     }
 
@@ -46,11 +53,21 @@ impl ClosestNodes {
 
     /// Add a node.
     pub fn add(&mut self, node: Node) {
-        let seek = node.id().xor(&self.target);
+        let node_ip = *node.address().ip();
 
-        if node.already_exists(&self.nodes) {
-            return;
+        // Fast duplicate check using IP set.
+        // already_exists logic: same IP AND (existing not secure OR same first 21 bits).
+        // The ip_set tracks IPs that have a non-secure node, which is the common case
+        // for blocking duplicates. For secure nodes with the same IP, we fall back to
+        // the original linear check only when the IP is already known.
+        if self.ip_set.contains(&node_ip) {
+            // IP exists - do the full check (rare path, only for this IP's nodes)
+            if node.already_exists(&self.nodes) {
+                return;
+            }
         }
+
+        let seek = node.id().xor(&self.target);
 
         if let Err(pos) = self.nodes.binary_search_by(|prope| {
             if prope.is_secure() && !node.is_secure() {
@@ -63,7 +80,9 @@ impl ClosestNodes {
                 prope.id().xor(&self.target).cmp(&seek)
             }
         }) {
-            self.nodes.insert(pos, node)
+            self.nodes.insert(pos, node);
+            // Track this IP (used for both secure and non-secure)
+            self.ip_set.insert(node_ip);
         }
     }
 

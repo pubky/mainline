@@ -1,6 +1,7 @@
 //! Simplified Kademlia routing table
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::net::Ipv4Addr;
 use std::slice::Iter;
 
 use crate::common::{ClosestNodes, Id, Node};
@@ -8,19 +9,30 @@ use crate::common::{ClosestNodes, Id, Node};
 /// K = the default maximum size of a k-bucket.
 pub const MAX_BUCKET_SIZE_K: usize = 20;
 
+/// Per-IP tracking info for fast duplicate detection.
+#[derive(Debug, Clone)]
+struct IpEntry {
+    id: Id,
+    is_secure: bool,
+}
+
 #[derive(Debug, Clone)]
 /// Simplified Kademlia routing table
 pub struct RoutingTable {
     id: Id,
     buckets: BTreeMap<u8, KBucket>,
+    /// Secondary index: IP → entries for O(1) duplicate checking.
+    ip_index: HashMap<Ipv4Addr, Vec<IpEntry>>,
 }
 
 impl RoutingTable {
     /// Create a new [RoutingTable] with a given id.
     pub fn new(id: Id) -> Self {
-        let buckets = BTreeMap::new();
-
-        RoutingTable { id, buckets }
+        RoutingTable {
+            id,
+            buckets: BTreeMap::new(),
+            ip_index: HashMap::new(),
+        }
     }
 
     /// Returns the [Id] of this node, where the distance is measured from.
@@ -44,17 +56,45 @@ impl RoutingTable {
             return false;
         }
 
-        if self
-            .buckets()
-            .values()
-            .any(|bucket| node.already_exists(&bucket.nodes))
-        {
-            return false;
-        };
+        // Fast duplicate check using IP index instead of scanning all buckets.
+        // Logic mirrors Node::already_exists: same IP AND (existing not secure OR same first 21 bits).
+        let node_ip = *node.address().ip();
+        if let Some(entries) = self.ip_index.get(&node_ip) {
+            let dominated = entries.iter().any(|existing| {
+                !existing.is_secure
+                    || node.id().first_21_bits() == existing.id.first_21_bits()
+            });
+            if dominated {
+                return false;
+            }
+        }
 
         let bucket = self.buckets.entry(distance).or_default();
+        let node_id = *node.id();
+        let node_is_secure = node.is_secure();
 
-        bucket.add(node)
+        let (added, evicted) = bucket.add(node);
+
+        if added {
+            // Remove evicted node from IP index if applicable
+            if let Some(evicted) = evicted {
+                let evicted_ip = *evicted.address().ip();
+                if let Some(entries) = self.ip_index.get_mut(&evicted_ip) {
+                    entries.retain(|e| e.id != *evicted.id());
+                    if entries.is_empty() {
+                        self.ip_index.remove(&evicted_ip);
+                    }
+                }
+            }
+
+            // Add new node to IP index
+            self.ip_index.entry(node_ip).or_default().push(IpEntry {
+                id: node_id,
+                is_secure: node_is_secure,
+            });
+        }
+
+        added
     }
 
     /// Remove a node from this routing table.
@@ -62,6 +102,16 @@ impl RoutingTable {
         let distance = self.id.distance(node_id);
 
         if let Some(bucket) = self.buckets.get_mut(&distance) {
+            // Find the node's IP before removing, to update the index
+            if let Some(node) = bucket.nodes.iter().find(|n| n.id() == node_id) {
+                let ip = *node.address().ip();
+                if let Some(entries) = self.ip_index.get_mut(&ip) {
+                    entries.retain(|e| &e.id != node_id);
+                    if entries.is_empty() {
+                        self.ip_index.remove(&ip);
+                    }
+                }
+            }
             bucket.remove(node_id)
         }
     }
@@ -197,7 +247,10 @@ impl KBucket {
 
     // === Public Methods ===
 
-    pub fn add(&mut self, incoming: Node) -> bool {
+    /// Add a node. Returns `(added, evicted)`:
+    /// - `added`: whether the node was added
+    /// - `evicted`: the node that was removed to make room (if any)
+    pub fn add(&mut self, incoming: Node) -> (bool, Option<Node>) {
         if let Some(index) = self.iter().position(|n| n.id() == incoming.id()) {
             let existing = self.nodes[index].clone();
 
@@ -215,21 +268,21 @@ impl KBucket {
                 self.nodes.remove(index);
                 self.nodes.push(incoming);
 
-                true
+                (true, Some(existing))
             } else {
-                false
+                (false, None)
             }
         } else if self.nodes.len() < MAX_BUCKET_SIZE_K {
             self.nodes.push(incoming);
-            true
+            (true, None)
         } else if self.nodes[0].is_stale() {
             // Remove the least recently seen node and add the new one
-            self.nodes.remove(0);
+            let evicted = self.nodes.remove(0);
             self.nodes.push(incoming);
 
-            true
+            (true, Some(evicted))
         } else {
-            false
+            (false, None)
         }
     }
 
@@ -353,12 +406,12 @@ mod test {
 
         for i in 0..MAX_BUCKET_SIZE_K {
             let node = Node::random();
-            assert!(bucket.add(node), "Failed to add node {}", i);
+            assert!(bucket.add(node).0, "Failed to add node {}", i);
         }
 
         let node = Node::random();
 
-        assert!(!bucket.add(node));
+        assert!(!bucket.add(node).0);
     }
 
     #[test]

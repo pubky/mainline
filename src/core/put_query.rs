@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use tracing::{debug, trace};
 
 use crate::{
@@ -17,7 +19,7 @@ pub struct PutQuery {
     pub target: Id,
     /// Nodes that confirmed success
     stored_at: u8,
-    inflight_requests: Vec<u32>,
+    inflight_requests: HashSet<u32>,
     pub request: PutRequestSpecific,
     errors: Vec<(u8, ErrorSpecific)>,
     extra_nodes: Box<[Node]>,
@@ -28,7 +30,7 @@ impl PutQuery {
         Self {
             target,
             stored_at: 0,
-            inflight_requests: Vec::new(),
+            inflight_requests: HashSet::new(),
             request,
             errors: Vec::new(),
             extra_nodes: extra_nodes.unwrap_or(Box::new([])),
@@ -69,7 +71,7 @@ impl PutQuery {
                     },
                 );
 
-                self.inflight_requests.push(tid);
+                self.inflight_requests.insert(tid);
             }
         }
 

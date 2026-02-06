@@ -19,6 +19,9 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 
 
 pub const READ_TIMEOUT: Duration = Duration::from_millis(50);
 
+/// Shorter timeout when queries are active to reduce latency.
+pub const ACTIVE_READ_TIMEOUT: Duration = Duration::from_millis(1);
+
 /// Cleanup interval for expired inflight requests to avoid overhead on every recv
 const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -132,6 +135,19 @@ impl KrpcSocket {
         let _ = self.send(address, message).map_err(|e| {
             debug!(?e, "Error sending error message");
         });
+    }
+
+    /// Set the socket to non-blocking mode for draining queued packets.
+    pub(crate) fn set_nonblocking(&self, nonblocking: bool) {
+        let _ = self.socket.set_nonblocking(nonblocking);
+        if !nonblocking {
+            let _ = self.socket.set_read_timeout(Some(READ_TIMEOUT));
+        }
+    }
+
+    /// Set the socket read timeout.
+    pub(crate) fn set_read_timeout(&self, timeout: Duration) {
+        let _ = self.socket.set_read_timeout(Some(timeout));
     }
 
     /// Receives a single krpc message on the socket.
