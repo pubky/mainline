@@ -9,13 +9,13 @@ use std::{
 use futures_lite::{Stream, StreamExt};
 
 use crate::{
+    actor::{GetRequestSpecific, Info, PutError, PutQueryError},
     common::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
     dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
-    rpc::{GetRequestSpecific, Info, PutError, PutQueryError},
 };
 
 impl Dht {
@@ -289,7 +289,7 @@ impl AsyncDht {
     /// ## Errors
     ///
     /// In addition to the [PutQueryError] common with all PUT queries, PUT mutable item
-    /// query has other [Concurrency errors][crate::rpc::ConcurrencyError], that try to detect write conflict
+    /// query has other [Concurrency errors][crate::actor::ConcurrencyError], that try to detect write conflict
     /// risks or obvious conflicts.
     ///
     /// If you are lucky to get one of these errors (which is not guaranteed), then you should
@@ -387,7 +387,7 @@ mod test {
     use ed25519_dalek::SigningKey;
     use futures::StreamExt;
 
-    use crate::{dht::Testnet, rpc::ConcurrencyError};
+    use crate::{actor::ConcurrencyError, dht::Testnet};
 
     use super::*;
 
