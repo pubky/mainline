@@ -24,7 +24,7 @@ use crate::core::server::Server;
 use crate::core::statistics::DhtStatistics;
 
 use self::messages::{GetPeersRequestArguments, PutMutableRequestArguments};
-use socket::{KrpcSocket, ACTIVE_READ_TIMEOUT, READ_TIMEOUT};
+use socket::KrpcSocket;
 
 pub use crate::common::messages;
 pub use crate::core::iterative_query::GetRequestSpecific;
@@ -172,9 +172,9 @@ impl Actor {
     ///
     /// Call periodically; delays degrade query completion and routing table quality.
     pub fn tick(&mut self) -> RpcTickReport {
-        // Receive messages FIRST so responses are available for query ticks.
+        // Drain all available messages FIRST so responses are available for query ticks.
         // This eliminates a full tick of latency vs. the old order.
-        let new_query_responses = self.handle_messages();
+        let new_query_responses = self.drain_socket();
 
         let mut done_put_queries = self.tick_put_queries();
 
@@ -590,41 +590,21 @@ impl Actor {
 
     /// Returns true if there are any active queries that would benefit from
     /// low-latency message processing.
-    fn has_active_queries(&self) -> bool {
+    pub(crate) fn has_active_queries(&self) -> bool {
         !self.iterative_queries.is_empty() || !self.put_queries.is_empty()
     }
 
-    /// Drain all available incoming messages from the socket.
-    ///
-    /// When queries are active, uses a short timeout (1ms) to keep latency low.
-    /// When idle, uses the full READ_TIMEOUT (50ms) to save CPU.
-    /// After the first recv, switches to non-blocking to drain queued packets.
-    fn handle_messages(&mut self) -> Vec<(Id, Response)> {
+    /// Returns a mutable reference to the underlying mio socket for poll registration.
+    pub(crate) fn socket_mut(&mut self) -> &mut mio::net::UdpSocket {
+        self.socket.socket_mut()
+    }
+
+    /// Drain all available incoming messages from the non-blocking socket.
+    fn drain_socket(&mut self) -> Vec<(Id, Response)> {
         let mut responses = Vec::new();
-
-        // Use shorter timeout when queries are active to reduce latency
-        if self.has_active_queries() {
-            self.socket.set_read_timeout(ACTIVE_READ_TIMEOUT);
-        }
-
-        // First recv: blocks up to the configured timeout
-        let Some((message, from)) = self.socket.recv_from() else {
-            // Restore default timeout if we changed it
-            if self.has_active_queries() {
-                self.socket.set_read_timeout(READ_TIMEOUT);
-            }
-            return responses;
-        };
-        self.process_message(message, from, &mut responses);
-
-        // Switch to non-blocking to drain remaining queued packets
-        self.socket.set_nonblocking(true);
         while let Some((message, from)) = self.socket.recv_from() {
             self.process_message(message, from, &mut responses);
         }
-        // Restore blocking mode with default timeout for next tick
-        self.socket.set_nonblocking(false);
-
         responses
     }
 

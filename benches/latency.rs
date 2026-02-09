@@ -10,7 +10,7 @@ fn main() {
     println!("latency\n");
 
     for size in [10, 100] {
-        let testnet = Testnet::new(size).unwrap();
+        let testnet = Testnet::builder(size).build().unwrap();
         let nodes = &testnet.nodes;
 
         // Seed a value from node 0

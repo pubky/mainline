@@ -721,7 +721,7 @@ mod test {
                 let request =
                     PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
                 dht.0
-                     .0
+                    .sender
                     .send(ActorMessage::Put(request, sender, None))
                     .unwrap();
             }

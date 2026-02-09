@@ -11,7 +11,7 @@ fn main() {
 
     for size in [5, 10, 25, 50, 100] {
         let init_start = Instant::now();
-        let testnet = Testnet::new(size).unwrap();
+        let testnet = Testnet::builder(size).build().unwrap();
         let init = init_start.elapsed();
 
         let nodes = &testnet.nodes;

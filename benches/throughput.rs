@@ -13,7 +13,7 @@ fn main() {
 }
 
 fn bench_concurrent_gets(concurrency: usize) {
-    let testnet = Testnet::new(100).unwrap();
+    let testnet = Testnet::builder(100).build().unwrap();
     let nodes = Arc::new(testnet.nodes);
 
     // Store values

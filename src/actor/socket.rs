@@ -4,9 +4,11 @@ mod inflight_requests;
 use crate::common::{ErrorSpecific, Message, MessageType, RequestSpecific, ResponseSpecific};
 use inflight_requests::InflightRequests;
 use std::io::ErrorKind;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::{Duration, Instant};
 use tracing::{debug, trace, warn};
+
+use mio::net::UdpSocket;
 
 use super::config::Config;
 
@@ -16,11 +18,6 @@ const MTU: usize = 2048;
 pub const DEFAULT_PORT: u16 = 6881;
 /// Default request timeout before abandoning an inflight request to a non-responding node.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_millis(2000); // 2 seconds
-
-pub const READ_TIMEOUT: Duration = Duration::from_millis(50);
-
-/// Shorter timeout when queries are active to reduce latency.
-pub const ACTIVE_READ_TIMEOUT: Duration = Duration::from_millis(1);
 
 /// Cleanup interval for expired inflight requests to avoid overhead on every recv
 const INFLIGHT_CLEANUP_INTERVAL: Duration = Duration::from_millis(200);
@@ -43,21 +40,22 @@ impl KrpcSocket {
         let port = config.port;
         let bind_addr = config.bind_address.unwrap_or(Ipv4Addr::UNSPECIFIED);
 
-        let socket = if let Some(port) = port {
-            UdpSocket::bind(SocketAddr::from((bind_addr, port)))?
+        let std_socket = if let Some(port) = port {
+            std::net::UdpSocket::bind(SocketAddr::from((bind_addr, port)))?
         } else {
-            match UdpSocket::bind(SocketAddr::from((bind_addr, DEFAULT_PORT))) {
+            match std::net::UdpSocket::bind(SocketAddr::from((bind_addr, DEFAULT_PORT))) {
                 Ok(socket) => Ok(socket),
-                Err(_) => UdpSocket::bind(SocketAddr::from((bind_addr, 0))),
+                Err(_) => std::net::UdpSocket::bind(SocketAddr::from((bind_addr, 0))),
             }?
         };
 
-        let local_addr = match socket.local_addr()? {
+        let local_addr = match std_socket.local_addr()? {
             SocketAddr::V4(addr) => addr,
             SocketAddr::V6(_) => unimplemented!("KrpcSocket does not support Ipv6"),
         };
 
-        socket.set_read_timeout(Some(READ_TIMEOUT))?;
+        std_socket.set_nonblocking(true)?;
+        let socket = UdpSocket::from_std(std_socket);
 
         Ok(Self {
             socket,
@@ -137,17 +135,9 @@ impl KrpcSocket {
         });
     }
 
-    /// Set the socket to non-blocking mode for draining queued packets.
-    pub(crate) fn set_nonblocking(&self, nonblocking: bool) {
-        let _ = self.socket.set_nonblocking(nonblocking);
-        if !nonblocking {
-            let _ = self.socket.set_read_timeout(Some(READ_TIMEOUT));
-        }
-    }
-
-    /// Set the socket read timeout.
-    pub(crate) fn set_read_timeout(&self, timeout: Duration) {
-        let _ = self.socket.set_read_timeout(Some(timeout));
+    /// Returns a mutable reference to the underlying mio socket for poll registration.
+    pub(crate) fn socket_mut(&mut self) -> &mut UdpSocket {
+        &mut self.socket
     }
 
     /// Receives a single krpc message on the socket.
@@ -294,7 +284,8 @@ impl KrpcSocket {
 
     /// Send a raw dht message
     fn send(&mut self, address: SocketAddrV4, message: Message) -> Result<(), SendMessageError> {
-        self.socket.send_to(&message.to_bytes()?, address)?;
+        self.socket
+            .send_to(&message.to_bytes()?, SocketAddr::from(address))?;
         trace!(context = "socket_message_sending", message = ?message);
         Ok(())
     }

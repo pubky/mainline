@@ -3,13 +3,25 @@
 use std::{
     collections::HashMap,
     net::{Ipv4Addr, SocketAddrV4, ToSocketAddrs},
+    sync::Arc,
     thread,
     time::Duration,
 };
 
 use flume::{Receiver, Sender, TryRecvError};
+use mio::{Events, Interest, Poll, Token, Waker};
 
 use tracing::info;
+
+const SOCKET_TOKEN: Token = Token(0);
+const WAKER_TOKEN: Token = Token(1);
+
+/// Poll timeout when queries are active. Only affects timeout detection cadence;
+/// actual responses trigger instant wakeup via mio.
+const ACTIVE_TIMEOUT: Duration = Duration::from_millis(100);
+
+/// Poll timeout when idle. Maintenance timers are minutes-scale.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(1);
 
 use crate::{
     actor::{
@@ -28,7 +40,10 @@ use crate::actor::config::Config;
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
-pub struct Dht(pub(crate) Sender<ActorMessage>);
+pub struct Dht {
+    pub(crate) sender: Sender<ActorMessage>,
+    waker: Arc<Waker>,
+}
 
 #[derive(Debug, Default, Clone)]
 /// A builder for the [Dht] node.
@@ -132,19 +147,23 @@ impl Dht {
     pub fn new(config: Config) -> Result<Self, std::io::Error> {
         let (sender, receiver) = flume::unbounded();
 
+        let poll = Poll::new()?;
+        let waker = Arc::new(Waker::new(poll.registry(), WAKER_TOKEN)?);
+
         thread::Builder::new()
             .name("Mainline Dht actor thread".to_string())
-            .spawn(move || run(config, receiver))?;
+            .spawn(move || run(config, receiver, poll))?;
 
         let (tx, rx) = flume::bounded(1);
 
         sender
             .send(ActorMessage::Check(tx))
             .expect("actor thread unexpectedly shutdown");
+        let _ = waker.wake();
 
         rx.recv().expect("actor thread unexpectedly shutdown")?;
 
-        Ok(Dht(sender))
+        Ok(Dht { sender, waker })
     }
 
     /// Returns a builder to edit settings before creating a Dht node.
@@ -484,9 +503,10 @@ impl Dht {
     }
 
     pub(crate) fn send(&self, message: ActorMessage) {
-        self.0
+        self.sender
             .send(message)
-            .expect("actor thrread unexpectedly shutdown");
+            .expect("actor thread unexpectedly shutdown");
+        let _ = self.waker.wake();
     }
 }
 
@@ -500,68 +520,83 @@ impl<T> Iterator for GetIterator<T> {
     }
 }
 
-fn run(config: Config, receiver: Receiver<ActorMessage>) {
+fn run(config: Config, receiver: Receiver<ActorMessage>, mut poll: Poll) {
     match Actor::new(config) {
         Ok(mut actor) => {
             let address = actor.local_addr();
             info!(?address, "Mainline DHT listening");
 
+            // Register the UDP socket with mio for readable events.
+            poll.registry()
+                .register(actor.socket_mut(), SOCKET_TOKEN, Interest::READABLE)
+                .expect("failed to register UDP socket with mio");
+
+            let mut events = Events::with_capacity(64);
             let mut put_senders = HashMap::new();
             let mut get_senders = HashMap::new();
 
             loop {
-                match receiver.try_recv() {
-                    Ok(actor_message) => match actor_message {
-                        ActorMessage::Check(sender) => {
-                            let _ = sender.send(Ok(()));
-                        }
-                        ActorMessage::Info(sender) => {
-                            let _ = sender.send(actor.info());
-                        }
-                        ActorMessage::Put(request, sender, extra_nodes) => {
-                            let target = *request.target();
+                let timeout = if actor.has_active_queries() {
+                    ACTIVE_TIMEOUT
+                } else {
+                    IDLE_TIMEOUT
+                };
 
-                            match actor.put(request, extra_nodes) {
-                                Ok(()) => {
-                                    let senders = put_senders.entry(target).or_insert(vec![]);
+                let _ = poll.poll(&mut events, Some(timeout));
 
-                                    senders.push(sender);
-                                }
-                                Err(error) => {
-                                    let _ = sender.send(Err(error));
-                                }
-                            };
-                        }
-                        ActorMessage::Get(request, sender) => {
-                            let target = *request.target();
-
-                            if let Some(responses) = actor.get(request, None) {
-                                for response in responses {
-                                    send(&sender, response);
-                                }
-                            };
-
-                            let senders = get_senders.entry(target).or_insert(vec![]);
-
-                            senders.push(sender);
-                        }
-                        ActorMessage::ToBootstrap(sender) => {
-                            let _ = sender.send(actor.routing_table().to_bootstrap());
-                        }
-                        ActorMessage::SeedRouting(nodes, sender) => {
-                            for node in nodes {
-                                actor.routing_table_mut().add(node);
+                // Drain ALL channel messages (waker events coalesce)
+                loop {
+                    match receiver.try_recv() {
+                        Ok(actor_message) => match actor_message {
+                            ActorMessage::Check(sender) => {
+                                let _ = sender.send(Ok(()));
                             }
-                            let _ = sender.send(());
+                            ActorMessage::Info(sender) => {
+                                let _ = sender.send(actor.info());
+                            }
+                            ActorMessage::Put(request, sender, extra_nodes) => {
+                                let target = *request.target();
+
+                                match actor.put(request, extra_nodes) {
+                                    Ok(()) => {
+                                        let senders =
+                                            put_senders.entry(target).or_insert(vec![]);
+                                        senders.push(sender);
+                                    }
+                                    Err(error) => {
+                                        let _ = sender.send(Err(error));
+                                    }
+                                };
+                            }
+                            ActorMessage::Get(request, sender) => {
+                                let target = *request.target();
+
+                                if let Some(responses) = actor.get(request, None) {
+                                    for response in responses {
+                                        send(&sender, response);
+                                    }
+                                };
+
+                                let senders = get_senders.entry(target).or_insert(vec![]);
+                                senders.push(sender);
+                            }
+                            ActorMessage::ToBootstrap(sender) => {
+                                let _ = sender.send(actor.routing_table().to_bootstrap());
+                            }
+                            ActorMessage::SeedRouting(nodes, sender) => {
+                                for node in nodes {
+                                    actor.routing_table_mut().add(node);
+                                }
+                                let _ = sender.send(());
+                            }
+                        },
+                        Err(TryRecvError::Disconnected) => {
+                            tracing::debug!(
+                                "mainline::Dht's actor thread was shutdown after Drop."
+                            );
+                            return;
                         }
-                    },
-                    Err(TryRecvError::Disconnected) => {
-                        // Node was dropped, kill this thread.
-                        tracing::debug!("mainline::Dht's actor thread was shutdown after Drop.");
-                        break;
-                    }
-                    Err(TryRecvError::Empty) => {
-                        // No op
+                        Err(TryRecvError::Empty) => break,
                     }
                 }
 
@@ -580,7 +615,6 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 for (id, closest_nodes) in report.done_get_queries {
                     if let Some(senders) = get_senders.remove(&id) {
                         for sender in senders {
-                            // return closest_nodes to whoever was asking
                             if let ResponseSender::ClosestNodes(sender) = sender {
                                 let _ = sender.send(closest_nodes.clone());
                             }
@@ -588,7 +622,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                // Cleanup done PUT query and send a resulting error if any.
+                // Cleanup done PUT queries
                 for (id, error) in report.done_put_queries {
                     if let Some(senders) = put_senders.remove(&id) {
                         let result = if let Some(error) = error {
@@ -1223,7 +1257,7 @@ mod test {
             let request =
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
             client
-                .0
+                .sender
                 .send(ActorMessage::Put(request, sender, None))
                 .unwrap();
         }

@@ -40,6 +40,7 @@ document-features = "0.2.12"
 # `node` dependencies
 flume = { version = "0.12.0", features = [
 ], default-features = false, optional = true }
+mio = { version = "1", features = ["os-poll", "net"], optional = true }
 
 # `async` dependencies
 futures-lite = { version = "2.6.1", default-features = false, optional = true }
@@ -58,7 +59,7 @@ chrono = "0.4"
 
 [features]
 ## Include [Dht] node.
-node = ["dep:flume"]
+node = ["dep:flume", "dep:mio"]
 ## Enable [Dht::as_async()] to use [async_dht::AsyncDht].
 async = ["node", "flume/async", "dep:futures-lite"]
 
