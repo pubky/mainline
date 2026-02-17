@@ -730,12 +730,7 @@ impl TestnetBuilder {
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
 ///
-/// # Bind Address
-///
-/// The convenience methods ([`Self::new`], [`Self::new_unseeded`], etc.) bind to `0.0.0.0`
-/// for backwards compatibility. Use [`Self::builder`] to bind to a different address.
-// TODO(breaking): In the next major version, change the default bind address from
-// `0.0.0.0` to `127.0.0.1` for better cross-platform compatibility (especially macOS).
+/// All nodes bind to `127.0.0.1` (localhost) by default.
 #[derive(Debug)]
 pub struct Testnet {
     /// bootstrapping nodes for this testnet.
@@ -743,10 +738,6 @@ pub struct Testnet {
     /// all nodes in this testnet
     pub nodes: Vec<Dht>,
 }
-
-// TODO(breaking): In the next major version, change `new()` and related methods to bind
-// to `127.0.0.1` instead of `0.0.0.0` for better macOS compatibility. The builder already
-// defaults to `127.0.0.1`.
 
 impl Testnet {
     /// Returns a builder to configure and create a [Testnet].
@@ -771,12 +762,10 @@ impl Testnet {
     /// This will block until all nodes are seeded with local peers.
     /// If you are using an async runtime, consider using [Self::new_async].
     ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] to bind to
+    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] to bind to
     /// a different address.
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_seeded(count, Ipv4Addr::UNSPECIFIED)
+        Testnet::build_seeded(count, Ipv4Addr::LOCALHOST)
     }
 
     /// Create a new testnet without pre-seeding routing tables.
@@ -784,34 +773,28 @@ impl Testnet {
     /// This is faster at startup, but nodes will not start with fully populated routing tables.
     /// Use this when your tests do not require immediate full connectivity.
     ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] with `.seeded(false)`
+    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] with `.seeded(false)`
     /// to bind to a different address.
     pub fn new_unseeded(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
+        Testnet::build_unseeded(count, Ipv4Addr::LOCALHOST)
     }
 
     #[cfg(feature = "async")]
     /// Similar to [Self::new], but available for async contexts.
     ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] to bind to
+    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] to bind to
     /// a different address.
     pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_seeded(count, Ipv4Addr::UNSPECIFIED)
+        Testnet::build_seeded(count, Ipv4Addr::LOCALHOST)
     }
 
     #[cfg(feature = "async")]
     /// Similar to [Self::new_unseeded], but available for async contexts.
     ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] with `.seeded(false)`
+    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] with `.seeded(false)`
     /// to bind to a different address.
     pub async fn new_unseeded_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
+        Testnet::build_unseeded(count, Ipv4Addr::LOCALHOST)
     }
 
     fn build_seeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
