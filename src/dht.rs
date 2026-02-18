@@ -378,15 +378,10 @@ impl Dht {
     /// then start authoring the new [MutableItem] based on the most recent as in the following example:
     ///
     ///```rust
-    /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
-    /// use std::net::Ipv4Addr;
+    /// use mainline::{MutableItem, SigningKey, Testnet};
     ///
     /// let testnet = Testnet::builder(3).build().unwrap();
-    /// let dht = Dht::builder()
-    ///     .bootstrap(&testnet.bootstrap)
-    ///     .bind_address(Ipv4Addr::LOCALHOST)
-    ///     .build()
-    ///     .unwrap();
+    /// let dht = testnet.dht_builder().build().unwrap();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
     /// let key = signing_key.verifying_key().to_bytes();
@@ -737,6 +732,7 @@ pub struct Testnet {
     pub bootstrap: Vec<String>,
     /// all nodes in this testnet
     pub nodes: Vec<Dht>,
+    bind_address: Ipv4Addr,
 }
 
 impl Testnet {
@@ -830,7 +826,7 @@ impl Testnet {
             let _ = rx.recv();
         }
 
-        Ok(Self { bootstrap, nodes })
+        Ok(Self { bootstrap, nodes, bind_address })
     }
 
     fn build_unseeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
@@ -860,7 +856,18 @@ impl Testnet {
             }
         }
 
-        Ok(Self { bootstrap, nodes })
+        Ok(Self { bootstrap, nodes, bind_address })
+    }
+
+    /// Returns a [`DhtBuilder`] pre-configured for this testnet.
+    ///
+    /// The builder is set up with the testnet's bootstrap nodes and bind address.
+    pub fn dht_builder(&self) -> DhtBuilder {
+        let mut builder = Dht::builder();
+        builder
+            .bootstrap(&self.bootstrap)
+            .bind_address(self.bind_address);
+        builder
     }
 
     /// By default as soon as this testnet gets dropped,
@@ -890,7 +897,6 @@ pub enum PutMutableError {
 
 #[cfg(test)]
 mod test {
-    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     use ed25519_dalek::SigningKey;
@@ -914,16 +920,8 @@ mod test {
     fn announce_get_peer() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let info_hash = Id::random();
 
@@ -939,16 +937,8 @@ mod test {
     fn put_get_immutable() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let value = b"Hello World!";
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
@@ -979,16 +969,8 @@ mod test {
     fn put_get_mutable() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1014,16 +996,8 @@ mod test {
     fn put_get_mutable_no_more_recent_value() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1048,11 +1022,7 @@ mod test {
     fn repeated_put_query() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
 
         let id = a.put_immutable(&[1, 2, 3]).unwrap();
 
@@ -1063,16 +1033,8 @@ mod test {
     fn concurrent_get_mutable() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1104,11 +1066,7 @@ mod test {
     fn concurrent_put_mutable_same() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1140,11 +1098,7 @@ mod test {
     fn concurrent_put_mutable_different() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let mut handles = vec![];
 
@@ -1187,11 +1141,7 @@ mod test {
     fn concurrent_put_mutable_different_with_cas() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1231,11 +1181,7 @@ mod test {
     fn conflict_302_seq_less_than_current() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1258,11 +1204,7 @@ mod test {
     fn conflict_301_cas() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
