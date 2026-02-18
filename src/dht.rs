@@ -796,6 +796,7 @@ impl Testnet {
             .map(|info| Node::new(*info.id(), info.local_addr()))
             .collect();
 
+        let mut rx_lists = Vec::with_capacity(count);
         for (node, info) in nodes.iter().zip(infos.iter()) {
             let peers = seeded_nodes
                 .iter()
@@ -804,6 +805,11 @@ impl Testnet {
                 .collect::<Vec<_>>();
             let (tx, rx) = flume::bounded(1);
             node.send(ActorMessage::SeedRouting(peers, tx));
+            rx_lists.push(rx);
+        }
+
+        // Wait for all nodes to finish seeding their routing tables before returning the testnet.
+        for rx in rx_lists {
             let _ = rx.recv();
         }
 
