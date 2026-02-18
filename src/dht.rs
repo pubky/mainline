@@ -754,7 +754,7 @@ impl Testnet {
     /// gets dropped, if you want the network to be `'static`, then
     /// you should call [Self::leak].
     ///
-    /// This will block until all nodes are seeded with local peers. 
+    /// This will block until all nodes are seeded with local peers.
     /// Use [Self::new_unseeded] if you don't need immediate full connectivity and want faster startup.
     ///
     /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] to bind to
