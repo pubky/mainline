@@ -732,7 +732,6 @@ pub struct Testnet {
     pub bootstrap: Vec<String>,
     /// all nodes in this testnet
     pub nodes: Vec<Dht>,
-    bind_address: Ipv4Addr,
 }
 
 impl Testnet {
@@ -775,24 +774,6 @@ impl Testnet {
         Testnet::build_unseeded(count, Ipv4Addr::LOCALHOST)
     }
 
-    #[cfg(feature = "async")]
-    /// Similar to [Self::new], but available for async contexts.
-    ///
-    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] to bind to
-    /// a different address.
-    pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_seeded(count, Ipv4Addr::LOCALHOST)
-    }
-
-    #[cfg(feature = "async")]
-    /// Similar to [Self::new_unseeded], but available for async contexts.
-    ///
-    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] with `.seeded(false)`
-    /// to bind to a different address.
-    pub async fn new_unseeded_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_unseeded(count, Ipv4Addr::LOCALHOST)
-    }
-
     fn build_seeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
         let mut nodes = Vec::with_capacity(count);
 
@@ -826,7 +807,7 @@ impl Testnet {
             let _ = rx.recv();
         }
 
-        Ok(Self { bootstrap, nodes, bind_address })
+        Ok(Self { bootstrap, nodes })
     }
 
     fn build_unseeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
@@ -856,7 +837,7 @@ impl Testnet {
             }
         }
 
-        Ok(Self { bootstrap, nodes, bind_address })
+        Ok(Self { bootstrap, nodes })
     }
 
     /// Returns a [`DhtBuilder`] pre-configured for this testnet.
@@ -866,7 +847,7 @@ impl Testnet {
         let mut builder = Dht::builder();
         builder
             .bootstrap(&self.bootstrap)
-            .bind_address(self.bind_address);
+            .bind_address(Ipv4Addr::LOCALHOST);
         builder
     }
 
