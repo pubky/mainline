@@ -1,10 +1,10 @@
-/// Micro-benchmarks for RoutingTable operations: add, closest, and remove
-/// at varying table sizes. Reports nanoseconds-per-operation.
-///
-/// Catches regressions in the hot-path data structure that underlies every
-/// query and maintenance cycle.
-///
-/// Run: `cargo run --release --features full --bin routing_table`
+//! Micro-benchmarks for RoutingTable operations: add, closest, and remove
+//! at varying table sizes. Reports nanoseconds-per-operation.
+//!
+//! Catches regressions in the hot-path data structure that underlies every
+//! query and maintenance cycle.
+//!
+//! Run: `cargo run --release --features full --bin routing_table`
 
 use mainline::{Id, Node, RoutingTable};
 use std::net::SocketAddrV4;
