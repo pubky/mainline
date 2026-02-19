@@ -16,7 +16,7 @@ const INITIAL_DHT_SIZE_ESTIMATE: f64 = 1_000_000.0;
 const INITIAL_SUBNETS_SUM: usize = 20;
 
 /// Empirical coefficients for standard deviation of DHT size estimates.
-/// See https://github.com/pubky/mainline/blob/main/docs/standard-deviation-vs-lookups.png
+/// See <https://github.com/pubky/mainline/blob/main/docs/standard-deviation-vs-lookups.png>
 const STD_DEV_COEFFICIENT: f64 = 0.281;
 const STD_DEV_EXPONENT: f64 = -0.529;
 
