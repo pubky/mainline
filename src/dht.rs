@@ -378,15 +378,10 @@ impl Dht {
     /// then start authoring the new [MutableItem] based on the most recent as in the following example:
     ///
     ///```rust
-    /// use mainline::{Dht, MutableItem, SigningKey, Testnet};
-    /// use std::net::Ipv4Addr;
+    /// use mainline::{MutableItem, SigningKey, Testnet};
     ///
     /// let testnet = Testnet::builder(3).build().unwrap();
-    /// let dht = Dht::builder()
-    ///     .bootstrap(&testnet.bootstrap)
-    ///     .bind_address(Ipv4Addr::LOCALHOST)
-    ///     .build()
-    ///     .unwrap();
+    /// let dht = testnet.dht_builder().build().unwrap();
     ///
     /// let signing_key = SigningKey::from_bytes(&[0; 32]);
     /// let key = signing_key.verifying_key().to_bytes();
@@ -730,12 +725,7 @@ impl TestnetBuilder {
 
 /// Create a testnet of Dht nodes to run tests against instead of the real mainline network.
 ///
-/// # Bind Address
-///
-/// The convenience methods ([`Self::new`], [`Self::new_unseeded`], etc.) bind to `0.0.0.0`
-/// for backwards compatibility. Use [`Self::builder`] to bind to a different address.
-// TODO(breaking): In the next major version, change the default bind address from
-// `0.0.0.0` to `127.0.0.1` for better cross-platform compatibility (especially macOS).
+/// All nodes bind to `127.0.0.1` (localhost) by default.
 #[derive(Debug)]
 pub struct Testnet {
     /// bootstrapping nodes for this testnet.
@@ -743,10 +733,6 @@ pub struct Testnet {
     /// all nodes in this testnet
     pub nodes: Vec<Dht>,
 }
-
-// TODO(breaking): In the next major version, change `new()` and related methods to bind
-// to `127.0.0.1` instead of `0.0.0.0` for better macOS compatibility. The builder already
-// defaults to `127.0.0.1`.
 
 impl Testnet {
     /// Returns a builder to configure and create a [Testnet].
@@ -769,14 +755,12 @@ impl Testnet {
     /// you should call [Self::leak].
     ///
     /// This will block until all nodes are seeded with local peers.
-    /// If you are using an async runtime, consider using [Self::new_async].
+    /// Use [Self::new_unseeded] if you don't need immediate full connectivity and want faster startup.
     ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] to bind to
+    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] to bind to
     /// a different address.
     pub fn new(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_seeded(count, Ipv4Addr::UNSPECIFIED)
+        Testnet::build_seeded(count, Ipv4Addr::LOCALHOST)
     }
 
     /// Create a new testnet without pre-seeding routing tables.
@@ -784,34 +768,10 @@ impl Testnet {
     /// This is faster at startup, but nodes will not start with fully populated routing tables.
     /// Use this when your tests do not require immediate full connectivity.
     ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] with `.seeded(false)`
+    /// Nodes bind to `127.0.0.1` (localhost). Use [`Self::builder`] with `.seeded(false)`
     /// to bind to a different address.
     pub fn new_unseeded(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
-    }
-
-    #[cfg(feature = "async")]
-    /// Similar to [Self::new], but available for async contexts.
-    ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] to bind to
-    /// a different address.
-    pub async fn new_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_seeded(count, Ipv4Addr::UNSPECIFIED)
-    }
-
-    #[cfg(feature = "async")]
-    /// Similar to [Self::new_unseeded], but available for async contexts.
-    ///
-    /// # Bind Address
-    ///
-    /// Nodes are bound to `0.0.0.0` (all interfaces). Use [`Self::builder`] with `.seeded(false)`
-    /// to bind to a different address.
-    pub async fn new_unseeded_async(count: usize) -> Result<Testnet, std::io::Error> {
-        Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
+        Testnet::build_unseeded(count, Ipv4Addr::LOCALHOST)
     }
 
     fn build_seeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
@@ -836,6 +796,7 @@ impl Testnet {
             .map(|info| Node::new(*info.id(), info.local_addr()))
             .collect();
 
+        let mut rx_lists = Vec::with_capacity(count);
         for (node, info) in nodes.iter().zip(infos.iter()) {
             let peers = seeded_nodes
                 .iter()
@@ -844,6 +805,11 @@ impl Testnet {
                 .collect::<Vec<_>>();
             let (tx, rx) = flume::bounded(1);
             node.send(ActorMessage::SeedRouting(peers, tx));
+            rx_lists.push(rx);
+        }
+
+        // Wait for all nodes to finish seeding their routing tables before returning the testnet.
+        for rx in rx_lists {
             let _ = rx.recv();
         }
 
@@ -880,6 +846,17 @@ impl Testnet {
         Ok(Self { bootstrap, nodes })
     }
 
+    /// Returns a [`DhtBuilder`] pre-configured for this testnet.
+    ///
+    /// The builder is set up with the testnet's bootstrap nodes and bind address.
+    pub fn dht_builder(&self) -> DhtBuilder {
+        let mut builder = Dht::builder();
+        builder
+            .bootstrap(&self.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST);
+        builder
+    }
+
     /// By default as soon as this testnet gets dropped,
     /// all the nodes get dropped and the entire network is shutdown.
     ///
@@ -907,7 +884,6 @@ pub enum PutMutableError {
 
 #[cfg(test)]
 mod test {
-    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     use ed25519_dalek::SigningKey;
@@ -931,16 +907,8 @@ mod test {
     fn announce_get_peer() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let info_hash = Id::random();
 
@@ -956,16 +924,8 @@ mod test {
     fn put_get_immutable() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let value = b"Hello World!";
         let expected_target = Id::from_str("e5f96f6f38320f0f33959cb4d3d656452117aadb").unwrap();
@@ -996,16 +956,8 @@ mod test {
     fn put_get_mutable() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1031,16 +983,8 @@ mod test {
     fn put_get_mutable_no_more_recent_value() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1065,11 +1009,7 @@ mod test {
     fn repeated_put_query() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
 
         let id = a.put_immutable(&[1, 2, 3]).unwrap();
 
@@ -1080,16 +1020,8 @@ mod test {
     fn concurrent_get_mutable() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let a = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
-        let b = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let a = testnet.dht_builder().build().unwrap();
+        let b = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1121,11 +1053,7 @@ mod test {
     fn concurrent_put_mutable_same() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1157,11 +1085,7 @@ mod test {
     fn concurrent_put_mutable_different() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let mut handles = vec![];
 
@@ -1204,11 +1128,7 @@ mod test {
     fn concurrent_put_mutable_different_with_cas() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1248,11 +1168,7 @@ mod test {
     fn conflict_302_seq_less_than_current() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
@@ -1275,11 +1191,7 @@ mod test {
     fn conflict_301_cas() {
         let testnet = Testnet::builder(10).build().unwrap();
 
-        let client = Dht::builder()
-            .bootstrap(&testnet.bootstrap)
-            .bind_address(Ipv4Addr::LOCALHOST)
-            .build()
-            .unwrap();
+        let client = testnet.dht_builder().build().unwrap();
 
         let signer = SigningKey::from_bytes(&[
             56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
