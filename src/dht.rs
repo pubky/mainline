@@ -12,19 +12,19 @@ use flume::{Receiver, Sender, TryRecvError};
 use tracing::info;
 
 use crate::{
+    actor::{
+        to_socket_address, Actor, ConcurrencyError, GetRequestSpecific, Info, PutError,
+        PutQueryError, Response,
+    },
     common::{
         hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    rpc::{
-        to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError,
-        Response, Rpc,
-    },
     Node, ServerSettings,
 };
 
-use crate::rpc::config::Config;
+use crate::actor::config::Config;
 
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
@@ -496,9 +496,9 @@ impl<T> Iterator for GetIterator<T> {
 }
 
 fn run(config: Config, receiver: Receiver<ActorMessage>) {
-    match Rpc::new(config) {
-        Ok(mut rpc) => {
-            let address = rpc.local_addr();
+    match Actor::new(config) {
+        Ok(mut actor) => {
+            let address = actor.local_addr();
             info!(?address, "Mainline DHT listening");
 
             let mut put_senders = HashMap::new();
@@ -511,12 +511,12 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             let _ = sender.send(Ok(()));
                         }
                         ActorMessage::Info(sender) => {
-                            let _ = sender.send(rpc.info());
+                            let _ = sender.send(actor.info());
                         }
                         ActorMessage::Put(request, sender, extra_nodes) => {
                             let target = *request.target();
 
-                            match rpc.put(request, extra_nodes) {
+                            match actor.put(request, extra_nodes) {
                                 Ok(()) => {
                                     let senders = put_senders.entry(target).or_insert(vec![]);
 
@@ -530,7 +530,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                         ActorMessage::Get(request, sender) => {
                             let target = *request.target();
 
-                            if let Some(responses) = rpc.get(request, None) {
+                            if let Some(responses) = actor.get(request, None) {
                                 for response in responses {
                                     send(&sender, response);
                                 }
@@ -541,11 +541,11 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                             senders.push(sender);
                         }
                         ActorMessage::ToBootstrap(sender) => {
-                            let _ = sender.send(rpc.routing_table().to_bootstrap());
+                            let _ = sender.send(actor.routing_table().to_bootstrap());
                         }
                         ActorMessage::SeedRouting(nodes, sender) => {
                             for node in nodes {
-                                rpc.routing_table_mut().add(node);
+                                actor.routing_table_mut().add(node);
                             }
                             let _ = sender.send(());
                         }
@@ -560,7 +560,7 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                let report = rpc.tick();
+                let report = actor.tick();
 
                 // Response for an ongoing GET query
                 if let Some((target, response)) = report.new_query_response {
@@ -888,7 +888,7 @@ mod test {
 
     use ed25519_dalek::SigningKey;
 
-    use crate::rpc::ConcurrencyError;
+    use crate::actor::ConcurrencyError;
 
     use super::*;
 

@@ -7,10 +7,10 @@ use crate::{
     Node,
 };
 
-use super::socket::KrpcSocket;
+use crate::actor::socket::KrpcSocket;
 
 #[derive(Debug)]
-/// Once an [super::IterativeQuery] is done, or if a previous cached one was a vailable,
+/// Once an [IterativeQuery](super::iterative_query::IterativeQuery) is done, or if a previous cached one was available,
 /// we can store data at the closest nodes using this PutQuery, that keeps track of
 /// acknowledging nodes, and or errors.
 pub struct PutQuery {
