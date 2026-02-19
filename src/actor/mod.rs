@@ -1,4 +1,8 @@
 //! Actor implementation - I/O orchestration layer for the DHT.
+//!
+//! This module handles network communication and coordinates the DHT node's
+//! event loop. Pure logic (queries, statistics, maintenance decisions) lives
+//! in `core/` and is called from here.
 
 pub(crate) mod config;
 mod handle_request;

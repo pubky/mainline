@@ -57,7 +57,7 @@ impl Actor {
                     let new_id = Id::from_ipv4(*ipv4);
 
                     info!(
-                        "Our current id {} is not valid for adrsess {}. Using new id {}",
+                        "Our current id {} is not valid for address {}. Using new id {}",
                         self.id(),
                         our_address,
                         new_id

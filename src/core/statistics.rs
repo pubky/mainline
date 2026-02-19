@@ -9,6 +9,17 @@ use crate::core::iterative_query::IterativeQuery;
 
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
+/// Cold-start DHT size assumption to avoid storing to too many nodes before real data arrives.
+const INITIAL_DHT_SIZE_ESTIMATE: f64 = 1_000_000.0;
+
+/// Default subnet diversity assumption until real query data arrives.
+const INITIAL_SUBNETS_SUM: usize = 20;
+
+/// Empirical coefficients for standard deviation of DHT size estimates.
+/// See https://github.com/pubky/mainline/blob/main/docs/standard-deviation-vs-lookups.png
+const STD_DEV_COEFFICIENT: f64 = 0.281;
+const STD_DEV_EXPONENT: f64 = -0.529;
+
 /// Statistics about the DHT network
 #[derive(Debug)]
 pub struct DhtStatistics {
@@ -21,7 +32,7 @@ pub struct DhtStatistics {
     /// Count of queries used for responders-based estimates
     responders_based_dht_size_estimates_count: usize,
 
-    /// Sum of subnet diversity metrics
+    /// Sum of the number of subnets with 6-bit prefix in the closest nodes' IPv4 addresses
     subnets_sum: usize,
 
     /// Cache of completed queries with their results
@@ -42,9 +53,9 @@ impl DhtStatistics {
     pub fn new() -> Self {
         DhtStatistics {
             dht_size_estimates_sum: 0.0,
-            responders_based_dht_size_estimates_sum: 1_000_000.0,
+            responders_based_dht_size_estimates_sum: INITIAL_DHT_SIZE_ESTIMATE,
             responders_based_dht_size_estimates_count: 0,
-            subnets_sum: 20,
+            subnets_sum: INITIAL_SUBNETS_SUM,
             cached_queries: LruCache::new(
                 NonZeroUsize::new(MAX_CACHED_ITERATIVE_QUERIES).expect("valid non-zero"),
             ),
@@ -60,8 +71,7 @@ impl DhtStatistics {
 
         let normal = self.dht_size_estimates_sum as usize / sample_count;
 
-        // Standard deviation calculation
-        let std_dev = 0.281 * (sample_count as f64).powf(-0.529);
+        let std_dev = STD_DEV_COEFFICIENT * (sample_count as f64).powf(STD_DEV_EXPONENT);
 
         (normal, std_dev)
     }
