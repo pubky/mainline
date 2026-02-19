@@ -1,11 +1,17 @@
 use mainline::Testnet;
 use std::time::{Duration, Instant};
 
-/// End-to-end latency for get/put operations on a local testnet.
+/// End-to-end latency for get/put operations on a 100-node local testnet.
 ///
-/// Note: latency is bounded below by the actor tick interval (READ_TIMEOUT = 50ms),
-/// so these numbers reflect query round-trips in ticks, not raw CPU cost.
-/// The useful signal is relative differences between runs, not absolute values.
+/// Reports min, mean, p50, p95, and max timings plus cache-miss counts.
+/// Catches regressions in query round-trip time (e.g. slower iterative lookups,
+/// routing table degradation, or increased tick latency).
+///
+/// Note: latency is bounded below by the actor tick interval, so absolute numbers
+/// reflect query round-trips in ticks, not raw CPU cost. Compare relative
+/// differences between runs on the same machine.
+///
+/// Run: `cargo run --release --features full --bin latency`
 fn main() {
     println!("latency\n");
 

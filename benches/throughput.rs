@@ -3,7 +3,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Measures how many concurrent GET queries the network can handle.
+/// Measures how many concurrent GET queries a 100-node testnet can handle.
+///
+/// Fires 10, 50, and 100 parallel gets and reports wall-clock time,
+/// queries-per-second, and per-query latency percentiles.
+/// Catches contention issues, lock overhead, or degraded performance under load.
+///
+/// Run: `cargo run --release --features full --bin throughput`
 fn main() {
     println!("throughput\n");
 

@@ -1,7 +1,13 @@
 use mainline::Testnet;
 use std::time::{Duration, Instant};
 
-/// How does init time and query latency scale with network size?
+/// Measures testnet init time and GET latency (p50/p95) across increasing
+/// network sizes (5 to 100 nodes).
+///
+/// Catches super-linear scaling in init or query cost — e.g. O(n^2) routing
+/// table operations. Compare columns between runs to spot regressions.
+///
+/// Run: `cargo run --release --features full --bin scalability`
 fn main() {
     println!("scalability\n");
     println!(
