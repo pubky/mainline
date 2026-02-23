@@ -17,7 +17,6 @@ keywords = ["bittorrent", "torrent", "dht", "kademlia", "mainline"]
 categories = ["network-programming"]
 repository = "https://github.com/pubky/mainline"
 exclude = ["/docs/*", "/examples/*"]
-autobenches = false
 
 [dependencies]
 getrandom = "0.4"
@@ -68,23 +67,3 @@ default = ["full"]
 
 [package.metadata.docs.rs]
 all-features = true
-
-[[bin]]
-name = "latency"
-path = "benches/latency.rs"
-required-features = ["full"]
-
-[[bin]]
-name = "throughput"
-path = "benches/throughput.rs"
-required-features = ["full"]
-
-[[bin]]
-name = "routing_table"
-path = "benches/routing_table.rs"
-required-features = ["full"]
-
-[[bin]]
-name = "scalability"
-path = "benches/scalability.rs"
-required-features = ["full"]
