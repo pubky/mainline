@@ -63,6 +63,19 @@ If you want to explicitly start in Server mode, because you know you are not run
 you can call `Dht::builder().server_mode().build()`, and you can optionally add your known public ip so the node doesn't have to depend on,
 votes from responding nodes: `Dht::builder().server_mode().public_ip().build()`.
 
+## Benchmarks
+
+There are manual benchmarks in `benches/` for tracking performance of core DHT
+operations. Each file has a doc comment describing what it measures and what
+regressions it catches. Run them with:
+
+```sh
+cargo run --release --features full --bin latency
+cargo run --release --features full --bin throughput
+cargo run --release --features full --bin scalability
+cargo run --release --features full --bin routing_table
+```
+
 ## Acknowledgment
 
 This implementation was possible thanks to [Webtorrent's Bittorrent-dht](https://github.com/webtorrent/bittorrent-dht) as a reference, 

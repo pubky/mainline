@@ -67,4 +67,3 @@ default = ["full"]
 
 [package.metadata.docs.rs]
 all-features = true
-

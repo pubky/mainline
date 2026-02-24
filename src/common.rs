@@ -1,5 +1,6 @@
 //! Miscellaneous common structs used throughout the library.
 
+mod closest_nodes;
 mod id;
 mod immutable;
 pub mod messages;
@@ -7,6 +8,7 @@ mod mutable;
 mod node;
 mod routing_table;
 
+pub use closest_nodes::*;
 pub use id::*;
 pub use immutable::*;
 pub use messages::*;
