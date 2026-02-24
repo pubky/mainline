@@ -67,9 +67,7 @@ fn main() {
     // put_mutable and verify with get_mutable, using 12 concurrent threads
     // (matching the homeserver's MultiRepublisher concurrency).
     let homeserver_key = random_signing_key();
-    let user_keys: Vec<SigningKey> = (0..USER_COUNT)
-        .map(|_| random_signing_key())
-        .collect();
+    let user_keys: Vec<SigningKey> = (0..USER_COUNT).map(|_| random_signing_key()).collect();
 
     // Collect all keys: homeserver + users.
     let mut all_keys = vec![&homeserver_key];
