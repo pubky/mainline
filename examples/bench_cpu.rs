@@ -9,6 +9,7 @@
 //!
 //! Run: `cargo run --release --example bench_cpu`
 
+use cpu_time::ProcessTime;
 use mainline::{Dht, MutableItem, SigningKey};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -47,9 +48,10 @@ fn main() {
     // looks like between republish cycles (most of the time).
     let phase_duration = Duration::from_secs(30);
 
-    let (cpu_before, wall_before) = (process_cpu_time(), Instant::now());
+    let cpu_before = ProcessTime::now();
+    let wall_before = Instant::now();
     thread::sleep(phase_duration);
-    let idle_cpu = process_cpu_time() - cpu_before;
+    let idle_cpu = cpu_before.elapsed();
     let idle_wall = wall_before.elapsed();
 
     println!("idle ({:.0}s)", idle_wall.as_secs_f64());
@@ -73,7 +75,8 @@ fn main() {
     let mut all_keys = vec![&homeserver_key];
     all_keys.extend(user_keys.iter());
 
-    let (cpu_before, wall_before) = (process_cpu_time(), Instant::now());
+    let cpu_before = ProcessTime::now();
+    let wall_before = Instant::now();
 
     // Republish in batches of REPUBLISH_CONCURRENCY, matching homeserver behavior.
     let mut published = 0usize;
@@ -116,7 +119,7 @@ fn main() {
         }
     }
 
-    let republish_cpu = process_cpu_time() - cpu_before;
+    let republish_cpu = cpu_before.elapsed();
     let republish_wall = wall_before.elapsed();
 
     println!(
@@ -136,21 +139,4 @@ fn main() {
 
 fn cpu_pct(cpu: Duration, wall: Duration) -> f64 {
     cpu.as_secs_f64() / wall.as_secs_f64() * 100.0
-}
-
-/// Returns total process CPU time (user + system) via getrusage.
-fn process_cpu_time() -> Duration {
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe {
-        libc::getrusage(libc::RUSAGE_SELF, &mut usage);
-    }
-    let user = Duration::new(
-        usage.ru_utime.tv_sec as u64,
-        usage.ru_utime.tv_usec as u32 * 1000,
-    );
-    let sys = Duration::new(
-        usage.ru_stime.tv_sec as u64,
-        usage.ru_stime.tv_usec as u32 * 1000,
-    );
-    user + sys
 }
