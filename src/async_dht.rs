@@ -14,7 +14,7 @@ use crate::{
         GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
         PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
-    dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
+    dht::{ActorMessage, Dht, PutMutableError, PutResult, ResponseSender},
     rpc::{GetRequestSpecific, Info, PutError, PutQueryError},
 };
 
@@ -347,6 +347,35 @@ impl AsyncDht {
             .recv_async()
             .await
             .expect("Query was dropped before sending a response, please open an issue.")
+            .map(|r| r.target)
+    }
+
+    /// Like [Self::put] but returns a [PutResult] with the number of nodes that stored the value.
+    pub async fn put_with_info(
+        &self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> Result<PutResult, PutError> {
+        self.put_inner(request, extra_nodes)
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue.")
+    }
+
+    /// Like [Self::put_mutable] but returns a [PutResult] with the number of nodes that stored the value.
+    pub async fn put_mutable_with_info(
+        &self,
+        item: MutableItem,
+        cas: Option<i64>,
+    ) -> Result<PutResult, PutMutableError> {
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
+
+        self.put_with_info(request, None)
+            .await
+            .map_err(|error| match error {
+                PutError::Query(err) => PutMutableError::Query(err),
+                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+            })
     }
 
     // === Private Methods ===
@@ -355,8 +384,8 @@ impl AsyncDht {
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
-    ) -> flume::Receiver<Result<Id, PutError>> {
-        let (tx, rx) = flume::bounded::<Result<Id, PutError>>(1);
+    ) -> flume::Receiver<Result<PutResult, PutError>> {
+        let (tx, rx) = flume::bounded::<Result<PutResult, PutError>>(1);
         self.send(ActorMessage::Put(request, tx, extra_nodes));
 
         rx
@@ -717,7 +746,7 @@ mod test {
             {
                 let item = MutableItem::new(signer.clone(), &value, 1000, None);
 
-                let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+                let (sender, _) = flume::bounded::<Result<PutResult, PutError>>(1);
                 let request =
                     PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
                 dht.0

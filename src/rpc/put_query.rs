@@ -76,6 +76,10 @@ impl PutQuery {
         Ok(())
     }
 
+    pub fn stored_at(&self) -> u8 {
+        self.stored_at
+    }
+
     pub fn started(&self) -> bool {
         !self.inflight_requests.is_empty()
     }

@@ -953,17 +953,17 @@ impl Rpc {
     // === tick() helpers ===
 
     /// Advance all PUT queries, return done ones.
-    fn tick_put_queries(&mut self) -> Vec<(Id, Option<PutError>)> {
+    fn tick_put_queries(&mut self) -> Vec<(Id, u8, Option<PutError>)> {
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
             match query.tick(&self.socket) {
                 Ok(done) => {
                     if done {
-                        done_put_queries.push((*id, None));
+                        done_put_queries.push((*id, query.stored_at(), None));
                     }
                 }
-                Err(error) => done_put_queries.push((*id, Some(error))),
+                Err(error) => done_put_queries.push((*id, 0, Some(error))),
             };
         }
 
@@ -1013,7 +1013,7 @@ impl Rpc {
     fn cleanup_done_queries(
         &mut self,
         done_get: &[(Id, Box<[Node]>)],
-        done_put: &mut Vec<(Id, Option<PutError>)>,
+        done_put: &mut Vec<(Id, u8, Option<PutError>)>,
     ) {
         // Has to happen _before_ `self.socket.recv_from()`.
         for (id, closest_nodes) in done_get {
@@ -1040,11 +1040,11 @@ impl Rpc {
             }
 
             if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
-                done_put.push((*id, Some(error)))
+                done_put.push((*id, 0, Some(error)))
             }
         }
 
-        for (id, _) in done_put.iter() {
+        for (id, _, _) in done_put.iter() {
             self.put_queries.remove(id);
         }
     }
@@ -1092,8 +1092,8 @@ pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
     pub done_get_queries: Vec<(Id, Box<[Node]>)>,
     /// All the [Id]s of the done [Rpc::put] queries,
-    /// and optional [PutError] if the query failed.
-    pub done_put_queries: Vec<(Id, Option<PutError>)>,
+    /// the number of nodes that stored the value, and optional [PutError] if the query failed.
+    pub done_put_queries: Vec<(Id, u8, Option<PutError>)>,
     /// Received GET query response.
     pub new_query_response: Option<(Id, Response)>,
 }
