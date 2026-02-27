@@ -26,6 +26,15 @@ use crate::{
 
 use crate::actor::config::Config;
 
+/// Result of a successful PUT query, including how many DHT nodes stored the value.
+#[derive(Debug, Clone)]
+pub struct PutResult {
+    /// The target Id of the stored value.
+    pub target: Id,
+    /// Number of DHT nodes that acknowledged storing the value.
+    pub stored_at: u8,
+}
+
 #[derive(Debug, Clone)]
 /// Mainline Dht node.
 pub struct Dht(pub(crate) Sender<ActorMessage>);
@@ -463,6 +472,33 @@ impl Dht {
         self.put_inner(request, extra_nodes)
             .recv()
             .expect("Query was dropped before sending a response, please open an issue.")
+            .map(|r| r.target)
+    }
+
+    /// Same as put, but returns a [PutResult] instead of just the target Id.
+    pub fn put_with_info(
+        &self,
+        request: PutRequestSpecific,
+        extra_nodes: Option<Box<[Node]>>,
+    ) -> Result<PutResult, PutError> {
+        self.put_inner(request, extra_nodes)
+            .recv()
+            .expect("Query was dropped before sending a response, please open an issue.")
+    }
+
+    /// Same as put_mutable, but returns a [PutResult] instead of just the target Id.
+    pub fn put_mutable_with_info(
+        &self,
+        item: MutableItem,
+        cas: Option<i64>,
+    ) -> Result<PutResult, PutMutableError> {
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
+
+        self.put_with_info(request, None)
+            .map_err(|error| match error {
+                PutError::Query(err) => PutMutableError::Query(err),
+                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+            })
     }
 
     // === Private Methods ===
@@ -471,8 +507,8 @@ impl Dht {
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
-    ) -> flume::Receiver<Result<Id, PutError>> {
-        let (tx, rx) = flume::bounded::<Result<Id, PutError>>(1);
+    ) -> flume::Receiver<Result<PutResult, PutError>> {
+        let (tx, rx) = flume::bounded::<Result<PutResult, PutError>>(1);
         self.send(ActorMessage::Put(request, tx, extra_nodes));
 
         rx
@@ -584,12 +620,15 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 }
 
                 // Cleanup done PUT query and send a resulting error if any.
-                for (id, error) in report.done_put_queries {
+                for (id, stored_at, error) in report.done_put_queries {
                     if let Some(senders) = put_senders.remove(&id) {
                         let result = if let Some(error) = error {
                             Err(error)
                         } else {
-                            Ok(id)
+                            Ok(PutResult {
+                                target: id,
+                                stored_at,
+                            })
                         };
 
                         for sender in senders {
@@ -627,7 +666,7 @@ pub(crate) enum ActorMessage {
     Info(Sender<Info>),
     Put(
         PutRequestSpecific,
-        Sender<Result<Id, PutError>>,
+        Sender<Result<PutResult, PutError>>,
         Option<Box<[Node]>>,
     ),
     Get(GetRequestSpecific, ResponseSender),
@@ -1139,7 +1178,7 @@ mod test {
         {
             let item = MutableItem::new(signer.clone(), &[], 1000, None);
 
-            let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+            let (sender, _) = flume::bounded::<Result<PutResult, PutError>>(1);
             let request =
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
             client
