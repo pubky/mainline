@@ -29,7 +29,7 @@ pub use actor::{
 #[cfg(feature = "node")]
 pub use common::ClosestNodes;
 #[cfg(feature = "node")]
-pub use dht::{Dht, DhtBuilder, Testnet, TestnetBuilder};
+pub use dht::{Dht, DhtBuilder, PutResult, Testnet, TestnetBuilder};
 
 pub use ed25519_dalek::SigningKey;
 
