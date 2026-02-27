@@ -26,8 +26,8 @@ use crate::{
 
 use crate::rpc::config::Config;
 
-#[derive(Debug, Clone)]
 /// Result of a successful PUT query, including how many DHT nodes stored the value.
+#[derive(Debug, Clone)]
 pub struct PutResult {
     /// The target Id of the stored value.
     pub target: Id,
@@ -480,7 +480,7 @@ impl Dht {
             .map(|r| r.target)
     }
 
-    /// Like [Self::put] but returns a [PutResult] with the number of nodes that stored the value.
+    /// Same as put, but returns a [PutResult] instead of just the target Id.
     pub fn put_with_info(
         &self,
         request: PutRequestSpecific,
@@ -491,7 +491,7 @@ impl Dht {
             .expect("Query was dropped before sending a response, please open an issue.")
     }
 
-    /// Like [Self::put_mutable] but returns a [PutResult] with the number of nodes that stored the value.
+    /// Same as put_mutable, but returns a [PutResult] instead of just the target Id.
     pub fn put_mutable_with_info(
         &self,
         item: MutableItem,
@@ -1064,6 +1064,31 @@ mod test {
             .expect("No mutable values");
 
         assert_eq!(&response, &item);
+    }
+
+    #[test]
+    fn put_mutable_with_info_reports_stored_at() {
+        let testnet = Testnet::builder(10).build().unwrap();
+
+        let a = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let item = MutableItem::new(signer.clone(), b"Hello World!", 1000, None);
+
+        let result = a.put_mutable_with_info(item, None).unwrap();
+
+        assert!(
+            result.stored_at > 0,
+            "expected at least one node to store the value, got 0"
+        );
     }
 
     #[test]

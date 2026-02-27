@@ -350,7 +350,7 @@ impl AsyncDht {
             .map(|r| r.target)
     }
 
-    /// Like [Self::put] but returns a [PutResult] with the number of nodes that stored the value.
+    /// Same as put, but returns a [PutResult] instead of just the target Id.
     pub async fn put_with_info(
         &self,
         request: PutRequestSpecific,
@@ -362,7 +362,7 @@ impl AsyncDht {
             .expect("Query was dropped before sending a response, please open an issue.")
     }
 
-    /// Like [Self::put_mutable] but returns a [PutResult] with the number of nodes that stored the value.
+    /// Same as put_mutable, but returns a [PutResult] instead of just the target Id.
     pub async fn put_mutable_with_info(
         &self,
         item: MutableItem,
