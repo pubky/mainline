@@ -59,6 +59,8 @@ const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 pub struct Rpc {
     // Options
     bootstrap: Box<[SocketAddrV4]>,
+    /// Hostnames pending DNS resolution, resolved lazily on first tick.
+    unresolved_bootstrap: Option<Box<[String]>>,
 
     socket: KrpcSocket,
 
@@ -116,11 +118,21 @@ impl Rpc {
 
         let socket = KrpcSocket::new(&config)?;
 
+        let (bootstrap, unresolved_bootstrap) = if let Some(resolved) = config.bootstrap {
+            (resolved.into(), None)
+        } else {
+            // Defer DNS resolution of default bootstrap nodes to first tick,
+            // so that Dht::new() does not block the caller.
+            let hostnames: Box<[String]> = DEFAULT_BOOTSTRAP_NODES
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            (Box::new([]) as Box<[SocketAddrV4]>, Some(hostnames))
+        };
+
         Ok(Rpc {
-            bootstrap: config
-                .bootstrap
-                .unwrap_or_else(|| to_socket_address(&DEFAULT_BOOTSTRAP_NODES))
-                .into(),
+            bootstrap,
+            unresolved_bootstrap,
             socket,
 
             routing_table: RoutingTable::new(id),
@@ -834,8 +846,19 @@ impl Rpc {
     /// Response will allow to add closest nodes candidates to routing table.
     ///
     /// Reset the last_table_refresh timer.
+    fn resolve_pending_bootstrap(&mut self) {
+        if let Some(hostnames) = self.unresolved_bootstrap.take() {
+            let resolved = to_socket_address(&hostnames);
+            if !resolved.is_empty() {
+                self.bootstrap = resolved.into();
+            }
+        }
+    }
+
     fn populate(&mut self) {
         self.last_table_refresh = Instant::now();
+
+        self.resolve_pending_bootstrap();
 
         if self.bootstrap.is_empty() {
             return;
@@ -1120,4 +1143,25 @@ pub(crate) fn to_socket_address<T: ToSocketAddrs>(bootstrap: &[T]) -> Vec<Socket
         })
         .flatten()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_bootstrap_dns_is_deferred_to_first_tick() {
+        // https://github.com/pubky/pkarr/issues/219
+        //
+        // Dht::new() blocks until Rpc::new() completes, so DNS resolution of default
+        // bootstrap nodes is deferred to the first tick() to avoid slow DNS stalling callers.
+        let mut rpc = Rpc::new(config::Config::default()).unwrap();
+
+        // Bootstrap is empty right after construction, DNS has not been resolved yet.
+        assert!(rpc.bootstrap.is_empty());
+
+        // After the first tick, default bootstrap nodes are resolved and available.
+        rpc.tick();
+        assert!(!rpc.bootstrap.is_empty());
+    }
 }
