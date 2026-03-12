@@ -38,7 +38,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.85
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Check MSRV
         run: cargo check --workspace --all-features
@@ -55,7 +55,7 @@ jobs:
           components: clippy
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Lint with Clippy
         run: cargo clippy --workspace --all-features --bins --tests -- -D warnings
@@ -79,7 +79,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --release --workspace --all-features --verbose
@@ -98,7 +98,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Run tests
         run: cargo test --all-features --workspace --verbose
@@ -113,7 +113,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v3
+        uses: Swatinem/rust-cache@v2
 
       - name: Build docs
         run: cargo doc --workspace --all-features --no-deps --document-private-items --verbose
