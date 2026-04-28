@@ -27,9 +27,7 @@ thiserror = "2.0.18"
 crc = "3.4.0"
 sha1_smol = "1.0.1"
 ed25519-dalek = "3.0.0-pre.1"
-# Pinned: digest 0.11.0-rc.11+ removed crypto_common re-export, breaking curve25519-dalek
-# See: https://github.com/pubky/mainline/issues/80
-digest = "=0.11.0-rc.10"
+digest = "0.11"
 tracing = "0.1.44"
 lru = { version = "0.16.2", default-features = false }
 dyn-clone = "1.0.20"
