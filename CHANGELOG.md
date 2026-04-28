@@ -2,6 +2,10 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+### Changed
+
+- Update digest pin from 0.11.0-rc.9 to 0.11.0 (#97).
+
 ## [6.1.2](https://github.com/pubky/mainline/compare/v6.1.1...v6.1.2) - 2026-03-12
 
 ### Changed
