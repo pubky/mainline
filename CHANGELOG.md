@@ -2,15 +2,12 @@
 
 All notable changes to mainline dht will be documented in this file.
 
-### Changed
+## [6.1.2](https://github.com/pubky/mainline/compare/v6.1.1...v6.1.2) - 2026-04-28
 
-- Update digest pin from 0.11.0-rc.9 to 0.11.0 (#97).
-
-## [6.1.2](https://github.com/pubky/mainline/compare/v6.1.1...v6.1.2) - 2026-03-12
-
-### Changed
-
-- Update digest pin from 0.11.0-rc.9 to 0.11.0-rc.10 (#93).
+- fix: Typo in log message for invalid ID by @dezren39 in https://github.com/pubky/mainline/pull/96
+- chore: Update digest dependency version to 0.11 by @emmyoh in https://github.com/pubky/mainline/pull/97
+- chore: Update digest pin by @eminence in https://github.com/pubky/mainline/pull/93
+- chore: Release flow + guide by @SeverinAlexB in https://github.com/pubky/mainline/pull/95
 
 ## [6.1.1](https://github.com/pubky/mainline/compare/v6.1.0...v6.1.1) - 2026-02-05
 
