@@ -1,6 +1,6 @@
 [package]
 name = "mainline"
-version = "6.1.1"
+version = "6.1.2"
 authors = [
     "nuh.dev",
     "SeverinAlexB <severin@synonym.to>",
