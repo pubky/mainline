@@ -19,24 +19,22 @@ repository = "https://github.com/pubky/mainline"
 exclude = ["/docs/*", "/examples/*"]
 
 [dependencies]
-getrandom = "0.4"
-serde_bencode = "^0.2.4"
+getrandom = { version = "0.4", default-features = false }
+serde_bencode = { version = "0.2.4", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_bytes = "0.11.19"
-thiserror = "2.0.18"
-crc = "3.4.0"
-sha1_smol = "1.0.1"
-ed25519-dalek = "3.0.0-pre.1"
-digest = "0.11"
+thiserror = { version = "2.0.18", default-features = false }
+crc = { version = "3.4.0", default-features = false }
+sha1_smol = { version = "1.0.1", default-features = false }
+ed25519-dalek = { version = "3.0.0-pre.1", default-features = false }
 tracing = "0.1.44"
 lru = { version = "0.16.2", default-features = false }
-dyn-clone = "1.0.20"
+dyn-clone = { version = "1.0.20", default-features = false }
 
 document-features = "0.2.12"
 
 # `node` dependencies
-flume = { version = "0.12.0", features = [
-], default-features = false, optional = true }
+flume = { version = "0.12.0", default-features = false, optional = true }
 
 # `async` dependencies
 futures-lite = { version = "2.6.1", default-features = false, optional = true }
@@ -49,9 +47,8 @@ ctrlc = "3.5.1"
 histo = "1.0.0"
 rayon = "1.11.0"
 dashmap = "6.1"
-flume = "0.12.0"
+flume = { version = "0.12.0", default-features = false }
 colored = "3.1.1"
-chrono = "0.4"
 
 [features]
 ## Include [Dht] node.
@@ -65,4 +62,3 @@ default = ["full"]
 
 [package.metadata.docs.rs]
 all-features = true
-
