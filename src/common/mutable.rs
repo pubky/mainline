@@ -151,6 +151,20 @@ pub fn encode_signable(seq: i64, value: &[u8], salt: Option<&[u8]>) -> Box<[u8]>
     signable.into()
 }
 
+pub(crate) fn most_recent_mutable_item(
+    most_recent: Option<MutableItem>,
+    item: MutableItem,
+) -> Option<MutableItem> {
+    match most_recent {
+        Some(mr)
+            if mr.seq() > item.seq() || (mr.seq() == item.seq() && mr.value() >= item.value()) =>
+        {
+            Some(mr)
+        }
+        _ => Some(item),
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 /// Mainline crate error enum.
 pub enum MutableError {
@@ -197,6 +211,8 @@ impl From<PutMutableRequestArguments> for MutableItem {
 mod tests {
     use super::*;
 
+    use ed25519_dalek::SigningKey;
+
     #[test]
     fn signable_without_salt() {
         let signable = encode_signable(4, b"Hello world!", None);
@@ -208,5 +224,49 @@ mod tests {
         let signable = encode_signable(4, b"Hello world!", Some(b"foobar"));
 
         assert_eq!(&*signable, b"4:salt6:foobar3:seqi4e1:v12:Hello world!");
+    }
+
+    #[test]
+    fn most_recent_mutable_item_selects_by_seq_then_value() {
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let lower_seq = MutableItem::new(signer.clone(), b"lower-seq", 999, None);
+        let current = MutableItem::new(signer.clone(), b"current1", 1000, None);
+        let higher_seq = MutableItem::new(signer.clone(), b"higher-seq", 1001, None);
+        let same_seq_lower_value = MutableItem::new(signer.clone(), b"current0", 1000, None);
+        let same_seq_higher_value = MutableItem::new(signer, b"current2", 1000, None);
+
+        assert_eq!(
+            most_recent_mutable_item(None, current.clone()),
+            Some(current.clone())
+        );
+
+        assert_eq!(
+            most_recent_mutable_item(Some(current.clone()), higher_seq.clone()),
+            Some(higher_seq)
+        );
+
+        assert_eq!(
+            most_recent_mutable_item(Some(current.clone()), lower_seq),
+            Some(current.clone())
+        );
+
+        assert_eq!(
+            most_recent_mutable_item(Some(current.clone()), same_seq_higher_value.clone()),
+            Some(same_seq_higher_value)
+        );
+
+        assert_eq!(
+            most_recent_mutable_item(Some(current.clone()), same_seq_lower_value),
+            Some(current.clone())
+        );
+
+        assert_eq!(
+            most_recent_mutable_item(Some(current.clone()), current.clone()),
+            Some(current)
+        );
     }
 }

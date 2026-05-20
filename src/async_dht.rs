@@ -10,9 +10,10 @@ use futures_lite::{Stream, StreamExt};
 
 use crate::{
     common::{
-        hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
-        GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem, Node,
-        PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
+        hash_immutable, most_recent_mutable_item, AnnouncePeerRequestArguments,
+        FindNodeRequestArguments, GetPeersRequestArguments, GetValueRequestArguments, Id,
+        MutableItem, Node, PutImmutableRequestArguments, PutMutableRequestArguments,
+        PutRequestSpecific,
     },
     dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
     rpc::{GetRequestSpecific, Info, PutError, PutQueryError},
@@ -220,20 +221,9 @@ impl AsyncDht {
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
     ) -> Option<MutableItem> {
-        let mut most_recent: Option<MutableItem> = None;
-        let mut stream = self.get_mutable(public_key, salt, None);
-
-        while let Some(item) = stream.next().await {
-            if let Some(mr) = &most_recent {
-                if item.seq() == mr.seq && item.value() > &mr.value {
-                    most_recent = Some(item)
-                }
-            } else {
-                most_recent = Some(item);
-            }
-        }
-
-        most_recent
+        self.get_mutable(public_key, salt, None)
+            .fold(None::<MutableItem>, most_recent_mutable_item)
+            .await
     }
 
     /// Put a mutable data to the DHT.
@@ -532,6 +522,47 @@ mod test {
                 .await;
 
             assert!(&response.is_none());
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn get_mutable_most_recent_prefers_highest_seq() {
+        async fn test() {
+            let testnet = Testnet::builder(10).build().unwrap();
+
+            let dht = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let newer = MutableItem::new(signer.clone(), b"newer", 1001, None);
+            dht.put_mutable(newer.clone(), None).await.unwrap();
+
+            let older = MutableItem::new(signer, b"older", 1000, None);
+            let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+            let request =
+                PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(older, None));
+            dht.0
+                 .0
+                .send(ActorMessage::Put(request, sender, None))
+                .unwrap();
+
+            let most_recent = dht
+                .get_mutable_most_recent(newer.key(), None)
+                .await
+                .expect("No mutable values");
+
+            assert_eq!(most_recent.seq(), newer.seq());
+            assert_eq!(most_recent.value(), newer.value());
         }
 
         futures::executor::block_on(test());

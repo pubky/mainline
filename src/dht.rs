@@ -13,9 +13,9 @@ use tracing::info;
 
 use crate::{
     common::{
-        hash_immutable, AnnouncePeerRequestArguments, FindNodeRequestArguments,
-        GetPeersRequestArguments, GetValueRequestArguments, Id, MutableItem,
-        PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
+        hash_immutable, most_recent_mutable_item, AnnouncePeerRequestArguments,
+        FindNodeRequestArguments, GetPeersRequestArguments, GetValueRequestArguments, Id,
+        MutableItem, PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
     rpc::{
         to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError,
@@ -351,19 +351,8 @@ impl Dht {
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
     ) -> Option<MutableItem> {
-        let mut most_recent: Option<MutableItem> = None;
-        let iter = self.get_mutable(public_key, salt, None);
-        for item in iter {
-            if let Some(mr) = &most_recent {
-                if item.seq() == mr.seq && item.value() > &mr.value {
-                    most_recent = Some(item)
-                }
-            } else {
-                most_recent = Some(item);
-            }
-        }
-
-        most_recent
+        self.get_mutable(public_key, salt, None)
+            .fold(None::<MutableItem>, most_recent_mutable_item)
     }
 
     /// Put a mutable data to the DHT.
@@ -1059,6 +1048,40 @@ mod test {
             .next();
 
         assert!(&response.is_none());
+    }
+
+    #[test]
+    fn get_mutable_most_recent_prefers_highest_seq() {
+        let testnet = Testnet::builder(10).build().unwrap();
+
+        let client = Dht::builder()
+            .bootstrap(&testnet.bootstrap)
+            .bind_address(Ipv4Addr::LOCALHOST)
+            .build()
+            .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let newer = MutableItem::new(signer.clone(), b"newer", 1001, None);
+        client.put_mutable(newer.clone(), None).unwrap();
+
+        let older = MutableItem::new(signer, b"older", 1000, None);
+        let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(older, None));
+        client
+            .0
+            .send(ActorMessage::Put(request, sender, None))
+            .unwrap();
+
+        let most_recent = client
+            .get_mutable_most_recent(newer.key(), None)
+            .expect("No mutable values");
+
+        assert_eq!(most_recent.seq(), newer.seq());
+        assert_eq!(most_recent.value(), newer.value());
     }
 
     #[test]
