@@ -39,6 +39,7 @@ pub use iterative_query::GetRequestSpecific;
 pub use put_query::{ConcurrencyError, PutError, PutQueryError};
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
+/// Default bootstrap nodes used to discover peers when no custom bootstrap list is configured.
 pub const DEFAULT_BOOTSTRAP_NODES: [&str; 4] = [
     "router.bittorrent.com:6881",
     "dht.transmissionbt.com:6881",
