@@ -119,6 +119,19 @@ impl PutQuery {
             return Ok(false);
         }
 
+        if let Some(most_common_error) = self.majority_nodes_rejected_put_mutable() {
+            let target = self.target;
+
+            debug!(
+                ?target,
+                ?most_common_error,
+                nodes_count = self.inflight_requests.len(),
+                "PutQuery for MutableItem was rejected by most nodes with 3xx code."
+            );
+
+            return Err(most_common_error)?;
+        }
+
         // And all queries got responses or timedout
         if self.is_done(socket) {
             let target = self.target;
@@ -141,17 +154,6 @@ impl PutQuery {
             debug!(?target, stored_at = ?self.stored_at, "PutQuery Done successfully");
 
             return Ok(true);
-        } else if let Some(most_common_error) = self.majority_nodes_rejected_put_mutable() {
-            let target = self.target;
-
-            debug!(
-                ?target,
-                ?most_common_error,
-                nodes_count = self.inflight_requests.len(),
-                "PutQuery for MutableItem was rejected by most nodes with 3xx code."
-            );
-
-            return Err(most_common_error)?;
         }
 
         Ok(false)
@@ -252,4 +254,49 @@ pub enum ConcurrencyError {
     /// The `CAS` condition does not match the `seq` of the most recent knonw signed item.
     #[error("CAS check failed, try reading most recent item before writing again.")]
     CasFailed,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        common::{PutMutableRequestArguments, PutRequestSpecific},
+        MutableItem, SigningKey,
+    };
+
+    use super::{ConcurrencyError, PutError, PutQuery};
+    use crate::common::ErrorSpecific;
+    use crate::rpc::socket::KrpcSocket;
+
+    #[test]
+    fn mutable_majority_cas_failure_wins_over_completed_success() {
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+        let item = MutableItem::new(signer, b"value", 1002, None);
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(
+            item.clone(),
+            Some(1000),
+        ));
+        let mut query = PutQuery::new(*item.target(), request, None);
+
+        query.inflight_requests = vec![1, 2, 3];
+        query.success();
+        query.error(cas_failed());
+        query.error(cas_failed());
+
+        let socket = KrpcSocket::client().unwrap();
+
+        assert!(matches!(
+            query.tick(&socket),
+            Err(PutError::Concurrency(ConcurrencyError::CasFailed))
+        ));
+    }
+
+    fn cas_failed() -> ErrorSpecific {
+        ErrorSpecific {
+            code: 301,
+            description: "cas failed".to_string(),
+        }
+    }
 }
