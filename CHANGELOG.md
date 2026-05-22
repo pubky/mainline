@@ -2,6 +2,21 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [6.2.0](https://github.com/pubky/mainline/compare/v6.1.2...v6.2.0) - 2026-05-22
+
+### Added
+
+- feat: Expose bootstrap configuration by @andrei-21 in https://github.com/pubky/mainline/pull/99
+
+### Fixed
+
+- fix: Select mutable item by highest sequence by @andrei-21 in https://github.com/pubky/mainline/pull/100
+- fix: Report mutable CAS majority rejection by @andrei-21 in https://github.com/pubky/mainline/pull/101
+
+### Changed
+
+- build: Disable default features for dependencies by @andrei-21 in https://github.com/pubky/mainline/pull/98
+
 ## [6.1.2](https://github.com/pubky/mainline/compare/v6.1.1...v6.1.2) - 2026-04-28
 
 - fix: Typo in log message for invalid ID by @dezren39 in https://github.com/pubky/mainline/pull/96
