@@ -9,10 +9,11 @@ use crate::{
 
 use super::socket::KrpcSocket;
 
+/// Stores data at the closest nodes after an [super::IterativeQuery] is done,
+/// or when a previous cached query is available.
+///
+/// Tracks successful acknowledgements and errors for the PUT query.
 #[derive(Debug)]
-/// Once an [super::IterativeQuery] is done, or if a previous cached one was a vailable,
-/// we can store data at the closest nodes using this PutQuery, that keeps track of
-/// acknowledging nodes, and or errors.
 pub struct PutQuery {
     pub target: Id,
     /// Nodes that confirmed success
@@ -31,7 +32,7 @@ impl PutQuery {
             inflight_requests: Vec::new(),
             request,
             errors: Vec::new(),
-            extra_nodes: extra_nodes.unwrap_or(Box::new([])),
+            extra_nodes: extra_nodes.unwrap_or_default(),
         }
     }
 
@@ -40,9 +41,7 @@ impl PutQuery {
         socket: &mut KrpcSocket,
         closest_nodes: &[Node],
     ) -> Result<(), PutError> {
-        if self.started() {
-            panic!("should not call PutQuery::start() twice");
-        };
+        assert!(!self.started(), "should not call PutQuery::start() twice");
 
         let target = self.target;
         trace!(?target, "PutQuery start");
@@ -51,9 +50,10 @@ impl PutQuery {
             Err(PutQueryError::NoClosestNodes)?;
         }
 
-        if closest_nodes.len() > u8::MAX as usize {
-            panic!("should not send PUT query to more than 256 nodes")
-        }
+        assert!(
+            closest_nodes.len() <= u8::MAX as usize,
+            "should not send PUT query to more than 256 nodes"
+        );
 
         for node in closest_nodes.iter().chain(self.extra_nodes.iter()) {
             // Set correct values to the request placeholders
@@ -112,27 +112,24 @@ impl PutQuery {
         }
     }
 
-    /// Check if the query is done, and if so send the query target to the receiver if any.
-    pub fn tick(&mut self, socket: &KrpcSocket) -> Result<bool, PutError> {
-        // Didn't start yet.
-        if self.inflight_requests.is_empty() {
+    /// Check if the query has completed.
+    pub fn poll_completion(&self, socket: &KrpcSocket) -> Result<bool, PutError> {
+        if !self.started() {
             return Ok(false);
         }
 
         if let Some(most_common_error) = self.majority_nodes_rejected_put_mutable() {
-            let target = self.target;
-
             debug!(
-                ?target,
+                target = ?self.target,
                 ?most_common_error,
                 nodes_count = self.inflight_requests.len(),
                 "PutQuery for MutableItem was rejected by most nodes with 3xx code."
             );
 
-            return Err(most_common_error)?;
+            return Err(PutError::from(most_common_error));
         }
 
-        // And all queries got responses or timedout
+        // And all queries got responses or timed out.
         if self.is_done(socket) {
             let target = self.target;
 
@@ -160,30 +157,27 @@ impl PutQuery {
     }
 
     fn is_done(&self, socket: &KrpcSocket) -> bool {
-        !self
-            .inflight_requests
+        self.inflight_requests
             .iter()
-            .any(|&tid| socket.inflight(tid))
+            .copied()
+            .all(|transaction_id| !socket.inflight(transaction_id))
     }
 
     fn majority_nodes_rejected_put_mutable(&self) -> Option<ConcurrencyError> {
+        if !matches!(self.request, PutRequestSpecific::PutMutable(_)) {
+            return None;
+        }
+
+        let (count, error) = self.most_common_error()?;
         let half = ((self.inflight_requests.len() / 2) + 1) as u8;
+        if count < half {
+            return None;
+        }
 
-        if matches!(self.request, PutRequestSpecific::PutMutable(_)) {
-            return self.most_common_error().and_then(|(count, error)| {
-                if count >= half {
-                    if let PutError::Concurrency(err) = error {
-                        Some(err)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            });
-        };
-
-        None
+        match error {
+            PutError::Concurrency(error) => Some(error),
+            PutError::Query(_) => None,
+        }
     }
 
     fn most_common_error(&self) -> Option<(u8, PutError)> {
@@ -197,8 +191,8 @@ impl PutQuery {
     }
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
 /// PutQuery errors
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum PutError {
     /// Common PutQuery errors
     #[error(transparent)]
@@ -209,8 +203,8 @@ pub enum PutError {
     Concurrency(#[from] ConcurrencyError),
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
 /// Common PutQuery errors
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum PutQueryError {
     /// Failed to find any nodes close, usually means dht node failed to bootstrap,
     /// so the routing table is empty. Check the machine's access to UDP socket,
@@ -218,7 +212,7 @@ pub enum PutQueryError {
     #[error("Failed to find any nodes close to store value at")]
     NoClosestNodes,
 
-    /// Either Put Query faild to store at any nodes, and most nodes responded
+    /// Either Put Query failed to store at any nodes, and most nodes responded
     /// with a non `301` nor `302` errors.
     ///
     /// Either way; contains the most common error response.
@@ -230,8 +224,8 @@ pub enum PutQueryError {
     Timeout,
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
 /// PutQuery for [crate::MutableItem] errors
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum ConcurrencyError {
     /// Trying to PUT mutable items with the same `key`, and `salt` but different `seq`.
     ///
@@ -251,7 +245,7 @@ pub enum ConcurrencyError {
     #[error("MutableItem::seq is not the most recent, try reading most recent item before writing again.")]
     NotMostRecent,
 
-    /// The `CAS` condition does not match the `seq` of the most recent knonw signed item.
+    /// The `CAS` condition does not match the `seq` of the most recent known signed item.
     #[error("CAS check failed, try reading most recent item before writing again.")]
     CasFailed,
 }
@@ -288,7 +282,7 @@ mod tests {
         let socket = KrpcSocket::client().unwrap();
 
         assert!(matches!(
-            query.tick(&socket),
+            query.poll_completion(&socket),
             Err(PutError::Concurrency(ConcurrencyError::CasFailed))
         ));
     }

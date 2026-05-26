@@ -319,7 +319,7 @@ impl Rpc {
             .get(&target)
             .map(|cached| cached.closest_responding_nodes.clone())
             .filter(|closest_nodes| {
-                !closest_nodes.is_empty() && closest_nodes.iter().any(|n| n.valid_token())
+                !closest_nodes.is_empty() && closest_nodes.iter().any(Node::valid_token)
             })
         {
             query.start(&mut self.socket, &closest_nodes)?
@@ -958,7 +958,7 @@ impl Rpc {
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
-            match query.tick(&self.socket) {
+            match query.poll_completion(&self.socket) {
                 Ok(done) => {
                     if done {
                         done_put_queries.push((*id, None));
