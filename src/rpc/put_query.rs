@@ -17,7 +17,7 @@ use super::socket::KrpcSocket;
 pub struct PutQuery {
     pub target: Id,
     /// Nodes that confirmed success
-    stored_at: u8,
+    stored_at: u32,
     inflight_requests: Vec<u32>,
     pub request: PutRequestSpecific,
     errors: Vec<(u8, ErrorSpecific)>,
@@ -112,10 +112,10 @@ impl PutQuery {
         }
     }
 
-    /// Check if the query has completed.
-    pub fn poll_completion(&self, socket: &KrpcSocket) -> Result<bool, PutError> {
+    /// Check if the query has completed, returning the PUT outcome when complete.
+    pub fn poll_completion(&self, socket: &KrpcSocket) -> Result<Option<PutOutcome>, PutError> {
         if !self.started() {
-            return Ok(false);
+            return Ok(None);
         }
 
         if let Some(most_common_error) = self.majority_nodes_rejected_put_mutable() {
@@ -150,10 +150,13 @@ impl PutQuery {
 
             debug!(?target, stored_at = ?self.stored_at, "PutQuery Done successfully");
 
-            return Ok(true);
+            return Ok(Some(PutOutcome {
+                target: self.target,
+                stored_at: self.stored_at,
+            }));
         }
 
-        Ok(false)
+        Ok(None)
     }
 
     fn is_done(&self, socket: &KrpcSocket) -> bool {
@@ -189,6 +192,16 @@ impl PutQuery {
                 _ => None,
             })
     }
+}
+
+/// Result details for a successful PUT query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PutOutcome {
+    /// DHT target the request was published under.
+    pub target: Id,
+
+    /// Number of DHT nodes that acknowledged storing the item.
+    pub stored_at: u32,
 }
 
 /// PutQuery errors

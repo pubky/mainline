@@ -16,7 +16,7 @@ use crate::{
         PutRequestSpecific,
     },
     dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
-    rpc::{GetRequestSpecific, Info, PutError, PutQueryError},
+    rpc::{GetRequestSpecific, Info, PutError, PutOutcome, PutQueryError},
 };
 
 impl Dht {
@@ -135,6 +135,7 @@ impl AsyncDht {
             None,
         )
         .await
+        .map(|outcome| outcome.target)
         .map_err(|error| match error {
             PutError::Query(error) => error,
             PutError::Concurrency(_) => {
@@ -172,6 +173,7 @@ impl AsyncDht {
             None,
         )
         .await
+        .map(|outcome| outcome.target)
         .map_err(|error| match error {
             PutError::Query(error) => error,
             PutError::Concurrency(_) => {
@@ -291,10 +293,13 @@ impl AsyncDht {
     ) -> Result<Id, PutMutableError> {
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
 
-        self.put(request, None).await.map_err(|error| match error {
-            PutError::Query(err) => PutMutableError::Query(err),
-            PutError::Concurrency(err) => PutMutableError::Concurrency(err),
-        })
+        self.put(request, None)
+            .await
+            .map(|outcome| outcome.target)
+            .map_err(|error| match error {
+                PutError::Query(err) => PutMutableError::Query(err),
+                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+            })
     }
 
     // === Raw ===
@@ -328,11 +333,13 @@ impl AsyncDht {
     /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.
     ///
     /// Note: extra nodes need to have [Node::valid_token].
+    ///
+    /// Returns details about the successful PUT.
     pub async fn put(
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
-    ) -> Result<Id, PutError> {
+    ) -> Result<PutOutcome, PutError> {
         self.put_inner(request, extra_nodes)
             .recv_async()
             .await
@@ -345,8 +352,8 @@ impl AsyncDht {
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
-    ) -> flume::Receiver<Result<Id, PutError>> {
-        let (tx, rx) = flume::bounded::<Result<Id, PutError>>(1);
+    ) -> flume::Receiver<Result<PutOutcome, PutError>> {
+        let (tx, rx) = flume::bounded::<Result<PutOutcome, PutError>>(1);
         self.send(ActorMessage::Put(request, tx, extra_nodes));
 
         rx
@@ -439,6 +446,34 @@ mod test {
 
             let response = b.get_immutable(target).await;
             assert_eq!(response, Some(value.to_vec().into_boxed_slice()));
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn raw_put_immutable_returns_outcome() {
+        async fn test() {
+            let testnet = Testnet::builder(10).build().unwrap();
+
+            let dht = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let value = b"Hello World!";
+            let target: Id = hash_immutable(value).into();
+            let request = PutRequestSpecific::PutImmutable(PutImmutableRequestArguments {
+                target,
+                v: value.as_ref().into(),
+            });
+
+            let outcome = dht.put(request, None).await.unwrap();
+
+            assert_eq!(outcome.target, target);
+            assert!(outcome.stored_at > 0);
         }
 
         futures::executor::block_on(test());
@@ -548,7 +583,7 @@ mod test {
             dht.put_mutable(newer.clone(), None).await.unwrap();
 
             let older = MutableItem::new(signer, b"older", 1000, None);
-            let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+            let (sender, _) = flume::bounded::<Result<PutOutcome, PutError>>(1);
             let request =
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(older, None));
             dht.0
@@ -748,7 +783,7 @@ mod test {
             {
                 let item = MutableItem::new(signer.clone(), &value, 1000, None);
 
-                let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+                let (sender, _) = flume::bounded::<Result<PutOutcome, PutError>>(1);
                 let request =
                     PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
                 dht.0
