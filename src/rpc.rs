@@ -36,7 +36,7 @@ pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
 pub use info::Info;
 pub use iterative_query::GetRequestSpecific;
-pub use put_query::{ConcurrencyError, PutError, PutQueryError};
+pub use put_query::{ConcurrencyError, PutError, PutOutcome, PutQueryError};
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
 /// Default bootstrap nodes used to discover peers when no custom bootstrap list is configured.
@@ -954,17 +954,14 @@ impl Rpc {
     // === tick() helpers ===
 
     /// Advance all PUT queries, return done ones.
-    fn tick_put_queries(&mut self) -> Vec<(Id, Option<PutError>)> {
+    fn tick_put_queries(&mut self) -> Vec<(Id, Result<PutOutcome, PutError>)> {
         let mut done_put_queries = Vec::with_capacity(self.put_queries.len());
 
         for (id, query) in self.put_queries.iter_mut() {
             match query.poll_completion(&self.socket) {
-                Ok(done) => {
-                    if done {
-                        done_put_queries.push((*id, None));
-                    }
-                }
-                Err(error) => done_put_queries.push((*id, Some(error))),
+                Ok(Some(outcome)) => done_put_queries.push((*id, Ok(outcome))),
+                Ok(None) => (),
+                Err(error) => done_put_queries.push((*id, Err(error))),
             };
         }
 
@@ -1014,7 +1011,7 @@ impl Rpc {
     fn cleanup_done_queries(
         &mut self,
         done_get: &[(Id, Box<[Node]>)],
-        done_put: &mut Vec<(Id, Option<PutError>)>,
+        done_put: &mut Vec<(Id, Result<PutOutcome, PutError>)>,
     ) {
         // Has to happen _before_ `self.socket.recv_from()`.
         for (id, closest_nodes) in done_get {
@@ -1041,7 +1038,7 @@ impl Rpc {
             }
 
             if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
-                done_put.push((*id, Some(error)))
+                done_put.push((*id, Err(error)))
             }
         }
 
@@ -1093,8 +1090,8 @@ pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
     pub done_get_queries: Vec<(Id, Box<[Node]>)>,
     /// All the [Id]s of the done [Rpc::put] queries,
-    /// and optional [PutError] if the query failed.
-    pub done_put_queries: Vec<(Id, Option<PutError>)>,
+    /// and either the successful [PutOutcome] or a [PutError].
+    pub done_put_queries: Vec<(Id, Result<PutOutcome, PutError>)>,
     /// Received GET query response.
     pub new_query_response: Option<(Id, Response)>,
 }

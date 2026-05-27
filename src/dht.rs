@@ -18,8 +18,8 @@ use crate::{
         MutableItem, PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
     rpc::{
-        to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutQueryError,
-        Response, Rpc,
+        to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutOutcome,
+        PutQueryError, Response, Rpc,
     },
     Node, ServerSettings,
 };
@@ -457,6 +457,7 @@ impl Dht {
         self.put_inner(request, extra_nodes)
             .recv()
             .expect("Query was dropped before sending a response, please open an issue.")
+            .map(|outcome| outcome.target)
     }
 
     // === Private Methods ===
@@ -465,8 +466,8 @@ impl Dht {
         &self,
         request: PutRequestSpecific,
         extra_nodes: Option<Box<[Node]>>,
-    ) -> flume::Receiver<Result<Id, PutError>> {
-        let (tx, rx) = flume::bounded::<Result<Id, PutError>>(1);
+    ) -> flume::Receiver<Result<PutOutcome, PutError>> {
+        let (tx, rx) = flume::bounded::<Result<PutOutcome, PutError>>(1);
         self.send(ActorMessage::Put(request, tx, extra_nodes));
 
         rx
@@ -577,15 +578,9 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                     }
                 }
 
-                // Cleanup done PUT query and send a resulting error if any.
-                for (id, error) in report.done_put_queries {
+                // Cleanup done PUT query and send its final result.
+                for (id, result) in report.done_put_queries {
                     if let Some(senders) = put_senders.remove(&id) {
-                        let result = if let Some(error) = error {
-                            Err(error)
-                        } else {
-                            Ok(id)
-                        };
-
                         for sender in senders {
                             let _ = sender.send(result.clone());
                         }
@@ -621,7 +616,7 @@ pub(crate) enum ActorMessage {
     Info(Sender<Info>),
     Put(
         PutRequestSpecific,
-        Sender<Result<Id, PutError>>,
+        Sender<Result<PutOutcome, PutError>>,
         Option<Box<[Node]>>,
     ),
     Get(GetRequestSpecific, ResponseSender),
@@ -1069,7 +1064,7 @@ mod test {
         client.put_mutable(newer.clone(), None).unwrap();
 
         let older = MutableItem::new(signer, b"older", 1000, None);
-        let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+        let (sender, _) = flume::bounded::<Result<PutOutcome, PutError>>(1);
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(older, None));
         client
             .0
@@ -1242,7 +1237,7 @@ mod test {
         {
             let item = MutableItem::new(signer.clone(), &[], 1000, None);
 
-            let (sender, _) = flume::bounded::<Result<Id, PutError>>(1);
+            let (sender, _) = flume::bounded::<Result<PutOutcome, PutError>>(1);
             let request =
                 PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
             client
