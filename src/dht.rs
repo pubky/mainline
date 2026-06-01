@@ -1252,13 +1252,7 @@ mod test {
         {
             let item = MutableItem::new(signer, &[], 1001, None);
 
-            let most_recent = client.get_mutable_most_recent(item.key(), None);
-
-            if let Some(cas) = most_recent.map(|item| item.seq()) {
-                client.put_mutable(item, Some(cas)).unwrap();
-            } else {
-                client.put_mutable(item, None).unwrap();
-            }
+            client.put_mutable(item, Some(1000)).unwrap();
         }
     }
 

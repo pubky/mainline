@@ -798,13 +798,7 @@ mod test {
             {
                 let item = MutableItem::new(signer, &value, 1001, None);
 
-                let most_recent = dht.get_mutable_most_recent(item.key(), None).await;
-
-                if let Some(cas) = most_recent.map(|item| item.seq()) {
-                    dht.put_mutable(item, Some(cas)).await.unwrap();
-                } else {
-                    dht.put_mutable(item, None).await.unwrap();
-                }
+                dht.put_mutable(item, Some(1000)).await.unwrap();
             }
         }
 
