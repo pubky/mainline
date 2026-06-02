@@ -370,24 +370,9 @@ impl Rpc {
             GetRequestSpecific::GetValue(GetValueRequestArguments { target, .. }) => target,
         };
 
-        let response_from_inflight_put_mutable_request =
-            self.put_queries.get(&target).and_then(|existing| {
-                if let PutRequestSpecific::PutMutable(request) = &existing.request {
-                    Some(Response::Mutable(request.clone().into()))
-                } else {
-                    None
-                }
-            });
-
         // If query is still active, no need to create a new one.
         if let Some(query) = self.iterative_queries.get(&target) {
-            let mut responses = query.responses().to_vec();
-
-            if let Some(response) = response_from_inflight_put_mutable_request {
-                responses.push(response);
-            }
-
-            return Some(responses);
+            return Some(query.responses().to_vec());
         }
 
         let node_id = self.routing_table.id();
@@ -439,11 +424,6 @@ impl Rpc {
         query.start(&mut self.socket);
 
         self.iterative_queries.insert(target, query);
-
-        // If there is an inflight PutQuery for mutable item return its value
-        if let Some(response) = response_from_inflight_put_mutable_request {
-            return Some(vec![response]);
-        }
 
         None
     }
@@ -1118,4 +1098,47 @@ pub(crate) fn to_socket_address<T: ToSocketAddrs>(bootstrap: &[T]) -> Vec<Socket
         })
         .flatten()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use ed25519_dalek::SigningKey;
+
+    use super::*;
+
+    #[test]
+    fn get_does_not_echo_inflight_mutable_put() {
+        let mut rpc = Rpc::new(config::Config {
+            bootstrap: Some(vec![]),
+            bind_address: Some(Ipv4Addr::LOCALHOST),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let signer = SigningKey::from_bytes(&[
+            56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+            228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+        ]);
+
+        let item = MutableItem::new(signer, b"value", 1000, None);
+        let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, None));
+        let target = *request.target();
+
+        rpc.put(request, None).unwrap();
+
+        let responses = rpc
+            .get(
+                GetRequestSpecific::GetValue(GetValueRequestArguments {
+                    target,
+                    seq: None,
+                    salt: None,
+                }),
+                None,
+            )
+            .unwrap();
+
+        assert!(responses.is_empty());
+    }
 }
