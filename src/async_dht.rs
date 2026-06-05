@@ -252,6 +252,8 @@ impl AsyncDht {
 
     /// Put a mutable data to the DHT.
     ///
+    /// Returns details about the successful PUT, including how many DHT nodes acknowledged it.
+    ///
     /// # Lost Update Problem
     ///
     /// As mainline DHT is a distributed system, it is vulnerable to [Write–write conflict](https://en.wikipedia.org/wiki/Write-write_conflict).
@@ -296,7 +298,9 @@ impl AsyncDht {
     ///         (MutableItem::new(signing_key, b"first value", 1, salt), None)
     ///     };
     ///
-    ///     dht.put_mutable(item, cas).await.unwrap();
+    ///     let target = *item.target();
+    ///     let outcome = dht.put_mutable(item, cas).await.unwrap();
+    ///     assert_eq!(outcome.target, target);
     /// });
     /// ```
     ///
@@ -312,16 +316,13 @@ impl AsyncDht {
         &self,
         item: MutableItem,
         cas: Option<i64>,
-    ) -> Result<Id, PutMutableError> {
+    ) -> Result<PutOutcome, PutMutableError> {
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
 
-        self.put(request, None)
-            .await
-            .map(|outcome| outcome.target)
-            .map_err(|error| match error {
-                PutError::Query(err) => PutMutableError::Query(err),
-                PutError::Concurrency(err) => PutMutableError::Concurrency(err),
-            })
+        self.put(request, None).await.map_err(|error| match error {
+            PutError::Query(err) => PutMutableError::Query(err),
+            PutError::Concurrency(err) => PutMutableError::Concurrency(err),
+        })
     }
 
     // === Raw ===
@@ -562,8 +563,12 @@ mod test {
             let value = b"Hello World!";
 
             let item = MutableItem::new(signer.clone(), value, seq, None);
+            let target = *item.target();
 
-            a.put_mutable(item.clone(), None).await.unwrap();
+            let outcome = a.put_mutable(item.clone(), None).await.unwrap();
+
+            assert_eq!(outcome.target, target);
+            assert!(outcome.stored_at > 0);
 
             let response = b
                 .get_mutable(signer.verifying_key().as_bytes(), None, None)
