@@ -16,7 +16,7 @@ use crate::{
         PutRequestSpecific,
     },
     dht::{ActorMessage, Dht, PutMutableError, ResponseSender},
-    rpc::{GetRequestSpecific, Info, PutError, PutOutcome, PutQueryError},
+    rpc::{GetMutableOutcome, GetRequestSpecific, Info, PutError, PutOutcome, PutQueryError},
 };
 
 impl Dht {
@@ -202,19 +202,41 @@ impl AsyncDht {
         salt: Option<&[u8]>,
         more_recent_than: Option<i64>,
     ) -> GetStream<MutableItem> {
-        let salt = salt.map(|s| s.into());
+        self.get_mutable_detailed(public_key, salt, more_recent_than)
+            .items
+    }
+
+    /// Get mutable data and final aggregate diagnostics for the lookup.
+    ///
+    /// Valid mutable items are yielded on [GetMutableDetailed::items] as they arrive.
+    /// Final counters are available by awaiting [GetMutableOutcomeReceiver::recv].
+    pub fn get_mutable_detailed(
+        &self,
+        public_key: &[u8; 32],
+        salt: Option<&[u8]>,
+        more_recent_than: Option<i64>,
+    ) -> GetMutableDetailed {
+        let salt = salt.map(Into::into);
         let target = MutableItem::target_from_key(public_key, salt.as_deref());
-        let (tx, rx) = flume::unbounded::<MutableItem>();
+        let (values_tx, values_rx) = flume::unbounded::<MutableItem>();
+        let (outcome_tx, outcome_rx) = flume::bounded::<GetMutableOutcome>(1);
+
         self.send(ActorMessage::Get(
             GetRequestSpecific::GetValue(GetValueRequestArguments {
                 target,
                 seq: more_recent_than,
                 salt,
             }),
-            ResponseSender::Mutable(tx),
+            ResponseSender::MutableDetailed {
+                values: values_tx,
+                outcome: outcome_tx,
+            },
         ));
 
-        GetStream(rx.into_stream())
+        GetMutableDetailed {
+            items: GetStream(values_rx.into_stream()),
+            outcome: GetMutableOutcomeReceiver(outcome_rx),
+        }
     }
 
     /// Get the most recent [MutableItem] from the network.
@@ -376,6 +398,27 @@ impl<T> Stream for GetStream<T> {
     }
 }
 
+/// Mutable GET values stream plus a final diagnostic outcome.
+pub struct GetMutableDetailed {
+    /// Valid mutable items returned by queried DHT nodes.
+    pub items: GetStream<MutableItem>,
+    /// Final aggregate diagnostics for the lookup.
+    pub outcome: GetMutableOutcomeReceiver,
+}
+
+/// Async receiver for a detailed mutable GET outcome.
+pub struct GetMutableOutcomeReceiver(flume::Receiver<GetMutableOutcome>);
+
+impl GetMutableOutcomeReceiver {
+    /// Wait for the mutable GET query to finish and return its aggregate diagnostics.
+    pub async fn recv(self) -> GetMutableOutcome {
+        self.0
+            .recv_async()
+            .await
+            .expect("Query was dropped before sending a response, please open an issue.")
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::net::Ipv4Addr;
@@ -387,6 +430,19 @@ mod test {
     use crate::{dht::Testnet, rpc::ConcurrencyError};
 
     use super::*;
+
+    fn counted_mutable_responses(outcome: &GetMutableOutcome) -> u32 {
+        outcome.values
+            + outcome.no_values
+            + outcome.no_more_recent
+            + outcome.invalid_values
+            + outcome.invalid_responses
+            + outcome.krpc_errors
+    }
+
+    fn counted_valid_mutable_responses(outcome: &GetMutableOutcome) -> u32 {
+        outcome.values + outcome.no_values + outcome.no_more_recent
+    }
 
     #[test]
     fn announce_get_peer() {
@@ -516,6 +572,137 @@ mod test {
                 .expect("No mutable values");
 
             assert_eq!(&response, &item);
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn get_mutable_detailed_no_values() {
+        async fn test() {
+            let testnet = Testnet::builder(10).build().unwrap();
+
+            let dht = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let detailed = dht.get_mutable_detailed(signer.verifying_key().as_bytes(), None, None);
+            let GetMutableDetailed { items, outcome } = detailed;
+
+            let items = items.collect::<Vec<_>>().await;
+            let outcome = outcome.recv().await;
+
+            assert!(items.is_empty());
+            assert!(outcome.queried > 0);
+            assert_eq!(outcome.values, 0);
+            assert!(outcome.no_values > 0);
+            assert_eq!(
+                outcome.valid_responses(),
+                counted_valid_mutable_responses(&outcome)
+            );
+            assert_eq!(outcome.responded(), counted_mutable_responses(&outcome));
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn get_mutable_detailed_returns_values_outcome() {
+        async fn test() {
+            let testnet = Testnet::builder(10).build().unwrap();
+
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+            let b = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let item = MutableItem::new(signer.clone(), b"Hello World!", 1000, None);
+            a.put_mutable(item.clone(), None).await.unwrap();
+
+            let detailed = b.get_mutable_detailed(signer.verifying_key().as_bytes(), None, None);
+            let GetMutableDetailed { items, outcome } = detailed;
+
+            let items = items.collect::<Vec<_>>().await;
+            let outcome = outcome.recv().await;
+
+            assert!(items.iter().any(|response| response == &item));
+            assert!(outcome.queried > 0);
+            assert_eq!(outcome.values, items.len() as u32);
+            assert!(outcome.values > 0);
+            assert_eq!(
+                outcome.valid_responses(),
+                counted_valid_mutable_responses(&outcome)
+            );
+            assert_eq!(outcome.responded(), counted_mutable_responses(&outcome));
+        }
+
+        futures::executor::block_on(test());
+    }
+
+    #[test]
+    fn get_mutable_detailed_no_more_recent_value() {
+        async fn test() {
+            let testnet = Testnet::builder(10).build().unwrap();
+
+            let a = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+            let b = Dht::builder()
+                .bootstrap(&testnet.bootstrap)
+                .bind_address(Ipv4Addr::LOCALHOST)
+                .build()
+                .unwrap()
+                .as_async();
+
+            let signer = SigningKey::from_bytes(&[
+                56, 171, 62, 85, 105, 58, 155, 209, 189, 8, 59, 109, 137, 84, 84, 201, 221, 115, 7,
+                228, 127, 70, 4, 204, 182, 64, 77, 98, 92, 215, 27, 103,
+            ]);
+
+            let seq = 1000;
+            let item = MutableItem::new(signer.clone(), b"Hello World!", seq, None);
+            a.put_mutable(item, None).await.unwrap();
+
+            let detailed =
+                b.get_mutable_detailed(signer.verifying_key().as_bytes(), None, Some(seq));
+            let GetMutableDetailed { items, outcome } = detailed;
+
+            let items = items.collect::<Vec<_>>().await;
+            let outcome = outcome.recv().await;
+
+            assert!(items.is_empty());
+            assert!(outcome.queried > 0);
+            assert_eq!(outcome.values, 0);
+            assert!(outcome.no_more_recent > 0);
+            assert_eq!(
+                outcome.valid_responses(),
+                counted_valid_mutable_responses(&outcome)
+            );
+            assert_eq!(outcome.responded(), counted_mutable_responses(&outcome));
         }
 
         futures::executor::block_on(test());

@@ -25,7 +25,7 @@ pub use rpc::{
     config::Config,
     messages::{MessageType, PutRequestSpecific, RequestSpecific},
     server::{RequestFilter, ServerSettings, MAX_INFO_HASHES, MAX_PEERS, MAX_VALUES},
-    ClosestNodes, PutOutcome, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT,
+    ClosestNodes, GetMutableOutcome, PutOutcome, DEFAULT_BOOTSTRAP_NODES, DEFAULT_REQUEST_TIMEOUT,
 };
 
 pub use ed25519_dalek::SigningKey;
