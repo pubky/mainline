@@ -35,7 +35,7 @@ use socket::KrpcSocket;
 pub use crate::common::messages;
 pub use closest_nodes::ClosestNodes;
 pub use info::Info;
-pub use iterative_query::GetRequestSpecific;
+pub use iterative_query::{GetMutableOutcome, GetRequestSpecific};
 pub use put_query::{ConcurrencyError, PutError, PutOutcome, PutQueryError};
 pub use socket::DEFAULT_REQUEST_TIMEOUT;
 
@@ -51,7 +51,7 @@ const REFRESH_TABLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const PING_TABLE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// Result of `tick_get_queries`: completed queries and whether self-findnode finished.
-type GetQueriesResult = (Vec<(Id, Box<[Node]>)>, bool);
+type GetQueriesResult = (Vec<GetQueryOutcome>, bool);
 
 const MAX_CACHED_ITERATIVE_QUERIES: usize = 1000;
 
@@ -521,7 +521,7 @@ impl Rpc {
     /// returning a final value for the associated target.
     ///
     /// Behavior:
-    /// - Ignores responses from read-only nodes.
+    /// - Ignores responses marked read-only, recording them as invalid responses.
     /// - If it matches an in-flight PutQuery, treats `Ping` as a storage ACK (success/error)
     ///   and stops further handling.
     /// - If it matches an in-flight iterative query:
@@ -544,6 +544,14 @@ impl Rpc {
     fn handle_response(&mut self, from: SocketAddrV4, message: Message) -> Option<(Id, Response)> {
         // If someone claims to be readonly, then let's not store anything even if they respond.
         if message.read_only {
+            if let Some(query) = self
+                .iterative_queries
+                .values_mut()
+                .find(|query| query.is_inflight_query_request(message.transaction_id))
+            {
+                query.record_invalid_response();
+            }
+
             return None;
         };
 
@@ -573,8 +581,15 @@ impl Rpc {
         if let Some(query) = self
             .iterative_queries
             .values_mut()
-            .find(|query| query.inflight(message.transaction_id))
+            .find(|query| query.is_inflight(message.transaction_id))
         {
+            let is_query_response = query.is_inflight_query_request(message.transaction_id);
+            let is_mutable_get_query_response = is_query_response
+                && matches!(
+                    &query.request.request_type,
+                    RequestTypeSpecific::GetValue(_)
+                );
+
             // KrpcSocket would not give us a response from the wrong address for the transaction_id
             should_add_node = true;
 
@@ -599,6 +614,10 @@ impl Rpc {
                     values,
                     ..
                 })) => {
+                    if is_mutable_get_query_response {
+                        query.record_invalid_response();
+                    }
+
                     let response = Response::Peers(values);
                     query.response(from, response.clone());
 
@@ -609,6 +628,10 @@ impl Rpc {
                         v, responder_id, ..
                     },
                 )) => {
+                    if is_mutable_get_query_response {
+                        query.record_invalid_response();
+                    }
+
                     if validate_immutable(&v, query.target()) {
                         let response = Response::Immutable(v);
                         query.response(from, response.clone());
@@ -644,12 +667,20 @@ impl Rpc {
 
                     match MutableItem::from_dht_message(query.target(), &k, v, seq, &sig, salt) {
                         Ok(item) => {
+                            if is_mutable_get_query_response {
+                                query.record_mutable_value();
+                            }
+
                             let response = Response::Mutable(item);
                             query.response(from, response.clone());
 
                             return Some((target, response));
                         }
                         Err(error) => {
+                            if is_mutable_get_query_response {
+                                query.record_invalid_mutable_value();
+                            }
+
                             debug!(
                                 ?error,
                                 ?from,
@@ -665,6 +696,10 @@ impl Rpc {
                         seq, responder_id, ..
                     },
                 )) => {
+                    if is_mutable_get_query_response {
+                        query.record_no_more_recent();
+                    }
+
                     debug!(
                         target= ?query.target(),
                         salt= ?match query.request.request_type.clone() {
@@ -682,6 +717,10 @@ impl Rpc {
                     responder_id,
                     ..
                 })) => {
+                    if is_mutable_get_query_response {
+                        query.record_no_values();
+                    }
+
                     debug!(
                         target= ?query.target(),
                         salt= ?match query.request.request_type.clone() {
@@ -695,6 +734,10 @@ impl Rpc {
                     );
                 }
                 MessageType::Error(error) => {
+                    if is_mutable_get_query_response {
+                        query.record_krpc_error();
+                    }
+
                     debug!(?error, ?from_version, "Get query got error response");
                 }
                 // Ping response is already handled in add_node()
@@ -702,7 +745,11 @@ impl Rpc {
                 // Requests are handled elsewhere
                 MessageType::Response(ResponseSpecific::Ping(_))
                 | MessageType::Response(ResponseSpecific::FindNode(_))
-                | MessageType::Request(_) => {}
+                | MessageType::Request(_) => {
+                    if is_mutable_get_query_response {
+                        query.record_invalid_response();
+                    }
+                }
             };
         };
 
@@ -981,7 +1028,15 @@ impl Rpc {
                     .into_boxed_slice()
             };
 
-            done_get_queries.push((*id, closest_nodes));
+            done_get_queries.push(GetQueryOutcome {
+                id: *id,
+                closest_nodes,
+                mutable_outcome: matches!(
+                    query.request.request_type,
+                    RequestTypeSpecific::GetValue(_)
+                )
+                .then(|| query.mutable_outcome()),
+            });
         }
 
         (done_get_queries, finished_self_findnode)
@@ -990,25 +1045,25 @@ impl Rpc {
     /// Remove completed GET and PUT queries from internal state.
     fn cleanup_done_queries(
         &mut self,
-        done_get: &[(Id, Box<[Node]>)],
+        done_get: &[GetQueryOutcome],
         done_put: &mut Vec<(Id, Result<PutOutcome, PutError>)>,
     ) {
         // Has to happen _before_ `self.socket.recv_from()`.
-        for (id, closest_nodes) in done_get {
-            let query = match self.iterative_queries.remove(id) {
+        for done in done_get {
+            let query = match self.iterative_queries.remove(&done.id) {
                 Some(query) => query,
                 None => continue,
             };
 
             self.update_address_votes_from_iterative_query(&query);
-            self.cache_iterative_query(&query, closest_nodes);
+            self.cache_iterative_query(&query, &done.closest_nodes);
 
             // Only for get queries, not find node.
             if matches!(query.request.request_type, RequestTypeSpecific::FindNode(_)) {
                 continue;
             }
 
-            let put_query = match self.put_queries.get_mut(id) {
+            let put_query = match self.put_queries.get_mut(&done.id) {
                 Some(put_query) => put_query,
                 None => continue,
             };
@@ -1017,8 +1072,8 @@ impl Rpc {
                 continue;
             }
 
-            if let Err(error) = put_query.start(&mut self.socket, closest_nodes) {
-                done_put.push((*id, Err(error)))
+            if let Err(error) = put_query.start(&mut self.socket, &done.closest_nodes) {
+                done_put.push((done.id, Err(error)))
             }
         }
 
@@ -1066,9 +1121,20 @@ struct CachedIterativeQuery {
 /// done PUT, GET, and FIND_NODE queries, as well as any
 /// incoming value response for any GET query.
 #[derive(Debug, Clone)]
+/// Completed GET/FIND_NODE query details returned from [Rpc::tick].
+pub struct GetQueryOutcome {
+    /// Query target id.
+    pub id: Id,
+    /// Closest responding nodes discovered by the query.
+    pub closest_nodes: Box<[Node]>,
+    /// Mutable GET diagnostics, present for GET value queries.
+    pub mutable_outcome: Option<GetMutableOutcome>,
+}
+
+#[derive(Debug, Clone)]
 pub struct RpcTickReport {
     /// All the [Id]s of the done [Rpc::get] queries.
-    pub done_get_queries: Vec<(Id, Box<[Node]>)>,
+    pub done_get_queries: Vec<GetQueryOutcome>,
     /// All the [Id]s of the done [Rpc::put] queries,
     /// and either the successful [PutOutcome] or a [PutError].
     pub done_put_queries: Vec<(Id, Result<PutOutcome, PutError>)>,
@@ -1102,8 +1168,9 @@ pub(crate) fn to_socket_address<T: ToSocketAddrs>(bootstrap: &[T]) -> Vec<Socket
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, SocketAddrV4};
 
+    use crate::common::FindNodeResponseArguments;
     use ed25519_dalek::SigningKey;
 
     use super::*;
@@ -1140,5 +1207,55 @@ mod tests {
             .unwrap();
 
         assert!(responses.is_empty());
+    }
+
+    #[test]
+    fn mutable_get_counts_wrong_primary_response_as_invalid() {
+        let mut rpc = Rpc::new(config::Config {
+            bootstrap: Some(vec![]),
+            bind_address: Some(Ipv4Addr::LOCALHOST),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let target = Id::random();
+        let responder = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 42_000);
+
+        rpc.get(
+            GetRequestSpecific::GetValue(GetValueRequestArguments {
+                target,
+                seq: None,
+                salt: None,
+            }),
+            Some(&[responder]),
+        );
+
+        let response = rpc.handle_response(
+            responder,
+            Message {
+                transaction_id: 0,
+                message_type: MessageType::Response(ResponseSpecific::FindNode(
+                    FindNodeResponseArguments {
+                        responder_id: Id::random(),
+                        nodes: Vec::new().into_boxed_slice(),
+                    },
+                )),
+                version: None,
+                read_only: false,
+                requester_ip: None,
+            },
+        );
+
+        let outcome = rpc
+            .iterative_queries
+            .get(&target)
+            .expect("mutable GET query should still be active")
+            .mutable_outcome();
+
+        assert!(response.is_none());
+        assert_eq!(outcome.valid_responses(), 0);
+        assert_eq!(outcome.invalid_responses, 1);
+        assert_eq!(outcome.responded(), 1);
+        assert_eq!(outcome.timed_out(), 0);
     }
 }

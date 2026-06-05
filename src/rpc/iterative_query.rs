@@ -13,6 +13,71 @@ use crate::{
     rpc::Response,
 };
 
+/// Aggregate diagnostics for a mutable GET query.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct GetMutableOutcome {
+    /// Number of unique DHT nodes queried.
+    pub queried: u32,
+    /// Number of valid mutable values returned.
+    pub values: u32,
+    /// Number of `NoValues` responses returned.
+    pub no_values: u32,
+    /// Number of `NoMoreRecentValue` responses returned.
+    pub no_more_recent: u32,
+    /// Number of mutable value responses that failed validation.
+    pub invalid_values: u32,
+    /// Number of invalid response shapes returned.
+    pub invalid_responses: u32,
+    /// Number of KRPC error responses returned.
+    pub krpc_errors: u32,
+}
+
+impl GetMutableOutcome {
+    /// Return the number of nodes that returned a GET response before timing out.
+    pub fn responded(&self) -> u32 {
+        self.valid_responses() + self.invalid_values + self.invalid_responses + self.krpc_errors
+    }
+
+    /// Return the number of nodes that returned a valid GET response.
+    pub fn valid_responses(&self) -> u32 {
+        self.values + self.no_values + self.no_more_recent
+    }
+
+    /// Return the number of queried nodes that did not return a GET response before timeout.
+    pub fn timed_out(&self) -> u32 {
+        self.queried.saturating_sub(self.responded())
+    }
+
+    fn record_value(&mut self) {
+        self.values += 1;
+    }
+
+    fn record_no_values(&mut self) {
+        self.no_values += 1;
+    }
+
+    fn record_no_more_recent(&mut self) {
+        self.no_more_recent += 1;
+    }
+
+    fn record_invalid_value(&mut self) {
+        self.invalid_values += 1;
+    }
+
+    fn record_invalid_response(&mut self) {
+        self.invalid_responses += 1;
+    }
+
+    fn record_krpc_error(&mut self) {
+        self.krpc_errors += 1;
+    }
+
+    fn finish(mut self, queried: u32) -> Self {
+        self.queried = queried;
+        self
+    }
+}
+
 /// An iterative process of concurrently sending a request to the closest known nodes to
 /// the target, updating the routing table with closer nodes discovered in the responses, and
 /// repeating this process until no closer nodes (that aren't already queried) are found.
@@ -22,8 +87,10 @@ pub(crate) struct IterativeQuery {
     closest: ClosestNodes,
     responders: ClosestNodes,
     inflight_requests: Vec<u32>,
+    query_requests: Vec<u32>,
     visited: HashSet<SocketAddrV4>,
     responses: Vec<Response>,
+    mutable_outcome: GetMutableOutcome,
     public_address_votes: HashMap<SocketAddrV4, u16>,
 }
 
@@ -64,9 +131,11 @@ impl IterativeQuery {
             responders: ClosestNodes::new(target),
 
             inflight_requests: Vec::new(),
+            query_requests: Vec::new(),
             visited: HashSet::new(),
 
             responses: Vec::new(),
+            mutable_outcome: GetMutableOutcome::default(),
 
             public_address_votes: HashMap::new(),
         }
@@ -90,6 +159,12 @@ impl IterativeQuery {
 
     pub fn responses(&self) -> &[Response] {
         &self.responses
+    }
+
+    pub fn mutable_outcome(&self) -> GetMutableOutcome {
+        self.mutable_outcome
+            .clone()
+            .finish(self.visited.len() as u32)
     }
 
     pub fn best_address(&self) -> Option<SocketAddrV4> {
@@ -132,6 +207,7 @@ impl IterativeQuery {
     pub fn visit(&mut self, socket: &mut KrpcSocket, address: SocketAddrV4) {
         let tid = socket.request(address, self.request.clone());
         self.inflight_requests.push(tid);
+        self.query_requests.push(tid);
 
         let tid = socket.request(
             address,
@@ -146,8 +222,13 @@ impl IterativeQuery {
     }
 
     /// Return true if a response (by transaction_id) is expected by this query.
-    pub fn inflight(&self, tid: u32) -> bool {
+    pub fn is_inflight(&self, tid: u32) -> bool {
         self.inflight_requests.contains(&tid)
+    }
+
+    /// Return true if the transaction belongs to the primary query request, not the liveness ping.
+    pub fn is_inflight_query_request(&self, tid: u32) -> bool {
+        self.query_requests.contains(&tid)
     }
 
     /// Add a node that responded with a token as a probable storage node.
@@ -162,6 +243,30 @@ impl IterativeQuery {
         debug!(?target, ?response, ?from, "Query got response");
 
         self.responses.push(response.to_owned());
+    }
+
+    pub fn record_mutable_value(&mut self) {
+        self.mutable_outcome.record_value();
+    }
+
+    pub fn record_no_values(&mut self) {
+        self.mutable_outcome.record_no_values();
+    }
+
+    pub fn record_no_more_recent(&mut self) {
+        self.mutable_outcome.record_no_more_recent();
+    }
+
+    pub fn record_invalid_response(&mut self) {
+        self.mutable_outcome.record_invalid_response();
+    }
+
+    pub fn record_krpc_error(&mut self) {
+        self.mutable_outcome.record_krpc_error();
+    }
+
+    pub fn record_invalid_mutable_value(&mut self) {
+        self.mutable_outcome.record_invalid_value();
     }
 
     /// Query closest nodes for this query's target and message.

@@ -18,8 +18,8 @@ use crate::{
         MutableItem, PutImmutableRequestArguments, PutMutableRequestArguments, PutRequestSpecific,
     },
     rpc::{
-        to_socket_address, ConcurrencyError, GetRequestSpecific, Info, PutError, PutOutcome,
-        PutQueryError, Response, Rpc,
+        to_socket_address, ConcurrencyError, GetMutableOutcome, GetRequestSpecific, Info, PutError,
+        PutOutcome, PutQueryError, Response, Rpc,
     },
     Node, ServerSettings,
 };
@@ -567,12 +567,20 @@ fn run(config: Config, receiver: Receiver<ActorMessage>) {
                 }
 
                 // Cleanup done GET queries
-                for (id, closest_nodes) in report.done_get_queries {
-                    if let Some(senders) = get_senders.remove(&id) {
+                for done in report.done_get_queries {
+                    if let Some(senders) = get_senders.remove(&done.id) {
                         for sender in senders {
-                            // return closest_nodes to whoever was asking
-                            if let ResponseSender::ClosestNodes(sender) = sender {
-                                let _ = sender.send(closest_nodes.clone());
+                            match sender {
+                                ResponseSender::ClosestNodes(sender) => {
+                                    let _ = sender.send(done.closest_nodes.clone());
+                                }
+                                ResponseSender::MutableDetailed { outcome, .. } => {
+                                    let _ = outcome
+                                        .send(done.mutable_outcome.clone().unwrap_or_default());
+                                }
+                                ResponseSender::Peers(_)
+                                | ResponseSender::Mutable(_)
+                                | ResponseSender::Immutable(_) => {}
                             }
                         }
                     }
@@ -604,6 +612,9 @@ fn send(sender: &ResponseSender, response: Response) {
         (ResponseSender::Mutable(s), Response::Mutable(r)) => {
             let _ = s.send(r);
         }
+        (ResponseSender::MutableDetailed { values, .. }, Response::Mutable(r)) => {
+            let _ = values.send(r);
+        }
         (ResponseSender::Immutable(s), Response::Immutable(r)) => {
             let _ = s.send(r);
         }
@@ -630,6 +641,10 @@ pub enum ResponseSender {
     ClosestNodes(Sender<Box<[Node]>>),
     Peers(Sender<Vec<SocketAddrV4>>),
     Mutable(Sender<MutableItem>),
+    MutableDetailed {
+        values: Sender<MutableItem>,
+        outcome: Sender<GetMutableOutcome>,
+    },
     Immutable(Sender<Box<[u8]>>),
 }
 
