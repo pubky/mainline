@@ -2,6 +2,23 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [7.0.0](https://github.com/pubky/mainline/compare/v6.2.0...v7.0.0) - 2026-06-08
+
+### Added
+
+- Add `PutOutcome` to report the target and number of DHT nodes that acknowledged a successful PUT.
+- Add `AsyncDht::get_mutable_detailed()` with `GetMutableOutcome` diagnostics for queried nodes, valid values, empty responses, invalid responses, KRPC errors, and timeouts.
+
+### Changed
+
+- **BREAKING**: `AsyncDht::put()` now returns `PutOutcome` instead of a raw `Id`.
+- **BREAKING**: `AsyncDht::put_mutable()` now returns `PutOutcome` instead of a raw `Id`.
+- Mutable GET queries no longer echo locally pending mutable PUT values; GET results now only come from DHT node responses.
+
+### Deprecated
+
+- Deprecate blocking `Dht` operation methods and `GetIterator`; use the async API via `Dht::as_async()` instead.
+
 ## [6.2.0](https://github.com/pubky/mainline/compare/v6.1.2...v6.2.0) - 2026-05-22
 
 ### Added
