@@ -173,6 +173,7 @@ impl Dht {
     // === Getters ===
 
     /// Information and statistics about this [Dht] node.
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn info(&self) -> Info {
         let (tx, rx) = flume::bounded::<Info>(1);
         self.send(ActorMessage::Info(tx));
@@ -181,6 +182,7 @@ impl Dht {
     }
 
     /// Turn this node's routing table to a list of bootstrapping nodes.   
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn to_bootstrap(&self) -> Vec<String> {
         let (tx, rx) = flume::bounded::<Vec<String>>(1);
         self.send(ActorMessage::ToBootstrap(tx));
@@ -193,6 +195,8 @@ impl Dht {
     /// Block until the bootstrapping query is done.
     ///
     /// Returns true if the bootstrapping was successful.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn bootstrapped(&self) -> bool {
         let info = self.info();
         let nodes = self.find_node(*info.id());
@@ -215,6 +219,7 @@ impl Dht {
     /// If you are trying to find the closest nodes to a target with intent to [Self::put],
     /// a request directly to these nodes (using `extra_nodes` parameter), then you should
     /// use [Self::get_closest_nodes] instead.
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn find_node(&self, target: Id) -> Box<[Node]> {
         let (tx, rx) = flume::bounded::<Box<[Node]>>(1);
         self.send(ActorMessage::Get(
@@ -237,6 +242,8 @@ impl Dht {
     /// for Bittorrent is that any peer will introduce you to more peers through "peer exchange"
     /// so if you are implementing something different from Bittorrent, you might want
     /// to implement your own logic for gossipping more peers after you discover the first ones.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn get_peers(&self, info_hash: Id) -> GetIterator<Vec<SocketAddrV4>> {
         let (tx, rx) = flume::unbounded::<Vec<SocketAddrV4>>();
         self.send(ActorMessage::Get(
@@ -252,6 +259,8 @@ impl Dht {
     /// The peer will be announced on this process IP.
     /// If explicit port is passed, it will be used, otherwise the port will be implicitly
     /// assumed by remote nodes to be the same ase port they received the request from.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn announce_peer(&self, info_hash: Id, port: Option<u16>) -> Result<Id, PutQueryError> {
         let (port, implied_port) = match port {
             Some(port) => (port, None),
@@ -277,6 +286,7 @@ impl Dht {
     // === Immutable data ===
 
     /// Get an Immutable data by its sha1 hash.
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn get_immutable(&self, target: Id) -> Option<Box<[u8]>> {
         let (tx, rx) = flume::unbounded::<Box<[u8]>>();
         self.send(ActorMessage::Get(
@@ -292,6 +302,8 @@ impl Dht {
     }
 
     /// Put an immutable data to the DHT.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn put_immutable(&self, value: &[u8]) -> Result<Id, PutQueryError> {
         let target: Id = hash_immutable(value).into();
 
@@ -324,6 +336,8 @@ impl Dht {
     /// more recent than earlier ones.
     ///
     /// Consider using [Self::get_mutable_most_recent] if that is what you need.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn get_mutable(
         &self,
         public_key: &[u8; 32],
@@ -346,6 +360,8 @@ impl Dht {
     }
 
     /// Get the most recent [MutableItem] from the network.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn get_mutable_most_recent(
         &self,
         public_key: &[u8; 32],
@@ -410,6 +426,8 @@ impl Dht {
     ///
     /// If you are lucky to get one of these errors (which is not guaranteed), then you should
     /// read the most recent item again, and repeat the steps in the previous example.
+    #[allow(deprecated)]
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn put_mutable(&self, item: MutableItem, cas: Option<i64>) -> Result<Id, PutMutableError> {
         let request = PutRequestSpecific::PutMutable(PutMutableRequestArguments::from(item, cas));
 
@@ -425,6 +443,7 @@ impl Dht {
     ///
     /// Useful to [Self::put] a request to nodes further from the 20 closest nodes to the
     /// [PutRequestSpecific::target]. Which itself is useful to circumvent [extreme vertical sybil attacks](https://github.com/pubky/mainline/blob/main/docs/censorship-resistance.md#extreme-vertical-sybil-attacks).
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn get_closest_nodes(&self, target: Id) -> Box<[Node]> {
         let (tx, rx) = flume::unbounded::<Box<[Node]>>();
         self.send(ActorMessage::Get(
@@ -449,6 +468,7 @@ impl Dht {
     /// [Self::get_closest_nodes] with the target that you want to find the closest nodes to.
     ///
     /// Note: extra nodes need to have [Node::valid_token].
+    #[deprecated(note = "use the async API via Dht::as_async() instead")]
     pub fn put(
         &self,
         request: PutRequestSpecific,
@@ -480,8 +500,10 @@ impl Dht {
     }
 }
 
+#[deprecated(note = "use the async stream returned by AsyncDht instead")]
 pub struct GetIterator<T>(flume::IntoIter<T>);
 
+#[allow(deprecated)]
 impl<T> Iterator for GetIterator<T> {
     type Item = T;
 
@@ -813,6 +835,7 @@ impl Testnet {
         Testnet::build_unseeded(count, Ipv4Addr::UNSPECIFIED)
     }
 
+    #[allow(deprecated)]
     fn build_seeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
         let mut nodes = Vec::with_capacity(count);
 
@@ -849,6 +872,7 @@ impl Testnet {
         Ok(Self { bootstrap, nodes })
     }
 
+    #[allow(deprecated)]
     fn build_unseeded(count: usize, bind_address: Ipv4Addr) -> Result<Testnet, std::io::Error> {
         let mut nodes = Vec::with_capacity(count);
         let mut bootstrap = Vec::new();
@@ -906,6 +930,8 @@ pub enum PutMutableError {
 
 #[cfg(test)]
 mod test {
+    #![allow(deprecated)]
+
     use std::net::Ipv4Addr;
     use std::str::FromStr;
 
