@@ -270,7 +270,7 @@ impl KrpcSocket {
             transaction_id: request_tid,
             message_type: message,
             version: Some(VERSION),
-            read_only: !self.server_mode,
+            read_only: false,
             // BEP_0042 Only relevant in responses.
             requester_ip: Some(requester_ip),
         }
@@ -316,6 +316,28 @@ mod test {
 
         assert_eq!(socket.tid(), 4294967295);
         assert_eq!(socket.tid(), 0);
+    }
+
+    #[test]
+    fn read_only_flag_is_only_set_on_outgoing_requests() {
+        let mut client = KrpcSocket::client().unwrap();
+
+        let request = client.request_message(RequestSpecific {
+            requester_id: Id::random(),
+            request_type: RequestTypeSpecific::Ping,
+        });
+
+        assert!(request.read_only);
+
+        let response = client.response_message(
+            MessageType::Response(ResponseSpecific::Ping(PingResponseArguments {
+                responder_id: Id::random(),
+            })),
+            "127.0.0.1:6881".parse().unwrap(),
+            request.transaction_id,
+        );
+
+        assert!(!response.read_only);
     }
 
     #[test]
@@ -371,7 +393,7 @@ mod test {
                 if let Some((message, from)) = server.recv_from() {
                     assert_eq!(from.port(), client_address.port());
                     assert_eq!(message.transaction_id, 8);
-                    assert!(message.read_only, "Read-only should be true");
+                    assert!(!message.read_only, "Read-only should be false");
                     assert_eq!(message.version, Some(VERSION), "Version should be 'RS'");
                     assert_eq!(
                         message.message_type,
