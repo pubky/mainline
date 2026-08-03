@@ -93,6 +93,10 @@ impl MutableItem {
         key.verify(&encode_signable(seq, &v, salt.as_deref()), &signature)
             .map_err(|_| MutableError::InvalidMutableSignature)?;
 
+        if Self::target_from_key(&key.to_bytes(), salt.as_deref()) != target {
+            return Err(MutableError::InvalidMutableTarget);
+        }
+
         Ok(Self {
             target,
             key: key.to_bytes(),
@@ -175,6 +179,10 @@ pub enum MutableError {
     #[error("Invalid mutable item public key")]
     /// Invalid mutable item public key
     InvalidMutablePublicKey,
+
+    #[error("Mutable item target does not match its public key and salt")]
+    /// Mutable item target does not match its public key and salt
+    InvalidMutableTarget,
 }
 
 impl PutMutableRequestArguments {
@@ -190,19 +198,6 @@ impl PutMutableRequestArguments {
             sig: item.signature,
             salt: item.salt,
             cas,
-        }
-    }
-}
-
-impl From<PutMutableRequestArguments> for MutableItem {
-    fn from(request: PutMutableRequestArguments) -> Self {
-        Self {
-            target: request.target,
-            value: request.v,
-            key: request.k,
-            seq: request.seq,
-            signature: request.sig,
-            salt: request.salt,
         }
     }
 }
@@ -268,5 +263,24 @@ mod tests {
             most_recent_mutable_item(Some(current.clone()), current.clone()),
             Some(current)
         );
+    }
+
+    #[test]
+    fn from_dht_message_rejects_a_signed_item_for_a_different_target() {
+        let signer = SigningKey::from_bytes(&[42; 32]);
+        let item = MutableItem::new(signer, b"value", 1, Some(b"salt"));
+        let mut wrong_target = *item.target().as_bytes();
+        wrong_target[0] ^= 1;
+
+        let result = MutableItem::from_dht_message(
+            wrong_target.into(),
+            item.key(),
+            item.value().into(),
+            item.seq(),
+            item.signature(),
+            item.salt().map(Into::into),
+        );
+
+        assert!(matches!(result, Err(MutableError::InvalidMutableTarget)));
     }
 }
