@@ -2,6 +2,21 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [8.0.0](https://github.com/pubky/mainline/compare/v7.0.0...v8.0.0) - 2026-08-04
+
+### Fixed
+
+- Reject malformed mutable PUT requests that omit the required sequence number
+  or signature, and reject immutable PUT requests that include mutable-only
+  fields.
+- Validate that a mutable item's target matches the SHA-1 hash derived from its
+  public key and salt.
+
+### Changed
+
+- **BREAKING**: Add `MutableError::InvalidMutableTarget`; `MutableItem` no
+  longer implements `From<PutMutableRequestArguments>`.
+
 ## [7.0.0](https://github.com/pubky/mainline/compare/v6.2.0...v7.0.0) - 2026-06-08
 
 ### Added
