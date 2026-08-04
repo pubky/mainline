@@ -296,7 +296,7 @@ impl Rpc {
                     // Noop, the inflight query is sufficient.
                     return Ok(());
                 } else if *seq < inflight_request.seq {
-                    return Err(ConcurrencyError::NotMostRecent)?;
+                    return Err(PutError::Concurrency(ConcurrencyError::NotMostRecent));
                 } else if let Some(cas) = cas {
                     if *cas == inflight_request.seq {
                         // The user is aware of the inflight query and whiches to overrides it.
@@ -304,10 +304,10 @@ impl Rpc {
                         // Remove the inflight request, and create a new one.
                         self.put_queries.remove(&target);
                     } else {
-                        return Err(ConcurrencyError::CasFailed)?;
+                        return Err(PutError::Concurrency(ConcurrencyError::CasFailed));
                     }
                 } else {
-                    return Err(ConcurrencyError::ConflictRisk)?;
+                    return Err(PutError::Concurrency(ConcurrencyError::ConflictRisk));
                 };
             };
         }
