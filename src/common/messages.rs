@@ -469,18 +469,26 @@ impl Message {
                                                 target: Id::from_bytes(arguments.target)?,
                                                 v: arguments.v,
                                                 k,
-                                                seq: arguments.seq.expect(
-                                                    "Put mutable message to have sequence number",
-                                                ),
-                                                sig: arguments.sig.expect(
-                                                    "Put mutable message to have a signature",
-                                                ),
+                                                seq: arguments.seq.ok_or(
+                                                    DecodeMessageError::MissingMutableSequence,
+                                                )?,
+                                                sig: arguments.sig.ok_or(
+                                                    DecodeMessageError::MissingMutableSignature,
+                                                )?,
                                                 salt: arguments.salt,
                                                 cas: arguments.cas,
                                             },
                                         ),
                                     }),
                                 }
+                            } else if arguments.seq.is_some()
+                                || arguments.sig.is_some()
+                                || arguments.salt.is_some()
+                                || arguments.cas.is_some()
+                            {
+                                return Err(
+                                    DecodeMessageError::UnexpectedMutableFieldsInImmutablePut,
+                                );
                             } else {
                                 RequestSpecific {
                                     requester_id: Id::from_bytes(arguments.id)?,
@@ -762,6 +770,15 @@ pub enum DecodeMessageError {
 
     #[error("Wrong number of bytes for sockaddr")]
     InvalidSocketAddrEncodingLength,
+
+    #[error("mutable put message is missing a sequence number")]
+    MissingMutableSequence,
+
+    #[error("mutable put message is missing a signature")]
+    MissingMutableSignature,
+
+    #[error("immutable put message contains mutable-only fields")]
+    UnexpectedMutableFieldsInImmutablePut,
 
     #[error("Failed to parse packet bytes: {0}")]
     BencodeError(#[from] serde_bencode::Error),
@@ -1103,5 +1120,136 @@ mod tests {
         let parsed_serde_msg = internal::DHTMessage::from_bytes(&bytes).unwrap();
         let parsed_msg = Message::from_serde_message(parsed_serde_msg).unwrap();
         assert_eq!(parsed_msg, original_msg);
+    }
+
+    #[test]
+    fn test_put_mutable_request_missing_sequence_is_rejected() {
+        let message = internal::DHTMessage {
+            ip: None,
+            read_only: None,
+            transaction_id: [1, 2, 3, 4],
+            version: None,
+            variant: internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+                arguments: internal::DHTPutValueRequestArguments {
+                    id: Id::random().into(),
+                    target: Id::random().into(),
+                    token: vec![0].into(),
+                    v: vec![0].into(),
+                    k: Some([0; 32]),
+                    sig: Some([0; 64]),
+                    seq: None,
+                    cas: None,
+                    salt: None,
+                },
+            }),
+        };
+
+        assert!(matches!(
+            Message::from_bytes(&message.to_bytes().unwrap()),
+            Err(DecodeMessageError::MissingMutableSequence)
+        ));
+    }
+
+    #[test]
+    fn test_put_mutable_request_missing_signature_is_rejected() {
+        let message = internal::DHTMessage {
+            ip: None,
+            read_only: None,
+            transaction_id: [1, 2, 3, 4],
+            version: None,
+            variant: internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+                arguments: internal::DHTPutValueRequestArguments {
+                    id: Id::random().into(),
+                    target: Id::random().into(),
+                    token: vec![0].into(),
+                    v: vec![0].into(),
+                    k: Some([0; 32]),
+                    sig: None,
+                    seq: Some(0),
+                    cas: None,
+                    salt: None,
+                },
+            }),
+        };
+
+        assert!(matches!(
+            Message::from_bytes(&message.to_bytes().unwrap()),
+            Err(DecodeMessageError::MissingMutableSignature)
+        ));
+    }
+
+    #[test]
+    fn test_put_immutable_request_with_mutable_fields_is_rejected() {
+        let immutable_put = || internal::DHTMessage {
+            ip: None,
+            read_only: None,
+            transaction_id: [1, 2, 3, 4],
+            version: None,
+            variant: internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+                arguments: internal::DHTPutValueRequestArguments {
+                    id: Id::random().into(),
+                    target: Id::random().into(),
+                    token: vec![0].into(),
+                    v: vec![0].into(),
+                    k: None,
+                    sig: None,
+                    seq: None,
+                    cas: None,
+                    salt: None,
+                },
+            }),
+        };
+
+        let mut message = immutable_put();
+        let internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+            arguments,
+        }) = &mut message.variant
+        else {
+            unreachable!("constructed a put value request");
+        };
+        arguments.seq = Some(0);
+        assert!(matches!(
+            Message::from_bytes(&message.to_bytes().unwrap()),
+            Err(DecodeMessageError::UnexpectedMutableFieldsInImmutablePut)
+        ));
+
+        let mut message = immutable_put();
+        let internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+            arguments,
+        }) = &mut message.variant
+        else {
+            unreachable!("constructed a put value request");
+        };
+        arguments.sig = Some([0; 64]);
+        assert!(matches!(
+            Message::from_bytes(&message.to_bytes().unwrap()),
+            Err(DecodeMessageError::UnexpectedMutableFieldsInImmutablePut)
+        ));
+
+        let mut message = immutable_put();
+        let internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+            arguments,
+        }) = &mut message.variant
+        else {
+            unreachable!("constructed a put value request");
+        };
+        arguments.salt = Some(vec![0].into());
+        assert!(matches!(
+            Message::from_bytes(&message.to_bytes().unwrap()),
+            Err(DecodeMessageError::UnexpectedMutableFieldsInImmutablePut)
+        ));
+
+        let mut message = immutable_put();
+        let internal::DHTMessageVariant::Request(internal::DHTRequestSpecific::PutValue {
+            arguments,
+        }) = &mut message.variant
+        else {
+            unreachable!("constructed a put value request");
+        };
+        arguments.cas = Some(0);
+        assert!(matches!(
+            Message::from_bytes(&message.to_bytes().unwrap()),
+            Err(DecodeMessageError::UnexpectedMutableFieldsInImmutablePut)
+        ));
     }
 }
