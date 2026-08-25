@@ -9,8 +9,6 @@ current implementation.
 - Develop the prototype on a dedicated branch.
 - Place it in a standalone `mainline-next/` crate at the repository root.
 - Keep the current crate working so behavior and resource use can be compared.
-- Do not build on `docs/proposal/prototype/`; it uses a simplified test protocol
-  and may only be consulted as a reference.
 - Treat the new prototype as evolutionary: successful parts should be suitable
   for moving into the main crate.
 
@@ -26,8 +24,10 @@ Implement one narrow vertical slice at a time:
 6. Low-level mutable PUT events and high-level publication conclusions.
 
 Use real UDP, KRPC, BEP 44 validation, routing-table traversal, and discovered
-nodes. Avoid fake peers or a prototype-only wire protocol. Leave nonessential
-edge cases as short TODOs rather than obscuring the architecture.
+nodes for reactor and traversal tests. Use synthetic public low-level events for
+deterministic high-level policy tests. Avoid a prototype-only wire protocol and
+leave nonessential edge cases as short TODOs rather than obscuring the
+architecture.
 
 ## Validation
 
@@ -35,8 +35,11 @@ Run the same API against:
 
 - local testnets containing one and two nodes;
 - a larger local testnet with slow, silent, invalid, and conflicting nodes;
-- the public DHT for manual observation, without making CI depend on it;
-- slow consumers, full admission queues, packet bursts, and query cancellation.
+- optionally, the public DHT for manual, read-only observation, never as an
+  acceptance or CI dependency;
+- slow consumers, full admission queues, packet bursts, and query cancellation;
+- cancellation and expiry during admission, execution, per-request, and overall
+  deadline phases.
 
 Instrument reactor load, queue occupancy, packet loss, response latency,
 timeouts, traversal progress, coverage, and settling decisions.
@@ -51,6 +54,10 @@ The prototype succeeds when it demonstrates that:
 - low-level streams expose enough information to implement high-level policy;
 - the high-level implementation depends only on the public low-level API;
 - callers can return early using understandable evidence;
+- GET coverage, settling, strict mode, deadlines, and equal-sequence
+  tie-breaking behave as specified;
+- PUT `301` is a protocol error, and `302` becomes a conflict only after a
+  direct GET verifies a newer item;
 - one-node and two-node testnets remain useful without weakening mainnet policy;
 - poor connectivity is visible through health and terminal query evidence;
 - tuning adapts to available CPU and network capacity without unnecessary

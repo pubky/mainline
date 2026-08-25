@@ -7,3 +7,5 @@ the high-level estimate and conclusion APIs only as adapters over those streams.
 - [Design principles](design-principles.md)
 - [Brief requirements](requirements-brief.md)
 - [Requirements](requirements.md)
+- [API proposal](api.rs)
+- [Prototype plan](prototype-plan.md)
