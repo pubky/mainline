@@ -22,8 +22,7 @@ two nodes without public bootstrap defaults.
 Expose low-level mutable GET and PUT streams and implement high-level estimates
 and conclusions only by consuming their public events and profile metadata.
 The reactor drives networking; polling releases bounded stream capacity, and
-dropping a stream cancels its query. Terminal events are last. See the
-[API summary](api-summary.rs).
+dropping a stream cancels its query. Terminal events are last.
 
 ## Mutable GET
 
