@@ -4,6 +4,8 @@
 
 - Provide a cloneable async `Dht` driven by a library-owned Mio reactor without
   requiring an application async runtime.
+- The reactor exclusively mutates the socket, routing, transaction, and query
+  state; other modules remain independently testable without shared locks.
 - Drain UDP to `WouldBlock` and service packets, commands, queries, and deadlines
   cooperatively. Bound all queues and concurrency; a slow consumer pauses only
   its query, and overload becomes backpressure or a typed failure.
@@ -26,6 +28,8 @@
 - Async construction waits only for reactor and socket initialization. DNS runs
   outside the caller and reactor threads; bootstrap continues independently and
   does not prevent queries.
+- Waiting for bootstrap is optional, and cancelling a waiter does not cancel
+  bootstrap.
 - Expose readiness, routing, reachability, response and timeout rates, bootstrap
   progress, and partial query outcomes. No reachable node means unreachable or
   inconclusive, not `NotFound`; do not guess the cause of poor connectivity.
@@ -41,8 +45,9 @@
   high-level `get_mutable` and `put_mutable` only over those public streams and
   their profile metadata.
 - Low-level streams expose everything required to reproduce high-level results;
-  adapters cannot access private DHT state. Terminal events are last, and
-  dropping a stream cancels its operation.
+  adapters cannot access private DHT state. Terminal reports preserve request,
+  response, timeout, protocol-error, acknowledgement, and partial-success data.
+  Terminal events are last, and dropping a stream cancels its operation.
 
 ## Mutable GET
 
@@ -53,7 +58,7 @@
 - The high-level stream emits material estimate or evidence changes as
   `Searching`, `Converged`, `NotFound`, or `Inconclusive`. Evidence includes
   coverage, closest-set state, failures, pending requests, timing, convergence,
-  and exact-item support.
+  and exact-item support; it is evidence, not a probability.
 - Coverage counts valid unique responses from the current closest set, including
   older-item and no-value responses. Exclude duplicates, errors, invalid
   responses, and timeouts; recompute when the closest set changes.
@@ -65,8 +70,9 @@
   value-then-signature byte tie-breaker, never responder count.
 - Derive a bounded settling delay from robust recent RTTs and restart it only
   when the closest set or selected estimate changes. Complete early after
-  traversal, coverage, and settling; hard deadlines win. Report stragglers and
-  offer a strict policy that waits for all relevant responses or timeouts.
+  traversal, coverage, and settling; only then report `Converged`. Insufficient
+  final coverage is `Inconclusive`, and hard deadlines win. Report stragglers
+  and offer a strict policy that waits for all relevant responses or timeouts.
 
 ## Mutable PUT
 
@@ -87,6 +93,17 @@
 
 - Encode only fields valid for each KRPC message, including correct BEP 43 `ro`
   handling.
-- Remove the blocking API and `AsyncDht` duplication. `Dht` clones and active
-  streams keep the reactor alive; dropping the last holder wakes, stops, and
-  joins it without waiting for network deadlines.
+- Migrate every existing DHT operation to the async `Dht`, then remove the
+  blocking API and `AsyncDht` duplication. `Dht` clones and active streams keep
+  the reactor alive; dropping the last holder wakes, stops, and joins it without
+  waiting for network deadlines.
+- Treat this as a breaking v9 refactor with native IPv4 as the initial networking
+  target.
+
+## Verification
+
+- Test concurrent UDP load, fairness and bounds, cancellation and deadlines,
+  reactor lifetime, source validation, and malformed or spoofed traffic.
+- Test degraded Mainline connectivity, one- and two-node Testnets, slow streams,
+  GET coverage, ties, settling and stragglers, and partial or conflicting PUTs.
+  Use synthetic events or local Testnets, never the public DHT.
