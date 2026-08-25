@@ -36,5 +36,6 @@ This lets callers return early once confidence is sufficient.
 
 Do not expose or send CAS. Expose acknowledgements and untrusted `301`/`302`
 claims, verify possible conflicts with bounded GETs, and return a valid newer
-item when found while preserving partial writes. Publication policy is applied
-only by the profile-aware high-level adapter.
+item when found while preserving partial writes. Publication conclusions are
+derived by the high-level adapter, while exposed evidence lets callers apply
+stricter durability policy.
