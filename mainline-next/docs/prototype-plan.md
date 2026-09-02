@@ -23,11 +23,11 @@ Implement one narrow vertical slice at a time:
 5. Adaptive settling and evidence-based early completion.
 6. Low-level mutable PUT events and high-level publication conclusions.
 
-Use real UDP, KRPC, BEP 44 validation, routing-table traversal, and discovered
-nodes for reactor and traversal tests. Use synthetic public low-level events for
-deterministic high-level policy tests. Avoid a prototype-only wire protocol and
-leave nonessential edge cases as short TODOs rather than obscuring the
-architecture.
+Use real UDP, KRPC, BEP 42 node-ID enforcement, BEP 44 validation,
+routing-table traversal, and discovered nodes for reactor and traversal tests.
+Use synthetic public low-level events for deterministic high-level policy
+tests. Avoid a prototype-only wire protocol and leave nonessential edge cases
+as short TODOs rather than obscuring the architecture.
 
 ## Validation
 
@@ -54,6 +54,8 @@ The prototype succeeds when it demonstrates that:
 - low-level streams expose enough information to implement high-level policy;
 - the high-level implementation depends only on the public low-level API;
 - callers can return early using understandable evidence;
+- BEP 42 local IDs, remote-node eligibility, local-address exemptions, and
+  public-address changes behave as specified;
 - GET coverage, settling, strict mode, deadlines, and equal-sequence
   tie-breaking behave as specified;
 - PUT `301` is a protocol error, and `302` becomes a conflict only after a

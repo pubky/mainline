@@ -39,6 +39,24 @@
   Low-level operations work with any available node count; profiles affect
   readiness and evidence interpretation, not protocol processing.
 
+## BEP 42 Node IDs
+
+- Implement and enforce the IPv4 requirements of
+  [BEP 42](https://www.bittorrent.org/beps/bep_0042.html). This is mandatory
+  protocol behavior, not optional high-level policy.
+- Generate the local node ID from a configured public IPv4 address or from an
+  external-address observation corroborated across independent responses. Do
+  not rotate the ID based on one untrusted node. If the public address changes,
+  generate a matching ID, reset address-dependent routing state, and bootstrap
+  again.
+- Validate every remote node ID against the packet's observed source IPv4
+  address. A non-compliant node does not count toward lookup termination,
+  coverage, readiness, or closest eligible storage nodes, and its token is not
+  eligible for PUT. Continue serving its requests as required by BEP 42.
+- Apply BEP 42's private, link-local, and loopback address exemptions so local
+  Testnets work without weakening Mainline enforcement. Expose non-compliant
+  responses through rejection events and counters.
+
 ## Layered Mutable API
 
 - Expose low-level `get_mutable_responses` and `put_mutable_events`; implement
@@ -78,6 +96,12 @@
 
 - High-level PUT neither exposes nor sends CAS; retain and enforce server-side
   BEP 44 CAS.
+- Send a PUT only to a node that directly returned a token in a validated GET
+  response for the same target. Associate the opaque token with that node's
+  socket address and target; do not transfer it between nodes or targets.
+- Use tokens promptly and do not persist them beyond the operation. Treat a
+  missing or rejected token as a per-node failure; any token refresh is bounded
+  by the existing query deadlines and retry limits.
 - The low-level stream exposes lookup progress, acknowledgements, raw `301` and
   `302` claims, bounded verification GETs, and completion. A `302` proves a
   conflict only after a direct GET returns a valid newer item for the target and
@@ -93,17 +117,27 @@
 
 - Encode only fields valid for each KRPC message, including correct BEP 43 `ro`
   handling.
+- Preserve BEP 42 enforcement throughout bootstrap, routing-table updates,
+  traversal termination, and mutable and peer storage-target selection.
 - Migrate every existing DHT operation to the async `Dht`, then remove the
   blocking API and `AsyncDht` duplication. `Dht` clones and active streams keep
   the reactor alive; dropping the last holder wakes, stops, and joins it without
   waiting for network deadlines.
 - Treat this as a breaking v9 refactor with native IPv4 as the initial networking
-  target.
+  target. IPv6 is intentionally unsupported rather than partially implemented:
+  it requires IPv6 sockets and address types, BEP 32 `nodes6` handling and
+  traversal, and BEP 42 IPv6 node-ID generation and validation as one coherent
+  feature. Safely ignore unsupported IPv6 contacts without discarding usable
+  IPv4 data or misclassifying IPv6-only responses.
 
 ## Verification
 
 - Test concurrent UDP load, fairness and bounds, cancellation and deadlines,
   reactor lifetime, source validation, and malformed or spoofed traffic.
+- Test BEP 42 generation and validation against its published IPv4 vectors,
+  local-address exemptions, non-compliant lookup and storage exclusion,
+  corroborated external-address discovery, and ID rotation followed by
+  rebootstrap.
 - Test degraded Mainline connectivity, one- and two-node Testnets, slow streams,
   GET coverage, ties, settling and stragglers, and partial or conflicting PUTs.
   Use synthetic events or local Testnets, never the public DHT.

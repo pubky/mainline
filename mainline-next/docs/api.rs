@@ -173,6 +173,7 @@ pub enum RejectionReason {
     Malformed,
     ProtocolViolation,
     UnexpectedSource,
+    NonCompliantNodeId,
     InvalidMutableItem,
 }
 

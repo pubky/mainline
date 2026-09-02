@@ -17,6 +17,15 @@ connectivity, and missing data. Support explicit Mainline and isolated Testnet
 profiles; Testnet declares its expected node count and can operate with one or
 two nodes without public bootstrap defaults.
 
+## Protocol Security
+
+Implement and enforce [BEP 42](https://www.bittorrent.org/beps/bep_0042.html)
+for IPv4. Generate the local node ID from the public IP, exclude non-compliant
+remote nodes from lookup completion and storage eligibility, and retain the
+specification's exemptions for local addresses. IPv6 is intentionally outside
+this refactor: proper support requires IPv6 networking and traversal, BEP 32
+wire fields, and BEP 42 IPv6 node IDs as one complete feature.
+
 ## Layered API
 
 Expose low-level mutable GET and PUT streams and implement high-level estimates
