@@ -4,6 +4,8 @@
 
 - Provide a cloneable async `Dht` driven by a library-owned Mio reactor without
   requiring an application async runtime.
+- Allow callers to configure the IPv4 bind address and UDP port. Expose the
+  actual bound socket address after initialization.
 - The reactor exclusively mutates the socket, routing, transaction, and query
   state; other modules remain independently testable without shared locks.
 - Drain UDP to `WouldBlock` and service packets, commands, queries, and deadlines
@@ -21,18 +23,29 @@
 - Admission is cancellation-safe and has its own timeout. The query timeout
   starts after acceptance; an overall deadline includes both phases, while
   per-request deadlines remain separate. Distinguish admission, execution,
-  shutdown, reachability, and protocol failures.
+  shutdown, outbound-connectivity, and protocol failures.
 
 ## Bootstrap, Profiles and Health
 
-- Async construction waits only for reactor and socket initialization. DNS runs
-  outside the caller and reactor threads; bootstrap continues independently and
-  does not prevent queries.
+- Async construction waits only for reactor and socket initialization. Accept
+  both resolved IPv4 addresses and custom DNS name-and-port bootstrap seeds.
+  DNS resolution runs outside the caller and reactor threads; bootstrap
+  continues independently and does not prevent queries. Surface resolution
+  progress and failures through bootstrap health.
 - Waiting for bootstrap is optional, and cancelling a waiter does not cancel
   bootstrap.
-- Expose readiness, routing, reachability, response and timeout rates, bootstrap
-  progress, and partial query outcomes. No reachable node means unreachable or
-  inconclusive, not `NotFound`; do not guess the cause of poor connectivity.
+- Allow callers to replace or extend a profile's bootstrap nodes with addresses
+  or DNS names and export candidates for later reuse. Imported nodes and DNS
+  results are untrusted seeds and must pass normal response and BEP 42 validation
+  before contributing to routing, readiness, or evidence. Export resolved
+  addresses only for validated, responsive nodes that remain eligible according
+  to routing liveness state; never export DNS names or write tokens.
+- Expose the local node ID and socket address, corroborated public-address
+  evidence, outbound DHT connectivity, readiness, routing, response and timeout
+  rates, bootstrap progress, and partial query outcomes. Outbound connectivity
+  is distinct from the inbound reachability needed by server mode. No reachable
+  node means unreachable or inconclusive, not `NotFound`; do not guess the cause
+  of poor connectivity.
 - Support `Mainline` and isolated `Testnet` profiles. Testnet declares a
   non-zero expected node count and its bootstrap nodes and never inherits
   public defaults.
@@ -49,10 +62,13 @@
   not rotate the ID based on one untrusted node. If the public address changes,
   generate a matching ID, reset address-dependent routing state, and bootstrap
   again.
+- Allow callers to configure the public IPv4 address used for ID generation.
+  Expose whether the active identity is provisional, explicitly configured, or
+  based on corroborated observations.
 - Validate every remote node ID against the packet's observed source IPv4
   address. A non-compliant node does not count toward lookup termination,
   coverage, readiness, or closest eligible storage nodes, and its token is not
-  eligible for PUT. Continue serving its requests as required by BEP 42.
+  eligible for PUT. Handling its incoming requests is deferred to server mode.
 - Apply BEP 42's private, link-local, and loopback address exemptions so local
   Testnets work without weakening Mainline enforcement. Expose non-compliant
   responses through rejection events and counters.
@@ -69,6 +85,10 @@
 
 ## Mutable GET
 
+- Both API levels accept an optional `more_recent_than` sequence and encode it
+  as the BEP 44 GET `seq` field. The low-level stream exposes the supplied value
+  as operation metadata so an independent high-level adapter can interpret
+  `NoMoreRecent` responses.
 - The low-level stream exposes every validated response, associated rejection,
   closest-set change, and completion, including node, timing, closer nodes, and
   item or no-value data. Its buffer is bounded and lossless: reserve event and
@@ -94,8 +114,8 @@
 
 ## Mutable PUT
 
-- High-level PUT neither exposes nor sends CAS; retain and enforce server-side
-  BEP 44 CAS.
+- High-level PUT neither exposes nor sends CAS. Server-side BEP 44 CAS
+  enforcement is deferred to server mode.
 - Send a PUT only to a node that directly returned a token in a validated GET
   response for the same target. Associate the opaque token with that node's
   socket address and target; do not transfer it between nodes or targets.
@@ -113,16 +133,25 @@
   and preserve acknowledgements, attempted targets, and target-set size so
   callers can apply stricter policy.
 
+## Immutable Items
+
+- Provide immutable GET and PUT through the same reactor, traversal, admission,
+  deadline, validation, token, backpressure, and cancellation machinery.
+- Validate an immutable value against its target before exposing it. Send PUT
+  only with a token obtained directly from the destination node for that target,
+  following the same token lifetime and association rules as mutable PUT.
+
 ## Protocol and Lifecycle
 
-- Encode only fields valid for each KRPC message, including correct BEP 43 `ro`
-  handling.
+- Operate as a BEP 43 read-only node: set `ro=1` on outgoing queries and do not
+  answer incoming queries, store data for the network, or generate server
+  tokens. Defer all serving behavior to the server-mode milestone.
+- Encode only fields valid for each KRPC message.
 - Preserve BEP 42 enforcement throughout bootstrap, routing-table updates,
-  traversal termination, and mutable and peer storage-target selection.
-- Migrate every existing DHT operation to the async `Dht`, then remove the
-  blocking API and `AsyncDht` duplication. `Dht` clones and active streams keep
-  the reactor alive; dropping the last holder wakes, stops, and joins it without
-  waiting for network deadlines.
+  traversal termination, and mutable and immutable storage-target selection.
+- Remove the blocking API and `AsyncDht` duplication. `Dht` clones and active
+  streams keep the reactor alive; dropping the last holder wakes, stops, and
+  joins it without waiting for network deadlines.
 - Treat this as a breaking v9 refactor with native IPv4 as the initial networking
   target. IPv6 is intentionally unsupported rather than partially implemented:
   it requires IPv6 sockets and address types, BEP 32 `nodes6` handling and
@@ -140,4 +169,7 @@
   rebootstrap.
 - Test degraded Mainline connectivity, one- and two-node Testnets, slow streams,
   GET coverage, ties, settling and stragglers, and partial or conflicting PUTs.
+  Test immutable target validation and publication token handling.
+  Test bootstrap replacement, extension, DNS resolution and failure, export
+  filtering, and reuse without persisting tokens or weakening Testnet isolation.
   Use synthetic events or local Testnets, never the public DHT.

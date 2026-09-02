@@ -17,8 +17,11 @@ current implementation.
 Implement one narrow vertical slice at a time:
 
 1. A dedicated Mio reactor with bounded admission and cooperative scheduling.
-2. Bootstrap and health reporting.
-3. A low-level mutable GET stream exposing validated network events.
+2. Bootstrap and health reporting, including secure import and export of
+   bootstrap nodes, non-blocking custom DNS bootstrap names, configurable IPv4
+   binding, and identity and connectivity diagnostics.
+3. A low-level mutable GET stream exposing validated network events and
+   supporting the optional BEP 44 `more_recent_than` sequence.
 4. A high-level GET stream deriving estimates only from the low-level stream.
 5. Adaptive settling and evidence-based early completion.
 6. Low-level mutable PUT events and high-level publication conclusions.
@@ -39,7 +42,11 @@ Run the same API against:
   acceptance or CI dependency;
 - slow consumers, full admission queues, packet bursts, and query cancellation;
 - cancellation and expiry during admission, execution, per-request, and overall
-  deadline phases.
+  deadline phases;
+- replacement, extension, DNS resolution and failure, filtering, persistence,
+  and reuse of bootstrap nodes;
+- configured and ephemeral ports, explicit and discovered public IPv4
+  identities, and outbound-connectivity transitions.
 
 Instrument reactor load, queue occupancy, packet loss, response latency,
 timeouts, traversal progress, coverage, and settling decisions.
@@ -62,6 +69,8 @@ The prototype succeeds when it demonstrates that:
   direct GET verifies a newer item;
 - one-node and two-node testnets remain useful without weakening mainnet policy;
 - poor connectivity is visible through health and terminal query evidence;
+- bootstrap exports contain only validated, responsive routing candidates and
+  never write tokens; and
 - tuning adapts to available CPU and network capacity without unnecessary
   protocol-independent fixed thresholds.
 

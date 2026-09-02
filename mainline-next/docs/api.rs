@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    net::SocketAddrV4,
+    net::{Ipv4Addr, SocketAddrV4},
     num::NonZeroUsize,
     time::{Duration, Instant},
 };
@@ -13,6 +13,16 @@ use futures_lite::Stream;
 
 impl DhtBuilder {
     pub fn network_profile(self, profile: NetworkProfile) -> Self;
+    pub fn bind_address(self, address: Ipv4Addr) -> Self;
+    pub fn port(self, port: u16) -> Self;
+    // Overrides public-address discovery for BEP 42 ID generation.
+    pub fn public_ipv4(self, address: Ipv4Addr) -> Self;
+    // Replaces the selected profile's bootstrap nodes. An empty list disables
+    // bootstrap seeds.
+    pub fn bootstrap_nodes(self, nodes: Box<[BootstrapSeed]>) -> Self;
+    // Extends the selected profile's bootstrap nodes. Testnet profiles never
+    // inherit Mainline defaults.
+    pub fn extra_bootstrap_nodes(self, nodes: Box<[BootstrapSeed]>) -> Self;
     pub fn query_deadlines(self, deadlines: QueryDeadlines) -> Self;
     pub async fn build(self) -> Result<Dht, DhtError>;
 }
@@ -20,6 +30,11 @@ impl DhtBuilder {
 impl Dht {
     pub fn health(&self) -> DhtHealth;
     pub async fn wait_for_bootstrap(&self) -> Result<BootstrapOutcome, DhtError>;
+    // Returns validated, responsive routing candidates suitable for persistent
+    // bootstrap caching. Tokens and other per-operation state are excluded.
+    pub async fn export_bootstrap_nodes(
+        &self,
+    ) -> Result<Box<[SocketAddrV4]>, DhtError>;
 }
 
 pub enum NetworkProfile {
@@ -27,6 +42,15 @@ pub enum NetworkProfile {
     Testnet {
         expected_nodes: NonZeroUsize,
         bootstrap_nodes: Box<[SocketAddrV4]>,
+    },
+}
+
+#[non_exhaustive]
+pub enum BootstrapSeed {
+    Address(SocketAddrV4),
+    DnsName {
+        name: Box<str>,
+        port: u16,
     },
 }
 
@@ -44,12 +68,32 @@ pub struct QueryDeadlines {
 }
 
 pub struct DhtHealth {
+    pub identity: Ipv4Identity,
+    pub local_address: SocketAddrV4,
     pub state: DhtHealthState,
     pub routing_nodes: usize,
     pub responsive_nodes: usize,
-    pub reachability: Reachability,
+    // Ability to send queries and receive their responses. This is not inbound
+    // reachability for server mode.
+    pub connectivity: Connectivity,
     pub recent_activity: NetworkActivity,
     pub bootstrap: BootstrapStatus,
+}
+
+pub struct Ipv4Identity {
+    pub node_id: Id,
+    pub public_address: PublicAddressStatus,
+}
+
+pub enum PublicAddressStatus {
+    Unknown,
+    Configured {
+        address: Ipv4Addr,
+    },
+    Corroborated {
+        address: SocketAddrV4,
+        independent_observers: NonZeroUsize,
+    },
 }
 
 pub enum DhtHealthState {
@@ -58,7 +102,7 @@ pub enum DhtHealthState {
     Degraded,
 }
 
-pub enum Reachability {
+pub enum Connectivity {
     Unknown,
     Reachable,
     Unreachable,
@@ -74,9 +118,15 @@ pub struct NetworkActivity {
 }
 
 pub enum BootstrapStatus {
-    Resolving,
+    Resolving(BootstrapResolutionProgress),
     InProgress(BootstrapProgress),
     Complete(BootstrapOutcome),
+}
+
+pub struct BootstrapResolutionProgress {
+    pub pending_names: usize,
+    pub resolved_addresses: usize,
+    pub failed_names: usize,
 }
 
 pub struct BootstrapProgress {
@@ -87,6 +137,7 @@ pub struct BootstrapProgress {
 
 pub struct BootstrapOutcome {
     pub state: DhtHealthState,
+    pub dns_failures: usize,
     pub queried: usize,
     pub responded: usize,
     pub timed_out: usize,
@@ -104,6 +155,7 @@ impl Dht {
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
+        more_recent_than: Option<i64>,
     ) -> Result<MutableLookupStream, QueryError>;
 
     pub async fn put_mutable_events(
@@ -124,6 +176,9 @@ impl Stream for MutableLookupStream {
 impl MutableLookupStream {
     // Public policy context used by independent high-level adapters.
     pub fn network_profile(&self) -> &NetworkProfile;
+
+    // The optional BEP 44 sequence supplied to the lookup.
+    pub fn more_recent_than(&self) -> Option<i64>;
 }
 
 pub enum MutableLookupEvent {
@@ -320,8 +375,11 @@ impl Dht {
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
+        more_recent_than: Option<i64>,
     ) -> Result<MutableEstimateStream, QueryError> {
-        let responses = self.get_mutable_responses(public_key, salt).await?;
+        let responses = self
+            .get_mutable_responses(public_key, salt, more_recent_than)
+            .await?;
         Ok(responses.into_estimates())
     }
 
@@ -329,9 +387,12 @@ impl Dht {
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,
+        more_recent_than: Option<i64>,
         policy: MutableGetPolicy,
     ) -> Result<MutableEstimateStream, QueryError> {
-        let responses = self.get_mutable_responses(public_key, salt).await?;
+        let responses = self
+            .get_mutable_responses(public_key, salt, more_recent_than)
+            .await?;
         Ok(responses.into_estimates_with_policy(policy))
     }
 
