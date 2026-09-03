@@ -90,9 +90,11 @@ addresses can belong to one operator or allocation.
 
 ## 5. IPv4 Server Mode
 
-IPv4 server mode may be placed behind a `server` Cargo feature, but entering it
-remains an explicit runtime choice. Expose the selected operating mode and
-inbound reachability separately from outbound DHT connectivity. Provide server
+IPv4 server mode may be placed behind a `server` Cargo feature, but making a
+node eligible to serve remains an explicit runtime choice. After the operator
+enables server-capable mode, the library may activate serving automatically only
+when its readiness checks pass. Expose the selected operating mode and inbound
+reachability separately from outbound DHT connectivity. Provide server
 configuration for storage bounds, request filtering, and abuse controls. Ship
 server mode together with:
 
@@ -102,8 +104,8 @@ server mode together with:
 - request filtering and per-source-address and global rate limiting;
 - response-size and amplification limits;
 - controlled overload shedding; and
-- inbound-reachability checks before any automatic promotion from read-only
-  mode.
+- inbound-reachability checks before automatically activating serving for an
+  explicitly enabled server-capable node.
 
 Server mode must not be released before its token and abuse controls. Client
 mode still needs bounded parsing, response correlation, bounded candidate sets,
