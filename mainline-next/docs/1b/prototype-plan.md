@@ -12,8 +12,8 @@ Implement one narrow vertical slice at a time:
    mutable GET stream.
 2. Adaptive settling, evidence-based early completion, and strict mode.
 3. High-level mutable PUT conclusions derived only from low-level PUT events.
-4. Immutable GET and PUT using the milestone 1a reactor, traversal, validation,
-   and token machinery.
+4. High-level immutable GET and PUT adapters consuming only their milestone 1a
+   streams.
 
 Use synthetic public low-level events for deterministic high-level policy
 tests. Run end-to-end behavior over the real low-level API on local testnets.
@@ -28,7 +28,9 @@ Exercise:
   combinations;
 - early completion and cancellation of the underlying low-level stream;
 - successful, partially successful, conflicting, and inconclusive mutable PUTs;
-- immutable target validation and destination-bound publication tokens; and
+- immutable early success, covered and inconclusive absence, acknowledgements,
+  partial failure, target validation, and destination-bound publication tokens;
+  and
 - Mainline and one- or two-node Testnet profile interpretation.
 
 Instrument estimate changes, current closest-set coverage, settling decisions,
@@ -49,8 +51,11 @@ The milestone 1b prototype succeeds when it demonstrates that:
 - PUT `301` is a protocol error, and `302` becomes `Conflict` only after the
   low-level direct GET verifies a newer item;
 - PUT conclusions preserve partial writes and target-set evidence; and
-- immutable operations validate targets and use tokens only for the destination
-  and target that issued them.
+- immutable GET completes on the first low-level validated value, reports
+  `NotFound` only after convergence with sufficient coverage, and otherwise is
+  inconclusive; and
+- immutable PUT requires an acknowledgement and preserves partial-failure
+  evidence without accessing tokens or other private state.
 
 ## Integration
 

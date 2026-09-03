@@ -1,8 +1,8 @@
-# Two-Level Mutable API Proposal
+# Two-Level DHT Item API Proposal
 
-This proposal exposes low-level mutable GET and PUT event streams and implements
-the high-level estimate and conclusion APIs only as adapters over those streams.
-The documents are organized around roadmap milestones 1a and 1b.
+This proposal exposes low-level mutable and immutable GET and PUT event streams,
+then implements high-level estimates and conclusions only as adapters over
+those streams. The documents are organized around roadmap milestones 1a and 1b.
 
 - [Problem statement](problem-statement.md)
 - [Design principles](design-principles.md)

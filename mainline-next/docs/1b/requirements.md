@@ -2,9 +2,9 @@
 
 ## Dependency and Policy Boundary
 
-- Implement high-level `get_mutable` and `put_mutable` only over the public
-  milestone 1a streams and their profile metadata. Adapters cannot access the
-  reactor, routing table, RPC internals, or any other private DHT state.
+- Implement every high-level item operation only over its public milestone 1a
+  stream and profile metadata. Adapters cannot access the reactor, routing
+  table, RPC internals, or any other private DHT state.
 - Use few policy parameters and prefer profile-relative fractions over fixed
   counts. Keep policy in adapters rather than adding thresholds to low-level
   traversal or protocol mechanisms.
@@ -60,12 +60,15 @@
 
 ## Immutable Items
 
-- Provide immutable GET and PUT through the same reactor, traversal, admission,
-  deadline, validation, token, backpressure, and cancellation machinery built
-  in milestone 1a.
-- Validate an immutable value against its target before exposing it. Send PUT
-  only with a token obtained directly from the destination node for that target,
-  following the same token lifetime and association rules as mutable PUT.
+- Implement immutable GET and PUT as thin adapters over the corresponding
+  public milestone 1a streams.
+- Return the first value already validated against the target by the low-level
+  stream. Report `NotFound` only after traversal converges with sufficient
+  closest-set coverage; report `Inconclusive` when the operation ends without a
+  value or both conditions.
+- Report immutable PUT as published only with at least one acknowledgement.
+  Otherwise report it as inconclusive, and always preserve the target,
+  acknowledgements, attempted targets, timeouts, and partial failures.
 
 ## Verification
 
@@ -75,5 +78,7 @@
   `NoNewerItem` versus `NotFound`, and insufficient evidence.
 - Test published, conflicting, and inconclusive PUT conclusions, including
   partial writes and verified newer items.
-- Test immutable target validation and publication token handling through local
-  Testnets. Automated acceptance must not depend on the public DHT.
+- Test immutable early success, covered absence, inconclusive absence,
+  acknowledgements, partial failure, target validation, and publication token
+  handling through local Testnets. Automated acceptance must not depend on the
+  public DHT.

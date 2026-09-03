@@ -24,6 +24,8 @@ Implement one narrow vertical slice at a time:
    supporting the optional BEP 44 `more_recent_than` sequence.
 4. Low-level mutable PUT events, token acquisition, raw rejection claims, and
    bounded direct GET verification.
+5. Low-level immutable GET and PUT streams exposing validated values, no-value
+   responses, closest-set progress, acknowledgements, and partial failures.
 
 Use real UDP, KRPC, BEP 42 node-ID enforcement, BEP 44 validation,
 routing-table traversal, and discovered nodes for reactor and traversal tests.
@@ -67,6 +69,8 @@ The milestone 1a prototype succeeds when it demonstrates that:
   value without deriving a high-level conclusion;
 - PUT `301` is exposed as a protocol error and a `302` claim triggers a bounded
   direct GET whose result remains visible;
+- immutable streams expose all evidence needed to distinguish a valid value,
+  covered absence, inconclusive absence, and partial publication;
 - one-node and two-node testnets remain useful without weakening mainnet
   protocol behavior;
 - poor connectivity is visible through health and terminal query evidence;
@@ -84,6 +88,6 @@ Review each vertical slice against the shared
 [requirements](requirements.md). Record any requirement that is ambiguous,
 impractical, or missing before changing the proposal.
 
-Milestone 1a is complete when an independent adapter can consume only its public
-API. Keep the current crate working until the complete refactor is ready to
-migrate incrementally.
+Milestone 1a is complete when independent mutable and immutable adapters can
+consume only its public API. Keep the current crate working until the complete
+refactor is ready to migrate incrementally.

@@ -1,9 +1,9 @@
 # Milestone 1b Requirements: High-Level IPv4 Item API
 
-Milestone 1b builds on the public low-level API from milestone 1a. High-level
-mutable adapters must not access the reactor, routing table, or other private
-DHT state. Policy should use few parameters and prefer profile-relative
-fractions over fixed counts.
+Milestone 1b builds every high-level item operation only on the corresponding
+public low-level stream from milestone 1a. Adapters must not access the reactor,
+routing table, or other private DHT state. Policy should use few parameters and
+prefer profile-relative fractions over fixed counts.
 
 ## Mutable GET
 
@@ -27,6 +27,8 @@ The high-level API neither exposes nor sends CAS.
 
 ## Immutable Items
 
-Provide immutable GET and PUT through the same bounded reactor and query
-machinery. Validate values against their targets and publish only with tokens
-obtained directly from each destination node for that target.
+Implement immutable GET and PUT as thin adapters over the milestone 1a streams.
+The first hash-valid value completes GET, while `NotFound` requires converged
+traversal with sufficient closest-set coverage and insufficient evidence is
+`Inconclusive`. PUT requires at least one acknowledgement and preserves
+partial-failure evidence.

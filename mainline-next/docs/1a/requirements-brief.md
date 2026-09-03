@@ -42,12 +42,13 @@ server-side CAS are deferred to server mode. IPv6 is intentionally outside this
 milestone: proper support requires IPv6 networking and traversal, BEP 32 wire
 fields, and BEP 42 IPv6 node IDs as one complete feature.
 
-## Low-Level Mutable API
+## Low-Level Item API
 
-Expose mutable GET and PUT streams containing all validated events, operation
-metadata, progress, and terminal reports required by an independent policy
-adapter. The reactor drives networking; polling releases bounded stream
-capacity, and dropping a stream cancels its query. Terminal events are last.
+Expose mutable and immutable GET and PUT streams containing all validated
+events, operation metadata, progress, and terminal reports required by an
+independent policy adapter. The reactor drives networking; polling releases
+bounded stream capacity, and dropping a stream cancels its query. Terminal
+events are last.
 
 ## Mutable GET
 
@@ -65,3 +66,11 @@ transfer them. Expose lookup progress, acknowledgements, and untrusted
 `301`/`302` claims. Treat `301` as a protocol error and verify a possible `302`
 conflict with a bounded direct GET. Preserve verification results, partial
 writes, and completion evidence without deriving a publication conclusion.
+
+## Immutable GET and PUT
+
+Expose immutable GET responses, rejections, closest-set progress, and
+completion, validating values against their targets before exposure. Expose
+immutable PUT lookup progress, acknowledgements, partial failures, and
+completion. Keep destination-bound write tokens private and operation-scoped.
+A valid value is definitive; absence remains a high-level coverage decision.

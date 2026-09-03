@@ -80,10 +80,10 @@
   Testnets work without weakening Mainline enforcement. Expose non-compliant
   responses through rejection events and counters.
 
-## Low-Level Mutable API
+## Low-Level Item API
 
-- Expose `get_mutable_responses` and `put_mutable_events` as bounded public
-  streams.
+- Expose mutable and immutable GET-response and PUT-event operations as bounded
+  public streams.
 - Streams expose every event, item of operation metadata, and progress snapshot
   required to reproduce the milestone 1b results without accessing private DHT
   state. Terminal reports preserve request, response, timeout, protocol-error,
@@ -121,6 +121,18 @@
   protocol error. Deduplicate and schedule verification through normal limits
   without extra pings.
 
+## Immutable GET and PUT
+
+- Expose immutable GET responses, rejections, closest-set progress, and
+  completion. Validate each returned value against the requested target before
+  exposing it; a valid value is definitive, while successful absence requires
+  traversal convergence and sufficient closest-set coverage to be established
+  by milestone 1b policy.
+- Expose immutable PUT lookup responses and progress, rejections,
+  acknowledgements, partial failure, and completion. Obtain tokens directly
+  from each destination for the same target, retain them as private
+  operation-scoped state, and never expose, persist, or transfer them.
+
 ## Protocol and Lifecycle
 
 - Operate as a BEP 43 read-only node: set `ro=1` on outgoing queries and do not
@@ -148,8 +160,8 @@
   corroborated external-address discovery, and ID rotation followed by
   rebootstrap.
 - Test degraded Mainline connectivity, one- and two-node Testnets, slow streams,
-  low-level GET progress and response categories, and partial or conflicting
-  PUT events.
+  mutable and immutable GET progress and response categories, and partial or
+  conflicting PUT events.
 - Test bootstrap replacement, extension, DNS resolution and failure, export
   filtering, and reuse without persisting tokens or weakening Testnet isolation.
   Use local Testnets, never the public DHT, for automated acceptance.

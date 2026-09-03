@@ -42,6 +42,22 @@ impl Dht {
         let events = self.put_mutable_events(item).await?;
         Ok(events.into_conclusion().await)
     }
+
+    pub async fn get_immutable(
+        &self,
+        target: Id,
+    ) -> Result<ImmutableGetConclusion, QueryError> {
+        let responses = self.get_immutable_responses(target).await?;
+        Ok(responses.into_conclusion().await)
+    }
+
+    pub async fn put_immutable(
+        &self,
+        value: &[u8],
+    ) -> Result<ImmutablePutConclusion, QueryError> {
+        let events = self.put_immutable_events(value).await?;
+        Ok(events.into_conclusion().await)
+    }
 }
 
 impl MutableLookupStream {
@@ -201,4 +217,76 @@ pub enum MutableGetInconclusiveReason {
     Shutdown,
     ProtocolError,
     InsufficientCoverage,
+}
+
+impl ImmutableLookupStream {
+    // Returns as soon as a hash-valid value is observed. In its absence, the
+    // adapter requires converged traversal and sufficient closest-set coverage;
+    // low-level completion without both produces an inconclusive result.
+    pub fn into_conclusion(self) -> ImmutableGetConclusionFuture;
+}
+
+pub struct ImmutableGetConclusionFuture {
+    // Private fields contain only an ImmutableLookupStream and adapter state.
+}
+
+impl Future for ImmutableGetConclusionFuture {
+    type Output = ImmutableGetConclusion;
+}
+
+pub enum ImmutableGetConclusion {
+    Found {
+        value: Box<[u8]>,
+        report: ImmutableGetReport,
+    },
+    NotFound {
+        report: ImmutableGetReport,
+    },
+    Inconclusive {
+        reason: ImmutableGetInconclusiveReason,
+        report: ImmutableGetReport,
+    },
+}
+
+pub enum ImmutableGetInconclusiveReason {
+    QueryTimeout,
+    OverallDeadline,
+    Unreachable,
+    Shutdown,
+    ProtocolError,
+    InsufficientCoverage,
+}
+
+impl ImmutablePutStream {
+    pub fn into_conclusion(self) -> ImmutablePutConclusionFuture;
+}
+
+pub struct ImmutablePutConclusionFuture {
+    // Private fields contain only an ImmutablePutStream and adapter state.
+}
+
+impl Future for ImmutablePutConclusionFuture {
+    type Output = ImmutablePutConclusion;
+}
+
+pub enum ImmutablePutConclusion {
+    Published {
+        target: Id,
+        acknowledgements: NonZeroUsize,
+        report: ImmutablePutReport,
+    },
+    Inconclusive {
+        target: Id,
+        reason: ImmutablePutInconclusiveReason,
+        report: ImmutablePutReport,
+    },
+}
+
+pub enum ImmutablePutInconclusiveReason {
+    NoAcknowledgement,
+    QueryTimeout,
+    OverallDeadline,
+    Unreachable,
+    Shutdown,
+    ProtocolError,
 }

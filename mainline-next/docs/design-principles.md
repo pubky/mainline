@@ -20,7 +20,9 @@
 
 5. **Observable**
    Expose health and query evidence so callers can assess confidence and decide
-   when to return.
+   when to return. Report recoverable failures as typed errors with a clear
+   lifecycle phase and cause; do not panic for network, overload, cancellation,
+   or shutdown conditions.
 
 6. **Adaptive and scale-relative**
    Avoid fixed low-level tuning except for protocol rules and safety limits. Use

@@ -174,6 +174,16 @@ impl Dht {
         &self,
         item: MutableItem,
     ) -> Result<MutablePutStream, QueryError>;
+
+    pub async fn get_immutable_responses(
+        &self,
+        target: Id,
+    ) -> Result<ImmutableLookupStream, QueryError>;
+
+    pub async fn put_immutable_events(
+        &self,
+        value: &[u8],
+    ) -> Result<ImmutablePutStream, QueryError>;
 }
 
 pub struct MutableLookupStream {
@@ -242,6 +252,7 @@ pub enum RejectionReason {
     UnexpectedSource,
     NonCompliantNodeId,
     InvalidMutableItem,
+    InvalidImmutableValue,
 }
 
 pub struct MutableLookupProgress {
@@ -376,6 +387,132 @@ pub struct MutableGetReport {
     pub final_closest_nodes: usize,
     pub timed_out: usize,
     pub ignored_stragglers: usize,
+}
+
+pub struct ImmutableLookupStream {
+    // Like MutableLookupStream, polling permits progress and dropping the
+    // stream cancels the operation.
+}
+
+impl Stream for ImmutableLookupStream {
+    type Item = ImmutableLookupEvent;
+}
+
+impl ImmutableLookupStream {
+    pub fn network_profile(&self) -> &NetworkProfile;
+    pub fn target(&self) -> Id;
+}
+
+pub enum ImmutableLookupEvent {
+    // Values are exposed only after their hash matches the lookup target.
+    Response(ImmutableNodeResponse),
+    Rejected {
+        source: SocketAddrV4,
+        node_id: Option<Id>,
+        reason: RejectionReason,
+    },
+    Progress(ImmutableLookupProgress),
+    Completed {
+        progress: ImmutableLookupProgress,
+        completion: ImmutableLookupCompletion,
+    },
+}
+
+pub struct ImmutableNodeResponse {
+    pub node: Node,
+    pub received_at: Instant,
+    pub rtt: Duration,
+    pub candidates: Box<[Node]>,
+    pub result: ImmutableNodeResult,
+}
+
+pub enum ImmutableNodeResult {
+    Value(Box<[u8]>),
+    NoValue,
+}
+
+pub struct ImmutableLookupProgress {
+    // Private fields preserve one consistent traversal snapshot.
+}
+
+impl ImmutableLookupProgress {
+    pub fn closest_set(&self) -> &ClosestSetSnapshot;
+    pub fn traversal_converged(&self) -> bool;
+    pub fn report(&self) -> &ImmutableGetReport;
+}
+
+pub enum ImmutableLookupCompletion {
+    TraversalComplete,
+    QueryTimeout,
+    OverallDeadline,
+    Unreachable,
+    Shutdown,
+}
+
+pub struct ImmutableGetReport {
+    pub requests_sent: usize,
+    pub responses_received: usize,
+    pub unique_responders: usize,
+    pub value_responses: usize,
+    pub no_value_responses: usize,
+    pub rejected_responses: usize,
+    pub protocol_errors: usize,
+    pub final_closest_nodes: usize,
+    pub timed_out: usize,
+    pub ignored_stragglers: usize,
+}
+
+pub struct ImmutablePutStream {
+    // Tokens remain private operation state. Polling permits progress and
+    // dropping the stream cancels the operation.
+}
+
+impl Stream for ImmutablePutStream {
+    type Item = ImmutablePutEvent;
+}
+
+impl ImmutablePutStream {
+    pub fn network_profile(&self) -> &NetworkProfile;
+    pub fn target(&self) -> Id;
+    pub fn value(&self) -> &[u8];
+}
+
+pub enum ImmutablePutEvent {
+    // A token-bearing GET response with the token omitted from the public
+    // event. The operation retains and uses it only for the issuing node.
+    LookupResponse(ImmutableNodeResponse),
+    LookupProgress(ImmutableLookupProgress),
+    Rejected {
+        source: SocketAddrV4,
+        node_id: Option<Id>,
+        reason: RejectionReason,
+    },
+    Acknowledged {
+        node: Node,
+    },
+    Completed {
+        completion: ImmutablePutCompletion,
+        report: ImmutablePutReport,
+    },
+}
+
+pub enum ImmutablePutCompletion {
+    PublicationComplete,
+    QueryTimeout,
+    OverallDeadline,
+    Unreachable,
+    Shutdown,
+}
+
+pub struct ImmutablePutReport {
+    pub requests_sent: usize,
+    pub responses_received: usize,
+    pub attempted_targets: usize,
+    pub target_set_size: usize,
+    pub acknowledgements: usize,
+    pub rejected_responses: usize,
+    pub protocol_errors: usize,
+    pub timed_out: usize,
 }
 
 pub enum QueryError {
