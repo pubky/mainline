@@ -1,6 +1,6 @@
 # Refactoring Roadmap
 
-## 1. Minimal Safe IPv4 Client
+## 1a. Minimal Safe IPv4 Client and Low-Level API
 
 Build the Mio-based client described by the current proposal:
 
@@ -11,13 +11,10 @@ Build the Mio-based client described by the current proposal:
   for BEP 42 identity generation;
 - diagnostics for the local identity and socket, corroborated public address,
   and outbound DHT connectivity;
-- low- and high-level mutable GET, including `more_recent_than`, and PUT APIs;
-- progressive mutable GET evidence so callers can judge confidence, with
-  adaptive early completion that does not wait for slow stragglers;
-- preservation of mutable PUT `301` and `302` responses, treating `301` as a
-  protocol error and verifying `302` with a bounded direct GET before reporting
-  a conflict and returning the verified newer item;
-- immutable GET and PUT APIs;
+- low-level mutable GET events, including `more_recent_than`, validated
+  responses, rejections, closest-set progress, timing, and completion;
+- low-level mutable PUT events, including acknowledgements, raw `301` and `302`
+  responses, bounded direct GET verification, and completion;
 - IPv4 BEP 42 enforcement;
 - transaction, source-address, and BEP 44 validation; and
 - client-side acquisition and use of write tokens.
@@ -27,6 +24,29 @@ read-only DHT node: it sets `ro=1` on outgoing queries and does not answer
 incoming queries. Read-only nodes can still GET and publish data; they simply do
 not serve the DHT. Basic routing safety, including bounded buckets and accepting
 only validated, responsive nodes, is part of this milestone.
+
+This step succeeds when the public low-level streams expose all evidence and
+operation metadata needed to implement high-level policy without access to the
+reactor, routing table, or other private DHT state.
+
+## 1b. High-Level IPv4 Item API
+
+Implement the high-level API exclusively as adapters over the public low-level
+operations from milestone 1a:
+
+- progressive mutable GET estimates and evidence so callers can judge
+  confidence;
+- adaptive settling and early completion that does not wait for slow
+  stragglers;
+- `Searching`, `Converged`, `NotFound`, `NoNewerItem`, and `Inconclusive`
+  mutable GET outcomes;
+- mutable PUT conclusions that treat `301` as a protocol error and report a
+  `302` conflict only after a bounded direct GET verifies and returns a newer
+  item, while preserving partial writes; and
+- immutable GET and PUT APIs using the same reactor, traversal, validation, and
+  token machinery.
+
+This step completes the ergonomic minimal safe IPv4 client API.
 
 ## 2. Censorship-Resistant IPv4 Client
 

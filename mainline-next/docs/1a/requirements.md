@@ -1,4 +1,4 @@
-# Mainline Refactoring Requirements
+# Milestone 1a Requirements: Low-Level IPv4 Client
 
 ## Runtime and Resources
 
@@ -13,8 +13,7 @@
   its query, and overload becomes backpressure or a typed failure.
 - Keep reactor tuning internal and adapt pacing, concurrency, batching, and
   timing to observed network and system load within fixed safety limits.
-  Low-level mechanisms avoid policy thresholds and hard-coded tuning values;
-  high-level policy uses few parameters and prefers profile-relative fractions.
+  Low-level mechanisms avoid policy thresholds and hard-coded tuning values.
 - Validate transaction IDs and source addresses and safely ignore invalid,
   unmatched, late, duplicate, expired, or spoofed responses.
 
@@ -32,6 +31,14 @@
   DNS resolution runs outside the caller and reactor threads; bootstrap
   continues independently and does not prevent queries. Surface resolution
   progress and failures through bootstrap health.
+- Represent DNS resolution and DHT traversal as independent parts of one
+  bootstrap snapshot. Start traversal as soon as an address is available while
+  other names may remain pending. Keep cumulative resolution successes and
+  failures visible during traversal and include their final values in the
+  bootstrap outcome returned to waiters.
+- A DNS failure does not fail bootstrap while another usable seed succeeds. If
+  every seed fails to resolve or respond, report degraded or unreachable
+  bootstrap rather than a successful lookup result.
 - Waiting for bootstrap is optional, and cancelling a waiter does not cancel
   bootstrap.
 - Allow callers to replace or extend a profile's bootstrap nodes with addresses
@@ -42,15 +49,15 @@
   to routing liveness state; never export DNS names or write tokens.
 - Expose the local node ID and socket address, corroborated public-address
   evidence, outbound DHT connectivity, readiness, routing, response and timeout
-  rates, bootstrap progress, and partial query outcomes. Outbound connectivity
-  is distinct from the inbound reachability needed by server mode. No reachable
-  node means unreachable or inconclusive, not `NotFound`; do not guess the cause
-  of poor connectivity.
+  activity, bootstrap progress, and partial query outcomes. Outbound
+  connectivity is distinct from the inbound reachability needed by server mode.
+  No reachable node means unreachable or incomplete, not successful absence;
+  do not guess the cause of poor connectivity.
 - Support `Mainline` and isolated `Testnet` profiles. Testnet declares a
   non-zero expected node count and its bootstrap nodes and never inherits
-  public defaults.
-  Low-level operations work with any available node count; profiles affect
-  readiness and evidence interpretation, not protocol processing.
+  public defaults. Low-level operations work with any available node count;
+  profiles describe the network context rather than changing protocol
+  processing.
 
 ## BEP 42 Node IDs
 
@@ -67,79 +74,52 @@
   based on corroborated observations.
 - Validate every remote node ID against the packet's observed source IPv4
   address. A non-compliant node does not count toward lookup termination,
-  coverage, readiness, or closest eligible storage nodes, and its token is not
-  eligible for PUT. Handling its incoming requests is deferred to server mode.
+  readiness, or closest eligible storage nodes, and its token is not eligible
+  for PUT. Handling its incoming requests is deferred to server mode.
 - Apply BEP 42's private, link-local, and loopback address exemptions so local
   Testnets work without weakening Mainline enforcement. Expose non-compliant
   responses through rejection events and counters.
 
-## Layered Mutable API
+## Low-Level Mutable API
 
-- Expose low-level `get_mutable_responses` and `put_mutable_events`; implement
-  high-level `get_mutable` and `put_mutable` only over those public streams and
-  their profile metadata.
-- Low-level streams expose everything required to reproduce high-level results;
-  adapters cannot access private DHT state. Terminal reports preserve request,
-  response, timeout, protocol-error, acknowledgement, and partial-success data.
-  Terminal events are last, and dropping a stream cancels its operation.
+- Expose `get_mutable_responses` and `put_mutable_events` as bounded public
+  streams.
+- Streams expose every event, item of operation metadata, and progress snapshot
+  required to reproduce the milestone 1b results without accessing private DHT
+  state. Terminal reports preserve request, response, timeout, protocol-error,
+  acknowledgement, and partial-success data. Terminal events are last, and
+  dropping a stream cancels its operation.
 
 ## Mutable GET
 
-- Both API levels accept an optional `more_recent_than` sequence and encode it
-  as the BEP 44 GET `seq` field. The low-level stream exposes the supplied value
-  as operation metadata so an independent high-level adapter can interpret
-  `NoMoreRecent` responses.
-- The low-level stream exposes every validated response, associated rejection,
-  closest-set change, and completion, including node, timing, closer nodes, and
-  item or no-value data. Its buffer is bounded and lossless: reserve event and
+- Accept an optional `more_recent_than` sequence, encode it as the BEP 44 GET
+  `seq` field, and expose it as operation metadata so an independent adapter can
+  interpret `NoMoreRecent` responses.
+- Expose every validated response, associated rejection, closest-set change,
+  and completion, including node, timing, closer nodes, and item, no-value, or
+  `NoMoreRecent` data. The buffer is bounded and lossless: reserve event and
   terminal capacity before sending, and pause only that query when full.
-- The high-level stream emits material estimate or evidence changes as
-  `Searching`, `Converged`, `NotFound`, or `Inconclusive`. Evidence includes
-  coverage, closest-set state, failures, pending requests, timing, convergence,
-  and exact-item support; it is evidence, not a probability.
-- Coverage counts valid unique responses from the current closest set, including
-  older-item and no-value responses. Exclude duplicates, errors, invalid
-  responses, and timeouts; recompute when the closest set changes.
-- Use the protocol closest-set width as the Mainline coverage basis and
-  `min(protocol width, expected_nodes)` on Testnet. Require at least 40%
-  coverage and at most 10% outstanding, rounded conservatively, with no
-  absolute floors or caps.
-- Select the highest sequence. Resolve equal highest sequences with a stable
-  value-then-signature byte tie-breaker, never responder count.
-- Derive a bounded settling delay from robust recent RTTs and restart it only
-  when the closest set or selected estimate changes. Complete early after
-  traversal, coverage, and settling; only then report `Converged`. Insufficient
-  final coverage is `Inconclusive`, and hard deadlines win. Report stragglers
-  and offer a strict policy that waits for all relevant responses or timeouts.
+- The terminal report contains cumulative counts of validated unique item,
+  no-value, and `NoMoreRecent` responses. Progress snapshots expose current
+  closest-set membership and per-node request state so an independent adapter
+  can calculate coverage. Exclude duplicates, errors, invalid responses, and
+  timeouts from valid-response evidence.
 
 ## Mutable PUT
 
-- High-level PUT neither exposes nor sends CAS. Server-side BEP 44 CAS
-  enforcement is deferred to server mode.
+- Do not expose or send CAS. Server-side BEP 44 CAS enforcement is deferred to
+  server mode.
 - Send a PUT only to a node that directly returned a token in a validated GET
   response for the same target. Associate the opaque token with that node's
   socket address and target; do not transfer it between nodes or targets.
 - Use tokens promptly and do not persist them beyond the operation. Treat a
   missing or rejected token as a per-node failure; any token refresh is bounded
   by the existing query deadlines and retry limits.
-- The low-level stream exposes lookup progress, acknowledgements, raw `301` and
-  `302` claims, bounded verification GETs, and completion. A `302` proves a
-  conflict only after a direct GET returns a valid newer item for the target and
-  salt. A `301` is a protocol error. Deduplicate and schedule verification
-  through normal limits without extra pings.
-- Derive `Published`, `Conflict`, or `Inconclusive` only from the stream.
-  `Published` means at least one acknowledgement and no verified newer item; it
-  is not a durability guarantee. Return a verified newer item for `Conflict`
-  and preserve acknowledgements, attempted targets, and target-set size so
-  callers can apply stricter policy.
-
-## Immutable Items
-
-- Provide immutable GET and PUT through the same reactor, traversal, admission,
-  deadline, validation, token, backpressure, and cancellation machinery.
-- Validate an immutable value against its target before exposing it. Send PUT
-  only with a token obtained directly from the destination node for that target,
-  following the same token lifetime and association rules as mutable PUT.
+- Expose lookup progress, acknowledgements, raw `301` and `302` claims, bounded
+  verification GETs, and completion. A `302` is only a verified conflict after
+  a direct GET returns a valid newer item for the target and salt. A `301` is a
+  protocol error. Deduplicate and schedule verification through normal limits
+  without extra pings.
 
 ## Protocol and Lifecycle
 
@@ -148,7 +128,7 @@
   tokens. Defer all serving behavior to the server-mode milestone.
 - Encode only fields valid for each KRPC message.
 - Preserve BEP 42 enforcement throughout bootstrap, routing-table updates,
-  traversal termination, and mutable and immutable storage-target selection.
+  traversal termination, and mutable storage-target selection.
 - Remove the blocking API and `AsyncDht` duplication. `Dht` clones and active
   streams keep the reactor alive; dropping the last holder wakes, stops, and
   joins it without waiting for network deadlines.
@@ -168,8 +148,8 @@
   corroborated external-address discovery, and ID rotation followed by
   rebootstrap.
 - Test degraded Mainline connectivity, one- and two-node Testnets, slow streams,
-  GET coverage, ties, settling and stragglers, and partial or conflicting PUTs.
-  Test immutable target validation and publication token handling.
-  Test bootstrap replacement, extension, DNS resolution and failure, export
+  low-level GET progress and response categories, and partial or conflicting
+  PUT events.
+- Test bootstrap replacement, extension, DNS resolution and failure, export
   filtering, and reuse without persisting tokens or weakening Testnet isolation.
-  Use synthetic events or local Testnets, never the public DHT.
+  Use local Testnets, never the public DHT, for automated acceptance.
