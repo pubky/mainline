@@ -1,44 +1,64 @@
 # Refactoring Roadmap
 
-## 1a. Core IPv4 Client and Low-Level APIs
+Milestone 1 delivers the IPv4 client in four ordered stages: the runtime and
+protocol foundation, bootstrap and health recovery, low-level item event
+streams, and high-level results derived from those streams.
 
-Build the client around a library-owned Mio reactor. Public futures and streams
-remain independent of any application async runtime. The milestone includes:
+## 1a. Core IPv4 Runtime and Protocol
 
-- bounded admission, active queries, and event streams, with fair cooperative
-  scheduling, per-query stream backpressure, and cancellation on stream drop;
-- cooperative UDP draining to `WouldBlock` and adaptive pacing, concurrency,
-  and batching within fixed safety bounds, without low-level policy thresholds;
-- panic-free public operations with typed errors that distinguish admission,
-  execution, deadline, connectivity, protocol, cancellation, and shutdown
-  failures;
-- bootstrap with custom DNS names and node import/export, plus health reporting
-  for bootstrap, identity, sockets, public-address evidence, and connectivity;
-- configurable IPv4 bind address, port, and optional public IPv4 address for
-  BEP 42 identity generation;
-- low-level mutable GET events, including `more_recent_than`, validated
-  responses, rejections, closest-set progress, timing, and completion;
-- low-level mutable PUT events, including acknowledgements, raw `301` and `302`
-  responses, bounded direct GET verification, and completion;
-- low-level immutable GET and PUT streams, including validated values,
-  no-value responses, closest-set progress, acknowledgements, partial failure,
-  and completion;
-- IPv4 BEP 42, transaction, source-address, and BEP 44 validation; and
-- operation-scoped acquisition and use of write tokens.
+Build the client around a library-owned Mio reactor while keeping public futures
+and streams independent of any application async runtime. Include:
 
-The client is a [BEP 43](https://www.bittorrent.org/beps/bep_0043.html)
-read-only node: it sets `ro=1` only on outgoing queries, never answers incoming
-queries, and can still GET and PUT. Routing uses bounded buckets and admits only
-validated, responsive nodes.
+- bounded queues and active queries, fair cooperative scheduling, cancellation,
+  and UDP draining to `WouldBlock`;
+- adaptive pacing, concurrency, and batching within fixed safety bounds;
+- configurable IPv4 binding and typed lifecycle, admission, deadline,
+  connectivity, and protocol failures;
+- transaction, source-address, KRPC, and BEP 44 validation;
+- IPv4 BEP 42 identity generation and remote-node validation; and
+- bounded routing that admits only validated, responsive nodes.
 
-This step succeeds when public streams expose the validated events, bounded
-rejection reporting, and metadata needed by high-level policy without private
+Operate as a [BEP 43](https://www.bittorrent.org/beps/bep_0043.html) read-only
+node: set `ro=1` only on outgoing queries and never answer incoming queries.
+
+## 1b. Bootstrap, Health, and Recovery
+
+Build bootstrap and continuously maintained health on the core runtime:
+
+- resolved addresses and custom DNS bootstrap names, with concurrent resolution
+  and traversal progress and visible partial failures;
+- Mainline and isolated Testnet profiles and secure bootstrap-node import and
+  export;
+- local identity, bound socket, public-address evidence, routing activity, and
+  outbound-connectivity diagnostics;
+- operation traffic and bounded idle probes that update health after initial
+  bootstrap; and
+- routing recovery and bootstrap retries with adaptive backoff, including BEP
+  42 identity rotation after a corroborated public-address change.
+
+Recovery must not require callers to recreate `Dht`.
+
+## 1c. Low-Level IPv4 Item APIs
+
+Expose bounded, stream-driven operations on the runtime and health foundation:
+
+- mutable GET events, including `more_recent_than`, validated responses,
+  rejections, closest-set progress, timing, and completion;
+- mutable PUT events, including acknowledgements, raw `301` and `302` claims,
+  bounded direct GET verification, and completion;
+- immutable GET and PUT events, including validated values, no-value responses,
+  closest-set progress, acknowledgements, partial failure, and completion; and
+- operation-scoped acquisition and use of destination-bound write tokens.
+
+Stream backpressure pauses only its query, dropping a stream cancels its
+operation, and terminal reports preserve partial results. This step succeeds
+when the streams expose everything needed by high-level policy without private
 DHT state.
 
-## 1b. High-Level IPv4 Item APIs
+## 1d. High-Level IPv4 Item APIs
 
-Implement the high-level API exclusively as adapters over the public low-level
-operations from milestone 1a:
+Implement the high-level API exclusively as adapters over the public milestone
+1c streams:
 
 - progressive mutable GET estimates and evidence, using few profile-relative
   policy parameters and adaptive settling to finish without slow stragglers;
@@ -104,11 +124,12 @@ Measure IPv6 diversity by meaningful prefixes, not individual addresses.
 
 ## 6. IPv6 Server Support
 
-Extend server mode to IPv6 only after the secure IPv6 client and IPv4 server
+Extend server mode to IPv6 only after the IPv6 client and IPv4 server
 milestones are complete. Apply the same token, validation, storage, overload,
 and amplification controls to IPv6 traffic. Add rate limiting by meaningful
 IPv6 network prefix so clients cannot evade limits by rotating addresses within
 one allocation.
 
-Milestones 3, 4, and 5 may proceed independently after the hardened IPv4
-client. Milestone 6 depends on milestones 4 and 5.
+Milestones 1a through 1d are ordered. Milestones 3, 4, and 5 may proceed
+independently after the hardened IPv4 client. Milestone 6 depends on milestones
+4 and 5.

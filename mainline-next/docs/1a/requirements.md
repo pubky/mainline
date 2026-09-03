@@ -53,6 +53,13 @@
   connectivity is distinct from the inbound reachability needed by server mode.
   No reachable node means unreachable or incomplete, not successful absence;
   do not guess the cause of poor connectivity.
+- Continuously maintain health after initial bootstrap. Transition between
+  ready, degraded, and unreachable as validated network evidence changes.
+  Use operation traffic when available and bounded maintenance probes when
+  idle. Recover stale or depleted routing state through bootstrap retries with
+  adaptive backoff, without requiring callers to recreate `Dht`. A
+  public-address change follows the BEP 42 identity reset and rebootstrap rules
+  below.
 - Support `Mainline` and isolated `Testnet` profiles. Testnet declares a
   non-zero expected node count and its bootstrap nodes and never inherits
   public defaults. Low-level operations work with any available node count;

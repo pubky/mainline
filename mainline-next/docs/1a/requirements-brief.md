@@ -26,7 +26,10 @@ responsive nodes that remain eligible for routing. Imported and resolved
 addresses remain untrusted until validated, and write tokens are never
 exported. Health also exposes the local identity and socket, corroborated
 public-address evidence, and outbound DHT connectivity. Inbound reachability is
-a separate server-mode concern.
+a separate server-mode concern. Health remains live after bootstrap: validated
+network evidence updates readiness, and bounded maintenance and bootstrap
+retries recover stale routing state with adaptive backoff without recreating
+`Dht`.
 
 ## Protocol Security
 

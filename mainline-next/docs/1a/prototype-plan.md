@@ -48,7 +48,8 @@ Run the low-level API against:
 - overlapping DNS resolution and DHT traversal, with DNS failures remaining
   visible through completion; and
 - configured and ephemeral ports, explicit and discovered public IPv4
-  identities, and outbound-connectivity transitions.
+  identities, outbound-connectivity transitions, and recovery after routing or
+  bootstrap state becomes stale.
 
 Instrument reactor load, queue occupancy, packet loss, response latency,
 timeouts, traversal progress, closest-set changes, and low-level event-buffer
@@ -74,6 +75,8 @@ The milestone 1a prototype succeeds when it demonstrates that:
 - one-node and two-node testnets remain useful without weakening mainnet
   protocol behavior;
 - poor connectivity is visible through health and terminal query evidence;
+- health transitions and bounded recovery continue after initial bootstrap
+  without recreating `Dht`;
 - partial and total DNS failure remain visible throughout bootstrap;
 - bootstrap exports contain only validated, responsive routing candidates and
   never write tokens; and

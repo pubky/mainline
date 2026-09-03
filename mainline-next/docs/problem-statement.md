@@ -1,4 +1,4 @@
-## Problem statement
+# Problem Statement
 
 The current architecture is unreliable and hard to diagnose under concurrency,
 network failures, and hostile traffic:
@@ -13,8 +13,11 @@ network failures, and hostile traffic:
   ([\#113](https://github.com/pubky/mainline/issues/113)).
 - Applications cannot distinguish absent data from bootstrap failure, timeout,
   or poor DHT connectivity
-  ([\#104](https://github.com/pubky/mainline/issues/104)), nor observe recovery
-  when connectivity, the public address, or bootstrap availability changes
+  ([\#104](https://github.com/pubky/mainline/issues/104)). Health is treated
+  primarily as a bootstrap result: after startup, applications cannot reliably
+  observe connectivity loss and restoration, and there is no explicit contract
+  for recovering stale routing state or reacting to public-address and
+  bootstrap availability changes
   ([\#61](https://github.com/pubky/mainline/issues/61)).
 - GET queries do not show when the best observed result has enough evidence for
   an early return.
