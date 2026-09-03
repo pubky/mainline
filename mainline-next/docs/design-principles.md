@@ -19,3 +19,9 @@
 5. **Runtime-independent**
    Use a library-owned Mio reactor without requiring an application async
    runtime.
+
+6. **Reciprocal participation**
+   Make secure server mode easy to enable and encourage reliable, reachable
+   clients to contribute capacity to the DHT they benefit from. Becoming a
+   server remains an explicit choice and requires the necessary reachability,
+   validation, storage, and abuse controls.
