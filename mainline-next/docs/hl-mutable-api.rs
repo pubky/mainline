@@ -49,6 +49,7 @@ pub struct MutableGetEvidence {
 pub enum MutableGetInconclusiveReason {
     Timeout,
     Unreachable,
+    Shutdown,
     ProtocolError,
     InsufficientCoverage,
 }
@@ -78,5 +79,6 @@ pub enum MutablePutInconclusiveReason {
     NoAcknowledgement,
     Timeout,
     Unreachable,
+    Shutdown,
     ProtocolError,
 }

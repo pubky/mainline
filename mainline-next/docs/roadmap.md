@@ -9,8 +9,12 @@ streams, and high-level results derived from those streams.
 Build the client around a library-owned Mio reactor while keeping public futures
 and streams independent of any application async runtime. Include:
 
-- bounded queues and active queries, fair cooperative scheduling, cancellation,
-  and UDP draining to `WouldBlock`;
+- bounded queues and active queries, fair cooperative scheduling, and
+  cancellation;
+- UDP receive turns that stop at `WouldBlock`, a packet-count budget, or an
+  elapsed-time budget, whichever comes first. If either budget is exhausted,
+  explicitly reschedule the still-readable socket before waiting for new
+  readiness, after giving deadlines, commands, and other queries a turn;
 - adaptive pacing, concurrency, and batching within fixed safety bounds;
 - configurable IPv4 binding and typed lifecycle, admission, deadline,
   connectivity, and protocol failures;
