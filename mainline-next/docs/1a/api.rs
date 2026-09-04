@@ -163,7 +163,7 @@ pub enum DhtError {
 // Low-level API: network operations and validated protocol events.
 
 impl Dht {
-    pub async fn get_mutable_responses(
+    pub async fn get_mutable_events(
         &self,
         public_key: &[u8; 32],
         salt: Option<&[u8]>,

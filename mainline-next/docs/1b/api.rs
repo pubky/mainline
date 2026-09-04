@@ -16,10 +16,10 @@ impl Dht {
         salt: Option<&[u8]>,
         more_recent_than: Option<i64>,
     ) -> Result<MutableEstimateStream, QueryError> {
-        let responses = self
-            .get_mutable_responses(public_key, salt, more_recent_than)
+        let events = self
+            .get_mutable_events(public_key, salt, more_recent_than)
             .await?;
-        Ok(responses.into_estimates())
+        Ok(events.into_estimates())
     }
 
     pub async fn get_mutable_with_policy(
@@ -29,10 +29,10 @@ impl Dht {
         more_recent_than: Option<i64>,
         policy: MutableGetPolicy,
     ) -> Result<MutableEstimateStream, QueryError> {
-        let responses = self
-            .get_mutable_responses(public_key, salt, more_recent_than)
+        let events = self
+            .get_mutable_events(public_key, salt, more_recent_than)
             .await?;
-        Ok(responses.into_estimates_with_policy(policy))
+        Ok(events.into_estimates_with_policy(policy))
     }
 
     pub async fn put_mutable(

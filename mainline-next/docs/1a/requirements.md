@@ -89,8 +89,8 @@
 
 ## Low-Level Item API
 
-- Expose mutable and immutable GET-response and PUT-event operations as bounded
-  public streams.
+- Expose mutable and immutable GET and PUT operations as bounded public event
+  streams.
 - Streams expose every event, item of operation metadata, and progress snapshot
   required to reproduce the milestone 1b results without accessing private DHT
   state. Terminal reports preserve request, response, timeout, protocol-error,
