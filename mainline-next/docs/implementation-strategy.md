@@ -1,9 +1,9 @@
 # Implementation Strategy
 
-Develop the new client beside the existing implementation, then replace the old
-runtime in one deliberate v9 cutover. Refactoring the current runtime in place
-would make it difficult to keep releases working because its actor, socket,
-queries, channels, server, and public APIs are tightly coupled.
+Develop the new client beside the existing implementation. Refactoring the
+current runtime in place would make it difficult to keep releases working
+because its actor, socket, queries, channels, server, and public APIs are tightly
+coupled.
 
 Make `mainline-next` an unpublished workspace crate while it is under
 development. It must not depend on the existing `Dht` or `Rpc`; otherwise their
@@ -43,8 +43,7 @@ real UDP and local Testnets, and add packet-level compatibility tests where old
 and new behavior should match. High-level adapters should also be tested with
 synthetic public low-level events.
 
-After stage 1d meets its acceptance criteria, move or promote the new
-implementation into the published `mainline` crate, release it as v9, and
-remove the old runtime. Do not retain a permanent feature flag that selects
-between the two engines; the parallel crate is a migration tool, not a second
-supported implementation.
+Release scope, versioning, and the migration approach remain undecided.
+Completing stage 1d does not require a release or removal of the old runtime.
+Use implementation and test results to inform those decisions before committing
+to a cutover or long-term support for both implementations.
