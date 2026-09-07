@@ -1,10 +1,19 @@
 # Refactoring Roadmap
 
-Milestone 1 delivers the IPv4 client in four ordered stages: the runtime and
-protocol foundation, bootstrap and health recovery, low-level item event
-streams, and high-level results derived from those streams.
+Milestone 1 builds the IPv4 client in order: runtime and protocol, bootstrap and
+health recovery, low-level events, then high-level results.
+
+Estimates assume one experienced Rust/DHT engineer, extensive AI assistance,
+and reuse of existing code and tests. Milestone 1 totals 10-17 engineer-weeks;
+recalibrate after 1a.
+
+Ranges include production hardening, tests, docs, CI, review fixes, soak-test
+work, and integration into `main`. Elapsed soak and review waits are separate;
+an independent security audit is excluded.
 
 ## 1a. Core IPv4 Runtime and Protocol
+
+Estimated effort: 2-4 engineer-weeks.
 
 Build the client around a library-owned Mio reactor while keeping public futures
 and streams independent of any application async runtime. Include:
@@ -27,6 +36,8 @@ node: set `ro=1` only on outgoing queries and never answer incoming queries.
 
 ## 1b. Bootstrap, Health, and Recovery
 
+Estimated effort: 2-3 engineer-weeks.
+
 Build bootstrap and continuously maintained health on the core runtime:
 
 - resolved addresses and custom DNS bootstrap names, with concurrent resolution
@@ -43,6 +54,8 @@ Build bootstrap and continuously maintained health on the core runtime:
 Recovery must not require callers to recreate `Dht`.
 
 ## 1c. Low-Level IPv4 Item APIs
+
+Estimated effort: 3-5 engineer-weeks.
 
 Expose bounded, stream-driven operations on the runtime and health foundation:
 
@@ -61,6 +74,8 @@ DHT state.
 
 ## 1d. High-Level IPv4 Item APIs
 
+Estimated effort: 3-5 engineer-weeks. Release scope and versioning remain undecided.
+
 Implement the high-level API exclusively as adapters over the public milestone
 1c streams:
 
@@ -78,6 +93,9 @@ Implement the high-level API exclusively as adapters over the public milestone
 
 ## 2. IPv4 Censorship-Resistance Hardening
 
+Estimated effort: 4-8 engineer-weeks. This stage has higher research and
+adversarial-testing uncertainty.
+
 Harden routing admission and eviction, prefer stable responsive nodes, enforce
 IP and prefix diversity, detect suspicious concentration, and adapt publication
 breadth when the closest set looks unsafe. Expose the supporting evidence,
@@ -90,11 +108,17 @@ tokens from those nodes internally; callers do not attach raw tokens to reusable
 
 ## 3. Optional Low-Level Client Operations
 
+Estimated effort: 1-2 engineer-weeks for peer discovery and announcement.
+Estimate additional operations separately.
+
 Optionally expose low-level methods for other client operations, such as peer
 discovery and peer announcement. These should reuse the same reactor, traversal,
 token, validation, and event machinery.
 
 ## 4. IPv4 Server Mode and Abuse Controls
+
+Estimated effort: 4-7 engineer-weeks. This includes security-focused testing
+of tokens, storage bounds, rate limits, and amplification behavior.
 
 IPv4 server mode may use a `server` Cargo feature, but requires explicit
 operator opt-in. Activate serving only after verifying inbound reachability,
@@ -109,31 +133,12 @@ from outbound connectivity. Include:
 - response-size and amplification limits;
 - controlled overload shedding.
 
+Provide a simple opt-in configuration and an example explaining resource needs
+and how to identify why serving is inactive.
+
 Client mode retains bounded parsing, response correlation, candidate sets, and
 packet-processing budgets, but needs no server storage, token generation, or
 request rate limiting.
 
-## 5. IPv6 Client Support
-
-Add complete IPv6 client support: IPv6 sockets and address types,
-[BEP 32](https://www.bittorrent.org/beps/bep_0032.html) `nodes6` and `want`
-handling, separate routing tables, independent BEP 42 local IDs and rotation
-state, and remote-ID validation. A change to the BEP 42-relevant IPv6 prefix
-rotates only the IPv6 ID, resets its address-dependent routing state, and
-rebootstraps IPv6; privacy-address changes within that prefix preserve both.
-
-Report health, coverage, and diversity per address family. Either family can
-establish a result independently; IPv6-only operation must not require IPv4.
-Measure IPv6 diversity by meaningful prefixes, not individual addresses.
-
-## 6. IPv6 Server Support
-
-Extend server mode to IPv6 only after the IPv6 client and IPv4 server
-milestones are complete. Apply the same token, validation, storage, overload,
-and amplification controls to IPv6 traffic. Add rate limiting by meaningful
-IPv6 network prefix so clients cannot evade limits by rotating addresses within
-one allocation.
-
-Milestones 1a through 1d are ordered. Milestones 3, 4, and 5 may proceed
-independently after the hardened IPv4 client. Milestone 6 depends on milestones
-4 and 5.
+Milestones 1a through 1d and milestone 2 are ordered. Milestones 3 and 4 may
+proceed independently after milestone 2.

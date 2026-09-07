@@ -7,6 +7,7 @@ implementation.
 - [Problem statement](docs/problem-statement.md)
 - [Design principles](docs/design-principles.md)
 - [Roadmap](docs/roadmap.md)
+- [Wishlist](docs/wishlist.md)
 - [Implementation strategy](docs/implementation-strategy.md)
 
 ## Mutable API Sketches
