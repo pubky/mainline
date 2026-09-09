@@ -7,7 +7,7 @@ fundamental to the design.
 1. **Secure by default**
    Treat network input, remote nodes, bootstrap sources, tokens, and peer claims
    as untrusted. Validate them before they affect results, identity, routing, or
-   storage. Keep resource use and amplification bounded.
+   storage.
 
 2. **Bounded and fair**
    Bound resource use, apply backpressure, and schedule work fairly and
