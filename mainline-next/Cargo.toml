@@ -6,3 +6,7 @@ rust-version = "1.85"
 publish = false
 license = "MIT"
 description = "Development crate for the Mainline DHT refactor"
+
+[dependencies]
+serde = { version = "1", features = ["derive"], default-features = false }
+serde_bencode = { version = "0.2", default-features = false }
