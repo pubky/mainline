@@ -58,7 +58,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Lint with Clippy
-        run: cargo clippy --workspace --all-features --bins --tests -- -D warnings
+        run: cargo clippy --workspace --all-features --lib --bins --tests -- -D warnings
 
   deny:
     name: Cargo Deny

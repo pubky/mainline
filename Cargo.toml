@@ -1,3 +1,7 @@
+[workspace]
+members = ["mainline-next"]
+resolver = "2"
+
 [package]
 name = "mainline"
 version = "8.0.0"
