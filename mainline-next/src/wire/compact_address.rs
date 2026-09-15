@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::ByteArray;
 
-/// IPv4 address and port encoded as six compact bytes.
+/// IPv4 address and port encoded in BEP 5's six-byte compact format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CompactAddress(pub SocketAddrV4);
 

@@ -20,7 +20,7 @@ fn get_matches_wire_examples() {
         (Some(42), b"d1:ad2:id20:abcdefghij01234567893:seqi42e6:target20:0123456789abcdefghije1:q3:get1:t2:aa1:y1:qe"),
     ] {
         assert_wire(&query(WireQuery::Get {
-            arguments: Map(GetArguments { id: ID, target: TARGET, seq }),
+            arguments: WireMap(GetArguments { id: ID, target: TARGET, seq }),
         }), bytes);
     }
 }
@@ -28,7 +28,7 @@ fn get_matches_wire_examples() {
 #[test]
 fn get_omits_absent_sequence() {
     let mut value = assert_roundtrip(&query(WireQuery::Get {
-        arguments: Map(GetArguments {
+        arguments: WireMap(GetArguments {
             id: ID,
             target: TARGET,
             seq: None,
@@ -42,7 +42,7 @@ fn get_omits_absent_sequence() {
 fn immutable_put_matches_wire_example() {
     assert_wire(
         &query(WireQuery::Put {
-            arguments: Map(put_arguments()),
+            arguments: WireMap(put_arguments()),
         }),
         b"d1:ad2:id20:abcdefghij01234567895:token3:tok1:v12:Hello World!e1:q3:put1:t2:aa1:y1:qe",
     );
@@ -53,7 +53,7 @@ fn mutable_put_matches_wire_example() {
     let key = ByteArray([255; 32]);
     let signature = ByteArray([128; 64]);
     let message = query(WireQuery::Put {
-        arguments: Map(PutArguments {
+        arguments: WireMap(PutArguments {
             key: Some(key),
             signature: Some(signature),
             seq: Some(42),
@@ -83,7 +83,7 @@ fn put_preserves_values_and_optional_mutable_fields() {
     ] {
         for mutable in [false, true] {
             let mut encoded = assert_roundtrip(&query(WireQuery::Put {
-                arguments: Map(PutArguments {
+                arguments: WireMap(PutArguments {
                     id: ID,
                     token: ByteString(vec![]),
                     value: value.clone(),
@@ -106,7 +106,7 @@ fn put_preserves_values_and_optional_mutable_fields() {
 #[test]
 fn put_rejects_malformed_mutable_fields() {
     let message = query(WireQuery::Put {
-        arguments: Map(put_arguments()),
+        arguments: WireMap(put_arguments()),
     });
     for (field, invalid) in [
         ("k", Value::Bytes(vec![])),
@@ -153,7 +153,7 @@ fn put_preserves_independent_mutable_fields() {
         },
     ] {
         assert_roundtrip(&query(WireQuery::Put {
-            arguments: Map(arguments),
+            arguments: WireMap(arguments),
         }));
     }
 }

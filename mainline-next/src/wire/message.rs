@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ByteString, CompactAddress, ErrorCode, Map, OptionalBool, ResponseArguments, WireQuery,
+    ByteString, CompactAddress, ErrorCode, ResponseArguments, WireBool, WireMap, WireQuery,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,13 +21,13 @@ pub(crate) enum WireKind {
     Query {
         #[serde(flatten)]
         query: WireQuery,
-        #[serde(rename = "ro", default, skip_serializing_if = "OptionalBool::is_false")]
-        read_only: OptionalBool,
+        #[serde(rename = "ro", default, skip_serializing_if = "WireBool::is_false")]
+        read_only: WireBool,
     },
     #[serde(rename = "r")]
     Response {
         #[serde(rename = "r")]
-        arguments: Map<ResponseArguments>,
+        arguments: WireMap<ResponseArguments>,
         #[serde(rename = "ip", skip_serializing_if = "Option::is_none")]
         requester_address: Option<CompactAddress>,
     },

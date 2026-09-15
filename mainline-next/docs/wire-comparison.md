@@ -10,8 +10,8 @@ only, with validation responsibilities described below.
 | Area | Existing implementation | New wire types |
 |---|---|---|
 | Transaction ID and version | Exactly four bytes each | Arbitrary byte-string lengths |
-| Query `ro` | Any `i32`; positive means true | `0`, `1`, or absence |
-| `implied_port` | `0..=255`; nonzero means true | `0`, `1`, or absence |
+| Query `ro` | Any `i32`; positive means true | Absent or `0` means false; any other `i64` means true |
+| `implied_port` | `0..=255`; nonzero means true | Absent or `0` means false; any other `i64` means true |
 | Arguments | Dictionaries or positional lists | Dictionaries only |
 | Byte-string fields | Also coerces integer lists through `serde_bytes` | Byte strings only |
 | PUT `target` | Required and emitted | Ignored on input; omitted on output |
@@ -21,8 +21,8 @@ only, with validation responsibilities described below.
 
 Both require a transaction ID; version is optional. [BEP 5] uses an opaque
 transaction string and recommends a four-byte version. Accepting other version
-lengths is a compatibility choice. [BEP 43] defines `ro=1`; accepting `0` and
-rejecting other values are our parsing choices.
+lengths is a compatibility choice. [BEP 43] defines `ro=1`; accepting other
+integer values is our parsing choice.
 
 The dictionary, byte-string, and `implied_port` representations match [BEP 5].
 [BEP 44] permits strings, integers, lists, and dictionaries as item values. Its
@@ -38,7 +38,7 @@ conversion also requires `sig` and `seq` with `k`, and rejects `sig`, `seq`,
 
 Definitions: [existing wire types](../../src/common/messages/internal.rs),
 [new messages](../src/wire/message.rs), [queries](../src/wire/query.rs), and
-[flags](../src/wire/optional_bool.rs).
+[flags](../src/wire/wire_bool.rs).
 
 ## Response interpretation
 

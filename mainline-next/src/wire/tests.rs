@@ -19,14 +19,14 @@ fn query(query: WireQuery) -> WireMessage {
         version: None,
         kind: WireKind::Query {
             query,
-            read_only: OptionalBool(false),
+            read_only: WireBool(false),
         },
     }
 }
 
 fn ping() -> WireMessage {
     query(WireQuery::Ping {
-        arguments: Map(PingArguments { id: ID }),
+        arguments: WireMap(PingArguments { id: ID }),
     })
 }
 
@@ -48,7 +48,7 @@ fn response(arguments: ResponseArguments) -> WireMessage {
         transaction_id: ByteString(b"aa".to_vec()),
         version: None,
         kind: WireKind::Response {
-            arguments: Map(arguments),
+            arguments: WireMap(arguments),
             requester_address: None,
         },
     }
@@ -307,10 +307,10 @@ fn error_requires_code_and_description_pair() {
 }
 
 #[test]
-fn read_only_accepts_zero_and_one_and_omits_false() {
+fn read_only_accepts_zero_and_nonzero_and_omits_false() {
     let mut value = assert_roundtrip(&ping());
     assert!(!dictionary(&mut value).contains_key(b"ro".as_slice()));
-    for (encoded, expected) in [(0, false), (1, true)] {
+    for (encoded, expected) in [(0, false), (1, true), (2, true), (-1, true)] {
         dictionary(&mut value).insert(b"ro".to_vec(), Value::Int(encoded));
         let message = decode(&value).unwrap();
         let WireKind::Query { read_only, .. } = &message.kind else {
@@ -330,7 +330,7 @@ fn response_and_error_preserve_requester_address_and_ignore_read_only() {
     let address = CompactAddress(SocketAddrV4::new(Ipv4Addr::new(1, 2, 3, 4), 6881));
     for kind in [
         WireKind::Response {
-            arguments: Map(response_arguments()),
+            arguments: WireMap(response_arguments()),
             requester_address: Some(address),
         },
         WireKind::Error {
@@ -371,14 +371,14 @@ fn query_commands_roundtrip_and_require_arguments() {
     let cases = [
         (
             WireQuery::Ping {
-                arguments: Map(PingArguments { id: ID }),
+                arguments: WireMap(PingArguments { id: ID }),
             },
             "ping",
             vec!["id"],
         ),
         (
             WireQuery::FindNode {
-                arguments: Map(FindNodeArguments {
+                arguments: WireMap(FindNodeArguments {
                     id: ID,
                     target: TARGET,
                 }),
@@ -388,7 +388,7 @@ fn query_commands_roundtrip_and_require_arguments() {
         ),
         (
             WireQuery::GetPeers {
-                arguments: Map(GetPeersArguments {
+                arguments: WireMap(GetPeersArguments {
                     id: ID,
                     info_hash: TARGET,
                 }),
@@ -398,11 +398,11 @@ fn query_commands_roundtrip_and_require_arguments() {
         ),
         (
             WireQuery::AnnouncePeer {
-                arguments: Map(AnnouncePeerArguments {
+                arguments: WireMap(AnnouncePeerArguments {
                     id: ID,
                     info_hash: TARGET,
                     port: 6881,
-                    implied_port: OptionalBool(true),
+                    implied_port: WireBool(true),
                     token: ByteString(vec![0, 255]),
                 }),
             },
@@ -411,7 +411,7 @@ fn query_commands_roundtrip_and_require_arguments() {
         ),
         (
             WireQuery::Get {
-                arguments: Map(GetArguments {
+                arguments: WireMap(GetArguments {
                     id: ID,
                     target: TARGET,
                     seq: Some(42),
@@ -422,7 +422,7 @@ fn query_commands_roundtrip_and_require_arguments() {
         ),
         (
             WireQuery::Put {
-                arguments: Map(PutArguments {
+                arguments: WireMap(PutArguments {
                     id: ID,
                     token: ByteString(vec![]),
                     value: Value::Bytes(b"item".to_vec()),
@@ -458,11 +458,11 @@ fn query_commands_roundtrip_and_require_arguments() {
 #[test]
 fn announce_peer_defaults_implied_port_to_false() {
     let mut value = assert_roundtrip(&query(WireQuery::AnnouncePeer {
-        arguments: Map(AnnouncePeerArguments {
+        arguments: WireMap(AnnouncePeerArguments {
             id: ID,
             info_hash: TARGET,
             port: 6881,
-            implied_port: OptionalBool(false),
+            implied_port: WireBool(false),
             token: ByteString(vec![]),
         }),
     }));
@@ -481,11 +481,11 @@ fn announce_peer_defaults_implied_port_to_false() {
 #[test]
 fn announce_peer_rejects_out_of_range_ports() {
     let mut value = assert_roundtrip(&query(WireQuery::AnnouncePeer {
-        arguments: Map(AnnouncePeerArguments {
+        arguments: WireMap(AnnouncePeerArguments {
             id: ID,
             info_hash: TARGET,
             port: 6881,
-            implied_port: OptionalBool(false),
+            implied_port: WireBool(false),
             token: ByteString(vec![]),
         }),
     }));
@@ -497,14 +497,14 @@ fn announce_peer_rejects_out_of_range_ports() {
 }
 
 #[test]
-fn announce_peer_implied_port_accepts_zero_and_one_and_omits_false() {
-    for (implied_port, encoded) in [(false, 0), (true, 1)] {
+fn announce_peer_implied_port_accepts_zero_and_nonzero_and_omits_false() {
+    for (implied_port, encoded) in [(false, 0), (true, 1), (true, 2), (true, -1)] {
         let mut value = assert_roundtrip(&query(WireQuery::AnnouncePeer {
-            arguments: Map(AnnouncePeerArguments {
+            arguments: WireMap(AnnouncePeerArguments {
                 id: ID,
                 info_hash: TARGET,
                 port: 6881,
-                implied_port: OptionalBool(implied_port),
+                implied_port: WireBool(implied_port),
                 token: ByteString(vec![]),
             }),
         }));

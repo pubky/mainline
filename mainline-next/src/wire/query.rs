@@ -3,34 +3,34 @@
 use serde::{Deserialize, Serialize};
 use serde_bencode::value::Value;
 
-use super::{ByteArray, ByteString, Id, Map, OptionalBool};
+use super::{ByteArray, ByteString, Id, WireBool, WireMap};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "q", rename_all = "snake_case")]
 pub(crate) enum WireQuery {
     Ping {
         #[serde(rename = "a")]
-        arguments: Map<PingArguments>,
+        arguments: WireMap<PingArguments>,
     },
     FindNode {
         #[serde(rename = "a")]
-        arguments: Map<FindNodeArguments>,
+        arguments: WireMap<FindNodeArguments>,
     },
     GetPeers {
         #[serde(rename = "a")]
-        arguments: Map<GetPeersArguments>,
+        arguments: WireMap<GetPeersArguments>,
     },
     AnnouncePeer {
         #[serde(rename = "a")]
-        arguments: Map<AnnouncePeerArguments>,
+        arguments: WireMap<AnnouncePeerArguments>,
     },
     Get {
         #[serde(rename = "a")]
-        arguments: Map<GetArguments>,
+        arguments: WireMap<GetArguments>,
     },
     Put {
         #[serde(rename = "a")]
-        arguments: Map<PutArguments>,
+        arguments: WireMap<PutArguments>,
     },
 }
 
@@ -56,8 +56,8 @@ pub(crate) struct AnnouncePeerArguments {
     pub id: Id,
     pub info_hash: Id,
     pub port: u16,
-    #[serde(default, skip_serializing_if = "OptionalBool::is_false")]
-    pub implied_port: OptionalBool,
+    #[serde(default, skip_serializing_if = "WireBool::is_false")]
+    pub implied_port: WireBool,
     pub token: ByteString,
 }
 
