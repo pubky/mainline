@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 
 /// A fixed-size binary string, without cryptographic validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ByteArray<const N: usize>(pub [u8; N]);
 
 impl<const N: usize> Serialize for ByteArray<N> {
