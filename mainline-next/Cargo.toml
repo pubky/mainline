@@ -10,3 +10,6 @@ description = "Development crate for the Mainline DHT refactor"
 [dependencies]
 serde = { version = "1", features = ["derive"], default-features = false }
 serde_bencode = { version = "0.2", default-features = false }
+
+[dev-dependencies]
+hex-literal = "0.4"
