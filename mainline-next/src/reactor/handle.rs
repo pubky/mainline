@@ -41,19 +41,24 @@ impl ReactorHandle {
 
     fn bind_inner(
         address: SocketAddrV4,
-        #[cfg(test)] exited: Option<std::sync::mpsc::SyncSender<()>>,
+        #[cfg(test)] signals: Option<WorkerSignals>,
     ) -> io::Result<Self> {
         let socket = UdpSocket::bind(SocketAddr::V4(address))?;
         let local_addr = ipv4_address(socket.local_addr()?)?;
-        let (worker, worker_control) = Worker::new(socket)?;
+        let worker = Worker::new(
+            socket,
+            #[cfg(test)]
+            signals.as_ref().map(|signals| signals.poll_started.clone()),
+        )?;
+        let worker_control = worker.control();
 
         let thread = thread::Builder::new()
             .name("mainline-reactor".to_owned())
             .spawn(move || {
                 let result = worker.run();
                 #[cfg(test)]
-                if let Some(exited) = exited {
-                    let _ = exited.send(());
+                if let Some(signals) = signals {
+                    let _ = signals.exited.send(());
                 }
                 result
             })?;
@@ -82,12 +87,28 @@ impl ReactorHandle {
     }
 
     #[cfg(test)]
-    fn bind_with_exit_signal(
+    fn bind_with_worker_signals(
         address: SocketAddrV4,
-    ) -> io::Result<(Self, std::sync::mpsc::Receiver<()>)> {
+    ) -> io::Result<(
+        Self,
+        std::sync::mpsc::Receiver<()>,
+        std::sync::mpsc::Receiver<()>,
+    )> {
+        let (poll_started, poll_started_receiver) = std::sync::mpsc::sync_channel(1);
         let (exited, receiver) = std::sync::mpsc::sync_channel(1);
-        Self::bind_inner(address, Some(exited)).map(|reactor| (reactor, receiver))
+        let signals = WorkerSignals {
+            poll_started,
+            exited,
+        };
+        Self::bind_inner(address, Some(signals))
+            .map(|reactor| (reactor, poll_started_receiver, receiver))
     }
+}
+
+#[cfg(test)]
+struct WorkerSignals {
+    poll_started: std::sync::mpsc::SyncSender<()>,
+    exited: std::sync::mpsc::SyncSender<()>,
 }
 
 /// A failure reported while joining the reactor worker.
@@ -189,6 +210,7 @@ mod tests {
     use super::*;
 
     const WAIT_TIMEOUT: Duration = Duration::from_secs(3);
+    const WAKE_TIMEOUT: Duration = Duration::from_millis(500);
 
     fn loopback() -> SocketAddrV4 {
         SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)
@@ -237,25 +259,37 @@ mod tests {
 
     #[test]
     fn explicit_shutdown_wakes_the_worker_and_releases_the_socket() {
-        let reactor = ReactorHandle::bind(loopback()).unwrap();
+        let (reactor, poll_started, _exited) =
+            ReactorHandle::bind_with_worker_signals(loopback()).unwrap();
         let surviving_clone = reactor.clone();
         let address = reactor.local_addr();
+        assert_eq!(poll_started.recv_timeout(WAIT_TIMEOUT), Ok(()));
 
-        reactor.shutdown().unwrap();
+        let (shutdown_result, elapsed) = timed(|| reactor.shutdown());
 
+        shutdown_result.unwrap();
+        assert!(elapsed < WAKE_TIMEOUT, "shutdown took {elapsed:?}");
         StdUdpSocket::bind(address).unwrap();
         surviving_clone.shutdown().unwrap();
     }
 
     #[test]
     fn dropping_the_final_handle_releases_the_worker_and_socket() {
-        let (reactor, exited) = ReactorHandle::bind_with_exit_signal(loopback()).unwrap();
+        let (reactor, poll_started, exited) =
+            ReactorHandle::bind_with_worker_signals(loopback()).unwrap();
         let address = reactor.local_addr();
+        assert_eq!(poll_started.recv_timeout(WAIT_TIMEOUT), Ok(()));
 
         drop(reactor);
 
-        assert_eq!(exited.recv_timeout(WAIT_TIMEOUT), Ok(()));
+        assert_eq!(exited.recv_timeout(WAKE_TIMEOUT), Ok(()));
         StdUdpSocket::bind(address).unwrap();
+    }
+
+    fn timed<T>(operation: impl FnOnce() -> T) -> (T, Duration) {
+        let started = std::time::Instant::now();
+        let result = operation();
+        (result, started.elapsed())
     }
 
     #[test]

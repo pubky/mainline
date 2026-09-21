@@ -2,7 +2,7 @@ use std::{
     io,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Weak,
     },
     time::Duration,
 };
@@ -19,32 +19,48 @@ pub(super) struct Worker {
     events: Events,
     _socket: UdpSocket,
     shutdown_requested: Arc<AtomicBool>,
+    // Keep the registration alive until the poll loop has exited. In
+    // particular, the final ReactorHandle may drop immediately after waking us.
+    waker: Arc<Waker>,
+    #[cfg(test)]
+    poll_started: Option<std::sync::mpsc::SyncSender<()>>,
 }
 
 impl Worker {
-    pub(super) fn new(mut socket: UdpSocket) -> io::Result<(Self, WorkerControl)> {
+    pub(super) fn new(
+        mut socket: UdpSocket,
+        #[cfg(test)] poll_started: Option<std::sync::mpsc::SyncSender<()>>,
+    ) -> io::Result<Self> {
         let poll = Poll::new()?;
         poll.registry()
             .register(&mut socket, SOCKET_TOKEN, Interest::READABLE)?;
-        let waker = Waker::new(poll.registry(), WAKE_TOKEN)?;
+        let waker = Arc::new(Waker::new(poll.registry(), WAKE_TOKEN)?);
         let shutdown_requested = Arc::new(AtomicBool::new(false));
 
-        Ok((
-            Self {
-                poll,
-                events: Events::with_capacity(1),
-                _socket: socket,
-                shutdown_requested: Arc::clone(&shutdown_requested),
-            },
-            WorkerControl {
-                shutdown_requested,
-                waker,
-            },
-        ))
+        Ok(Self {
+            poll,
+            events: Events::with_capacity(1),
+            _socket: socket,
+            shutdown_requested,
+            waker,
+            #[cfg(test)]
+            poll_started,
+        })
+    }
+
+    pub(super) fn control(&self) -> WorkerControl {
+        WorkerControl {
+            shutdown_requested: Arc::clone(&self.shutdown_requested),
+            waker: Arc::downgrade(&self.waker),
+        }
     }
 
     pub(super) fn run(mut self) -> io::Result<()> {
         while !self.shutdown_requested.load(Ordering::Acquire) {
+            #[cfg(test)]
+            if let Some(poll_started) = self.poll_started.take() {
+                let _ = poll_started.send(());
+            }
             match self.poll.poll(&mut self.events, Some(SHUTDOWN_FALLBACK)) {
                 Ok(()) => {
                     for event in &self.events {
@@ -65,14 +81,16 @@ impl Worker {
 
 pub(super) struct WorkerControl {
     shutdown_requested: Arc<AtomicBool>,
-    waker: Waker,
+    waker: Weak<Waker>,
 }
 
 impl WorkerControl {
     pub(super) fn request_shutdown(&self) {
         self.shutdown_requested.store(true, Ordering::Release);
         // Worker::run uses a bounded poll timeout, so shutdown still completes
-        // if waking fails.
-        let _ = self.waker.wake();
+        // if the worker has exited or waking fails.
+        if let Some(waker) = self.waker.upgrade() {
+            let _ = waker.wake();
+        }
     }
 }
