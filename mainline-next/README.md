@@ -1,8 +1,7 @@
 # Mainline Next
 
 Unpublished workspace crate for the Mainline DHT refactor, developed alongside
-the existing `mainline` crate. Requires Rust 1.85 or newer. Currently only the
-crate setup is implemented; there is no runtime or public API yet.
+the existing `mainline` crate. Requires Rust 1.85 or newer.
 
 ## Development
 

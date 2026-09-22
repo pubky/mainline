@@ -8,8 +8,10 @@ license = "MIT"
 description = "Development crate for the Mainline DHT refactor"
 
 [dependencies]
+mio = { version = "1", features = ["net", "os-poll"], default-features = false }
 serde = { version = "1", features = ["derive"], default-features = false }
 serde_bencode = { version = "0.2", default-features = false }
+tracing = "0.1"
 
 [dev-dependencies]
 hex-literal = "0.4"
