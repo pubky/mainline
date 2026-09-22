@@ -19,7 +19,7 @@ mod wire_map;
 pub(crate) use byte_array::ByteArray;
 pub(crate) use byte_string::ByteString;
 pub(crate) use compact_address::CompactAddress;
-pub(crate) use compact_nodes::CompactNodes;
+pub(crate) use compact_nodes::{CompactNodes, NodeContact};
 pub(crate) use error_code::ErrorCode;
 pub(crate) use id::{Id, ID_BYTES};
 // Used outside this module once the codec is added.
