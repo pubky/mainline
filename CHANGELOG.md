@@ -2,6 +2,13 @@
 
 All notable changes to mainline dht will be documented in this file.
 
+## [8.0.1](https://github.com/pubky/mainline/compare/v8.0.0...v8.0.1) - 2026-09-30
+
+### Fixed
+
+- Require `lru` 0.18.2 or newer within 0.18.x to exclude versions affected by
+  RUSTSEC-2026-0253. This dependency update preserves Mainline's public API.
+
 ## [8.0.0](https://github.com/pubky/mainline/compare/v7.0.0...v8.0.0) - 2026-08-04
 
 ### Fixed
