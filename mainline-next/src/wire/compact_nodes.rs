@@ -41,9 +41,10 @@ impl<'de> Deserialize<'de> for CompactNodes {
 
             fn visit_bytes<E: serde::de::Error>(self, bytes: &[u8]) -> Result<Self::Value, E> {
                 let contacts = bytes.chunks_exact(CONTACT_BYTES);
-                if !contacts.remainder().is_empty() {
-                    return Err(E::invalid_length(bytes.len(), &self));
-                }
+                ensure!(
+                    contacts.remainder().is_empty(),
+                    E::invalid_length(bytes.len(), &self)
+                );
                 let nodes = contacts
                     .map(|contact| {
                         let mut id = [0; 20];

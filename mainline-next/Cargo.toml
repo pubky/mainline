@@ -13,6 +13,7 @@ getrandom = { version = "0.4", default-features = false }
 mio = { version = "1", features = ["net", "os-poll"], default-features = false }
 serde = { version = "1", features = ["derive"], default-features = false }
 serde_bencode = { version = "0.2", default-features = false }
+thiserror = { version = "2", default-features = false }
 tracing = "0.1"
 
 [dev-dependencies]

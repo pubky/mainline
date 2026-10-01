@@ -85,11 +85,13 @@ The layer above the wire types will:
 - Validate responses using the originating query and field-consistency rules.
 - Handle human-readable error descriptions; wire types preserve received bytes.
 
-The future codec will handle bounds, canonical bencoding, duplicate keys, and
-complete-input validation. Both decoders currently accept trailing bytes in the
-comparison cases and ignore unknown fields, including repeated unknown fields.
-Rejecting duplicate `nodes` is not general duplicate-key validation. These codec
-changes remain deferred; see [wire scope](wire.md#scope).
+This comparison uses the wire types directly. The [codec](../src/codec/mod.rs)
+now checks datagram size, container depth, and complete input before using those
+types. Direct wire deserialization still accepts trailing bytes, and both wire
+implementations ignore unknown fields, including repeated unknown fields.
+Rejecting duplicate `nodes` is not general duplicate-key validation. Canonical
+bencoding and general duplicate-key checks remain deferred; see
+[wire scope](wire.md#scope).
 
 ## Verification
 

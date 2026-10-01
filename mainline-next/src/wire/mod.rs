@@ -22,7 +22,6 @@ pub(crate) use compact_address::CompactAddress;
 pub(crate) use compact_nodes::{CompactNodes, NodeContact};
 pub(crate) use error_code::ErrorCode;
 pub(crate) use id::{Id, ID_BYTES};
-// Used outside this module once the codec is added.
 #[allow(unused_imports)]
 pub(crate) use message::{WireKind, WireMessage};
 pub(crate) use query::WireQuery;
